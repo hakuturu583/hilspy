@@ -8,6 +8,12 @@ This is a Python package called `hilspy` built using the `uv` build system. It's
 
 ## Development Setup and Commands
 
+### Virtual Environment
+```bash
+# Activate the Python virtual environment
+source .venv/bin/activate
+```
+
 ### Package Management
 This project uses `uv` as its package manager and build system.
 
