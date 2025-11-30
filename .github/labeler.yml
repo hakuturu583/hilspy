@@ -1,28 +1,51 @@
-# Add labels based on file paths
+# Add labels based on file paths - v6 format
 documentation:
-  - '*.md'
-  - 'docs/**'
-  - '*.rst'
+  - changed-files:
+    - any-glob-to-any-file:
+      - '*.md'
+      - 'docs/**'
+      - '*.rst'
 
 tests:
-  - 'test/**'
-  - 'tests/**'
-  - '**/test_*.py'
-  - '**/*_test.py'
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'test/**'
+      - 'tests/**'
+      - '**/test_*.py'
+      - '**/*_test.py'
 
 ci:
-  - '.github/workflows/**'
-  - '.github/*.yml'
-  - '.github/*.yaml'
+  - changed-files:
+    - any-glob-to-any-file:
+      - '.github/workflows/**'
+      - '.github/*.yml'
+      - '.github/*.yaml'
+      - '.pre-commit-config.yaml'
 
 dependencies:
-  - 'pyproject.toml'
-  - 'requirements*.txt'
-  - 'uv.lock'
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'pyproject.toml'
+      - 'requirements*.txt'
+      - 'uv.lock'
 
 velodyne:
-  - 'src/hilspy/velodyne/**'
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'src/hilspy/velodyne/**'
 
 core:
-  - 'src/hilspy/*.py'
-  - 'src/hilspy/__init__.py'
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'src/hilspy/*.py'
+      - 'src/hilspy/__init__.py'
+
+python:
+  - changed-files:
+    - any-glob-to-any-file:
+      - '**/*.py'
+
+github-actions:
+  - changed-files:
+    - any-glob-to-any-file:
+      - '.github/workflows/**'
