@@ -1,8 +1,9 @@
 import asyncio
 import socket
 import struct
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import List, Optional, TypeVar, Generic
 import logging
 from aioquic.asyncio import connect
 from aioquic.asyncio.protocol import QuicConnectionProtocol
@@ -100,15 +101,19 @@ class VelodynePacket:
         return cls(blocks=blocks, timestamp=0, factory=b"\x00\x00")
 
 
-class VelodyneLidar:
+# Type variable for packet types
+PacketType = TypeVar("PacketType", bound=VelodynePacket)
+
+
+class VelodyneLidar(ABC, Generic[PacketType]):
     def __init__(
         self,
+        packet_class: type[PacketType],
         quic_host: str = "localhost",
         quic_port: int = 4433,
         udp_host: str = "127.0.0.1",
         udp_port: int = 2368,
         stream_id: int = 0,
-        packet_class: type = VelodynePacket,
     ):
         self.quic_host = quic_host
         self.quic_port = quic_port
@@ -119,7 +124,7 @@ class VelodyneLidar:
 
         self.udp_socket: Optional[socket.socket] = None
         self.quic_protocol: Optional[QuicConnectionProtocol] = None
-        self.packet_queue: asyncio.Queue = asyncio.Queue()
+        self.packet_queue: asyncio.Queue[PacketType] = asyncio.Queue()
         self.running = False
 
     async def connect(self):
@@ -230,10 +235,34 @@ class VelodyneLidar:
         logger.info("Stopping VelodyneLidar")
         self.running = False
 
+    @abstractmethod
+    def parse_packet(self, data: bytes) -> PacketType:
+        """Parse raw bytes into a packet object
+
+        Args:
+            data: Raw packet bytes
+
+        Returns:
+            Parsed packet object
+        """
+        pass
+
+    @abstractmethod
+    def validate_packet(self, data: bytes) -> bool:
+        """Validate if the data represents a valid packet
+
+        Args:
+            data: Raw packet bytes
+
+        Returns:
+            True if valid packet, False otherwise
+        """
+        pass
+
 
 def main():
     import argparse
-    from .vlp16 import VLP16Packet, VLP16Config
+    from .vlp16 import VLP16, VLP16Config
 
     parser = argparse.ArgumentParser(description="Velodyne QUIC to UDP forwarder")
     parser.add_argument("--quic-host", default="localhost", help="QUIC server hostname")
@@ -253,7 +282,7 @@ def main():
     parser.add_argument(
         "--model",
         default="vlp16",
-        choices=["vlp16", "generic"],
+        choices=["vlp16"],
         help="Velodyne model type (default: vlp16)",
     )
     parser.add_argument("--verbose", action="store_true", help="Enable verbose logging")
@@ -266,20 +295,16 @@ def main():
     )
 
     async def run():
-        # Select packet class based on model
-        packet_class = VLP16Packet if args.model == "vlp16" else VelodynePacket
-
-        lidar = VelodyneLidar(
+        # Create VLP16 instance
+        lidar = VLP16(
             quic_host=args.quic_host,
             quic_port=args.quic_port,
             udp_host=args.udp_host,
             udp_port=args.udp_port,
             stream_id=args.stream_id,
-            packet_class=packet_class,
         )
 
-        if args.model == "vlp16":
-            logger.info("Using VLP-16 packet format")
+        logger.info("Using VLP-16 packet format")
 
         try:
             await lidar.connect()

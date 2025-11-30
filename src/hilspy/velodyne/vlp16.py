@@ -1,11 +1,12 @@
 """VLP-16 specific implementation for Velodyne LiDAR"""
 
 import struct
+import math
 from dataclasses import dataclass
 from typing import List, ClassVar, Optional
 import time
 
-from .velodyne_lidar import VelodynePacket, DataBlock, LaserReturn
+from .velodyne_lidar import VelodynePacket, DataBlock, LaserReturn, VelodyneLidar
 
 
 @dataclass
@@ -192,29 +193,52 @@ class VLP16Packet(VelodynePacket):
                     elevation_rad = elevation * 0.017453293
 
                     # Calculate 3D coordinates
-                    xy_distance = distance * cos(elevation_rad)
-                    x = xy_distance * sin(azimuth_rad)
-                    y = xy_distance * cos(azimuth_rad)
-                    z = distance * sin(elevation_rad)
+                    xy_distance = distance * math.cos(elevation_rad)
+                    x = xy_distance * math.sin(azimuth_rad)
+                    y = xy_distance * math.cos(azimuth_rad)
+                    z = distance * math.sin(elevation_rad)
 
                     points.append((x, y, z, laser_return.intensity))
 
         return points
 
 
-class VLP16:
-    """VLP-16 LiDAR interface"""
+class VLP16(VelodyneLidar[VLP16Packet]):
+    """VLP-16 LiDAR interface implementing the VelodyneLidar abstract base class"""
 
-    def __init__(self, config: Optional[VLP16Config] = None):
+    def __init__(
+        self,
+        config: Optional[VLP16Config] = None,
+        quic_host: str = "localhost",
+        quic_port: int = 4433,
+        udp_host: str = "127.0.0.1",
+        udp_port: int = 2368,
+        stream_id: int = 0,
+    ):
         self.config = config or VLP16Config()
+        super().__init__(
+            packet_class=VLP16Packet,
+            quic_host=quic_host,
+            quic_port=quic_port,
+            udp_host=udp_host,
+            udp_port=udp_port,
+            stream_id=stream_id,
+        )
 
     def create_packet(self, **kwargs) -> VLP16Packet:
         """Create a VLP16 packet with given parameters"""
         return VLP16Packet.create_from_points(**kwargs)
 
     def parse_packet(self, data: bytes) -> VLP16Packet:
-        """Parse raw bytes into a VLP16Packet"""
-        if not VLP16Packet.validate_packet(data):
+        """Parse raw bytes into a VLP16Packet
+
+        Args:
+            data: Raw packet bytes
+
+        Returns:
+            Parsed VLP16Packet object
+        """
+        if not self.validate_packet(data):
             raise ValueError("Invalid VLP-16 packet data")
         packet = VLP16Packet.from_bytes(data)
         # Ensure we return VLP16Packet type
@@ -225,19 +249,17 @@ class VLP16:
             )
         return packet
 
+    def validate_packet(self, data: bytes) -> bool:
+        """Validate if the data represents a valid VLP-16 packet
+
+        Args:
+            data: Raw packet bytes
+
+        Returns:
+            True if valid VLP-16 packet, False otherwise
+        """
+        return VLP16Packet.validate_packet(data)
+
     def get_config(self) -> VLP16Config:
         """Get current VLP-16 configuration"""
         return self.config
-
-
-# Import math functions only when needed for point cloud conversion
-def cos(angle):
-    import math
-
-    return math.cos(angle)
-
-
-def sin(angle):
-    import math
-
-    return math.sin(angle)
