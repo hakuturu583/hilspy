@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [ master, main, develop ]
+    branches: [ master]
   pull_request:
-    branches: [ master, main, develop ]
+    branches: [ master]
   workflow_dispatch:
 
 env:
@@ -16,12 +16,12 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
 
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
-        python-version: '3.11'
+        python-version: '3.12'
 
     - name: Install uv
       uses: astral-sh/setup-uv@v3
@@ -43,12 +43,12 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
 
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
-        python-version: '3.11'
+        python-version: '3.12'
 
     - name: Install uv
       uses: astral-sh/setup-uv@v3
@@ -72,15 +72,9 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest]
-        python-version: ['3.9', '3.10', '3.11', '3.12']
-        include:
-          - os: windows-latest
-            python-version: '3.11'
-          - os: macos-latest
-            python-version: '3.11'
-
+        python-version: ['3.12']
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
 
     - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v5
@@ -103,7 +97,7 @@ jobs:
         uv run pytest test/ -v --cov=hilspy --cov-report=term-missing --cov-report=xml
 
     - name: Upload coverage to Codecov
-      if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
+      if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
       uses: codecov/codecov-action@v3
       with:
         file: ./coverage.xml
@@ -117,12 +111,12 @@ jobs:
     needs: [lint, type-check, test]
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
 
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
-        python-version: '3.11'
+        python-version: '3.12'
 
     - name: Install uv
       uses: astral-sh/setup-uv@v3
@@ -137,7 +131,7 @@ jobs:
         uv run twine check dist/*
 
     - name: Upload artifacts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v5
       with:
         name: dist
         path: dist/
@@ -147,12 +141,12 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
 
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
-        python-version: '3.11'
+        python-version: '3.12'
 
     - name: Install uv
       uses: astral-sh/setup-uv@v3
