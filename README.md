@@ -1,5 +1,9 @@
 # hilspy
 
+[![CI](https://github.com/hakuturu583/hilspy/actions/workflows/ci.yml/badge.svg)](https://github.com/hakuturu583/hilspy/actions/workflows/ci.yml)
+[![Python Version](https://img.shields.io/pypi/pyversions/hilspy)](https://pypi.org/project/hilspy/)
+[![License](https://img.shields.io/github/license/hakuturu583/hilspy)](LICENSE)
+
 A Python package for working with Velodyne LiDAR data, providing QUIC-based communication and packet processing capabilities.
 
 ## Features

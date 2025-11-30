@@ -1,0 +1,28 @@
+# Add labels based on file paths
+documentation:
+  - '*.md'
+  - 'docs/**'
+  - '*.rst'
+
+tests:
+  - 'test/**'
+  - 'tests/**'
+  - '**/test_*.py'
+  - '**/*_test.py'
+
+ci:
+  - '.github/workflows/**'
+  - '.github/*.yml'
+  - '.github/*.yaml'
+
+dependencies:
+  - 'pyproject.toml'
+  - 'requirements*.txt'
+  - 'uv.lock'
+
+velodyne:
+  - 'src/hilspy/velodyne/**'
+
+core:
+  - 'src/hilspy/*.py'
+  - 'src/hilspy/__init__.py'

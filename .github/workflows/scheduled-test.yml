@@ -1,0 +1,56 @@
+name: Scheduled Tests
+
+on:
+  schedule:
+    # Run tests every day at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+env:
+  UV_SYSTEM_PYTHON: 1
+
+jobs:
+  test-latest-deps:
+    name: Test with Latest Dependencies
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v3
+
+    - name: Create virtual environment
+      run: uv venv
+
+    - name: Install package with latest dependencies
+      run: |
+        uv pip install -e . --upgrade
+        uv pip install pytest pytest-cov pytest-asyncio --upgrade
+
+    - name: Run tests
+      run: |
+        uv run pytest test/ -v
+
+    - name: Create issue on failure
+      if: failure()
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const title = `Scheduled test failed on ${new Date().toISOString().split('T')[0]}`;
+          const body = `The scheduled test with latest dependencies failed.
+
+          Check the [workflow run](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}) for details.`;
+
+          await github.rest.issues.create({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            title: title,
+            body: body,
+            labels: ['bug', 'ci', 'dependencies']
+          });
