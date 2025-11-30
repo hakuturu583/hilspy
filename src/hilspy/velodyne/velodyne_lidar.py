@@ -108,12 +108,14 @@ class VelodyneLidar:
         udp_host: str = "127.0.0.1",
         udp_port: int = 2368,
         stream_id: int = 0,
+        packet_class: type = VelodynePacket,
     ):
         self.quic_host = quic_host
         self.quic_port = quic_port
         self.udp_host = udp_host
         self.udp_port = udp_port
         self.stream_id = stream_id
+        self.packet_class = packet_class
 
         self.udp_socket: Optional[socket.socket] = None
         self.quic_protocol: Optional[QuicConnectionProtocol] = None
@@ -174,19 +176,19 @@ class VelodyneLidar:
                 # Read available data from stream
                 data = self.quic_protocol._quic.receive_stream_data(
                     self.stream_id,
-                    VelodynePacket.PACKET_SIZE * 10,  # Read multiple packets at once
+                    self.packet_class.PACKET_SIZE * 10,  # Read multiple packets at once
                 )
 
                 if data:
                     buffer.extend(data)
 
                     # Process complete packets from buffer
-                    while len(buffer) >= VelodynePacket.PACKET_SIZE:
-                        packet_data = bytes(buffer[: VelodynePacket.PACKET_SIZE])
-                        buffer = buffer[VelodynePacket.PACKET_SIZE :]
+                    while len(buffer) >= self.packet_class.PACKET_SIZE:
+                        packet_data = bytes(buffer[: self.packet_class.PACKET_SIZE])
+                        buffer = buffer[self.packet_class.PACKET_SIZE :]
 
                         try:
-                            packet = VelodynePacket.from_bytes(packet_data)
+                            packet = self.packet_class.from_bytes(packet_data)
                             await self.packet_queue.put(packet)
                             logger.debug(
                                 f"Received packet with timestamp {packet.timestamp}"
@@ -231,6 +233,7 @@ class VelodyneLidar:
 
 def main():
     import argparse
+    from .vlp16 import VLP16Packet, VLP16Config
 
     parser = argparse.ArgumentParser(description="Velodyne QUIC to UDP forwarder")
     parser.add_argument("--quic-host", default="localhost", help="QUIC server hostname")
@@ -239,10 +242,19 @@ def main():
         "--udp-host", default="127.0.0.1", help="UDP destination hostname"
     )
     parser.add_argument(
-        "--udp-port", type=int, default=2368, help="UDP destination port"
+        "--udp-port",
+        type=int,
+        default=VLP16Config.udp_port,
+        help="UDP destination port",
     )
     parser.add_argument(
         "--stream-id", type=int, default=0, help="QUIC stream ID to read from"
+    )
+    parser.add_argument(
+        "--model",
+        default="vlp16",
+        choices=["vlp16", "generic"],
+        help="Velodyne model type (default: vlp16)",
     )
     parser.add_argument("--verbose", action="store_true", help="Enable verbose logging")
 
@@ -254,13 +266,20 @@ def main():
     )
 
     async def run():
+        # Select packet class based on model
+        packet_class = VLP16Packet if args.model == "vlp16" else VelodynePacket
+
         lidar = VelodyneLidar(
             quic_host=args.quic_host,
             quic_port=args.quic_port,
             udp_host=args.udp_host,
             udp_port=args.udp_port,
             stream_id=args.stream_id,
+            packet_class=packet_class,
         )
+
+        if args.model == "vlp16":
+            logger.info("Using VLP-16 packet format")
 
         try:
             await lidar.connect()
