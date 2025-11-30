@@ -235,6 +235,38 @@ class VelodyneLidar(ABC, Generic[PacketType]):
         logger.info("Stopping VelodyneLidar")
         self.running = False
 
+    async def send_as_quic_packet(self, packet: PacketType) -> None:
+        """Send a Velodyne packet to the QUIC server
+
+        Args:
+            packet: The packet to send to the QUIC server
+
+        Raises:
+            RuntimeError: If QUIC connection is not established
+        """
+        if not self.quic_protocol:
+            raise RuntimeError("QUIC connection not established. Call connect() first.")
+
+        try:
+            # Convert packet to bytes
+            packet_bytes = packet.to_bytes()
+
+            # Send data on the configured stream
+            self.quic_protocol._quic.send_stream_data(
+                self.stream_id, packet_bytes, end_stream=False
+            )
+
+            # Transmit any pending data
+            self.quic_protocol.transmit()
+
+            logger.debug(
+                f"Sent packet with timestamp {packet.timestamp} via QUIC stream {self.stream_id}"
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to send packet via QUIC: {e}")
+            raise
+
     @abstractmethod
     def parse_packet(self, data: bytes) -> PacketType:
         """Parse raw bytes into a packet object
