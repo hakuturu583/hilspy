@@ -7,7 +7,12 @@ authors = [
     { name = "Masaya Kataoka", email = "ms.kataoka@gmail.com" }
 ]
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "aioquic>=1.3.0",
+]
+
+[project.scripts]
+velodyne-forwarder = "hilspy.velodyne.velodyne_lidar:main"
 
 [build-system]
 requires = ["uv_build>=0.9.7,<0.10.0"]
