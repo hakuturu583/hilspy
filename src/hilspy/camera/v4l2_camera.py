@@ -4,6 +4,10 @@ import struct
 import time
 import tempfile
 from typing import Optional
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import v4l2  # type: ignore
 from cryptography import x509
 from cryptography.x509.oid import NameOID
 from cryptography.hazmat.primitives import hashes, serialization
@@ -14,7 +18,7 @@ import datetime
 import av
 import cv2
 import numpy as np
-import v4l2
+import v4l2  # type: ignore
 from aioquic.asyncio import QuicConnectionProtocol, serve
 from aioquic.asyncio.client import connect
 from aioquic.quic.configuration import QuicConfiguration
@@ -41,19 +45,21 @@ class V4L2Camera:
         self.v4l2_output = None
         self.encoder = None
         self.decoder = None
-        self.capture = None
+        self.capture: Optional[cv2.VideoCapture] = None
         self.running = False
 
     def _setup_h264_encoder(self) -> av.CodecContext:
         codec = av.codec.Codec("libx264", "w")
         encoder = codec.create()
-        encoder.width = self.width
-        encoder.height = self.height
-        encoder.pix_fmt = "yuv420p"
+        encoder.width = self.width  # type: ignore
+        encoder.height = self.height  # type: ignore
+        encoder.pix_fmt = "yuv420p"  # type: ignore
         encoder.bit_rate = self.bitrate
-        encoder.framerate = self.fps
-        encoder.gop_size = self.fps
-        encoder.time_base = av.Fraction(1, self.fps)
+        encoder.framerate = self.fps  # type: ignore
+        encoder.gop_size = self.fps  # type: ignore
+        from fractions import Fraction
+
+        encoder.time_base = Fraction(1, self.fps)
         encoder.options = {
             "preset": "ultrafast",
             "tune": "zerolatency",
@@ -87,11 +93,11 @@ class V4L2Camera:
 
     def _setup_camera_capture(self, input_device: str = "/dev/video1"):
         self.capture = cv2.VideoCapture(input_device)
-        if self.capture is not None:
+        if self.capture is not None and self.capture.isOpened():
             self.capture.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
             self.capture.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
             self.capture.set(cv2.CAP_PROP_FPS, self.fps)
-            self.capture.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+            self.capture.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter.fourcc(*"MJPG"))
 
     def encode_frame(self, frame: np.ndarray) -> bytes:
         if self.encoder is None:
@@ -99,7 +105,9 @@ class V4L2Camera:
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         av_frame = av.VideoFrame.from_ndarray(frame_rgb, format="rgb24")
         av_frame.pts = int(time.time() * self.fps)
-        av_frame.time_base = av.Fraction(1, self.fps)
+        from fractions import Fraction
+
+        av_frame.time_base = Fraction(1, self.fps)
 
         packets = self.encoder.encode(av_frame)
         encoded_data = b""
@@ -268,21 +276,37 @@ class V4L2CameraServer:
 
 
 class V4L2CameraClient:
+    """
+    QUIC client for sending video frames to V4L2CameraServer.
+
+    This client accepts image data via Python API instead of using a camera device.
+
+    Example usage:
+        client = V4L2CameraClient("localhost", 4433)
+        await client.connect()
+
+        # Send frames via Python API
+        for frame in your_frame_source:
+            await client.send_frame(frame)
+    """
+
     def __init__(
         self,
         server_host: str = "localhost",
         server_port: int = 4433,
-        input_device: str = "/dev/video1",
         camera: Optional[V4L2Camera] = None,
     ):
         self.server_host = server_host
         self.server_port = server_port
-        self.input_device = input_device
         self.camera = camera or V4L2Camera()
+        self._frame_queue: asyncio.Queue = asyncio.Queue()
+        self._protocol: Optional[QuicCameraClientProtocol] = None
+        self._stream_id: Optional[int] = None
+        self._running = False
 
-    async def run(self):
+    async def connect(self):
+        """Connect to the QUIC server"""
         self.camera.encoder = self.camera._setup_h264_encoder()
-        self.camera._setup_camera_capture(self.input_device)
 
         configuration = QuicConfiguration(
             alpn_protocols=["h264-stream"],
@@ -290,37 +314,65 @@ class V4L2CameraClient:
         )
         configuration.verify_mode = False
 
-        async with connect(
+        self._connection = await connect(
             self.server_host,
             self.server_port,
             configuration=configuration,
             create_protocol=lambda *args, **kwargs: QuicCameraClientProtocol(
                 *args, camera=self.camera, **kwargs
             ),
-        ) as protocol:
-            logger.info(
-                f"Connected to QUIC server at {self.server_host}:{self.server_port}"
-            )
+        )
+        self._protocol = self._connection
+        self._stream_id = self._protocol._quic.get_next_available_stream_id()
+        self._running = True
 
-            stream_id = protocol._quic.get_next_available_stream_id()
+        logger.info(
+            f"Connected to QUIC server at {self.server_host}:{self.server_port}"
+        )
 
-            while True:
-                ret, frame = self.camera.capture.read()
-                if not ret:
-                    logger.warning("Failed to capture frame")
-                    await asyncio.sleep(0.001)
-                    continue
+    async def send_frame(self, frame: np.ndarray):
+        """Send a frame to the server via Python API"""
+        if not self._running or self._protocol is None or self._stream_id is None:
+            raise RuntimeError("Client not connected. Call connect() first.")
+
+        await self._frame_queue.put(frame)
+
+    async def _frame_sender(self):
+        """Background task to send frames from the queue"""
+        while self._running:
+            try:
+                frame = await asyncio.wait_for(self._frame_queue.get(), timeout=0.1)
 
                 encoded_data = self.camera.encode_frame(frame)
-
-                if encoded_data:
+                if encoded_data and self._protocol and self._stream_id is not None:
                     size_header = struct.pack("!I", len(encoded_data))
-                    protocol._quic.send_stream_data(
-                        stream_id, size_header + encoded_data, end_stream=False
+                    self._protocol._quic.send_stream_data(
+                        self._stream_id, size_header + encoded_data, end_stream=False
                     )
-                    protocol.transmit()
+                    self._protocol.transmit()
 
-                await asyncio.sleep(1.0 / self.camera.fps)
+            except asyncio.TimeoutError:
+                continue
+            except Exception as e:
+                logger.error(f"Error sending frame: {e}")
+
+    async def run(self):
+        """Start the client and begin sending frames"""
+        await self.connect()
+
+        # Start the background frame sender
+        sender_task = asyncio.create_task(self._frame_sender())
+
+        try:
+            await sender_task
+        except asyncio.CancelledError:
+            self._running = False
+            sender_task.cancel()
+            await self._connection.close()
+
+    def stop(self):
+        """Stop the client"""
+        self._running = False
 
 
 async def main_server():
@@ -334,16 +386,40 @@ async def main_server():
 
 
 async def main_client():
+    """Example usage of V4L2CameraClient with Python API"""
     camera = V4L2Camera(width=640, height=480, fps=30, bitrate=2000000)
 
     client = V4L2CameraClient(
         server_host="localhost",
         server_port=4433,
-        input_device="/dev/video1",
         camera=camera,
     )
 
-    await client.run()
+    # Connect to server
+    await client.connect()
+
+    # Start the frame sender task
+    sender_task = asyncio.create_task(client.run())
+
+    # Example: Send frames from camera device (for demonstration)
+    # In real usage, you would call client.send_frame() with your image data
+    cap = cv2.VideoCapture("/dev/video1")
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+    cap.set(cv2.CAP_PROP_FPS, 30)
+
+    try:
+        while True:
+            ret, frame = cap.read()
+            if ret:
+                # Send frame via Python API
+                await client.send_frame(frame)
+            await asyncio.sleep(1.0 / 30)  # 30 FPS
+    except KeyboardInterrupt:
+        client.stop()
+        sender_task.cancel()
+        cap.release()
+        print("Client stopped")
 
 
 if __name__ == "__main__":
