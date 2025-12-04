@@ -108,7 +108,7 @@ jobs:
   build:
     name: Build Package
     runs-on: ubuntu-latest
-    needs: [lint, type-check, test]
+    needs: [lint, type-check, test, ansible-test]
 
     steps:
     - uses: actions/checkout@v6
@@ -135,6 +135,55 @@ jobs:
       with:
         name: dist
         path: dist/
+
+  ansible-test:
+    name: Ansible V4L2 Setup Test
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v6
+
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: '3.12'
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v7
+
+    - name: Create virtual environment
+      run: uv venv
+
+    - name: Install dependencies
+      run: |
+        uv pip install -e .
+        sudo apt-get update
+        sudo apt-get install -y ansible
+
+    - name: Test Ansible playbook syntax
+      run: |
+        ansible-playbook --syntax-check src/hilspy/setup/playbooks/setup-v4l2.yml
+
+    - name: Test V4L2 setup script import
+      run: |
+        uv run python -c "from hilspy.setup.v4l2_setup import V4L2Setup; print('Import successful')"
+
+    - name: Test V4L2 setup script help
+      run: |
+        uv run python src/hilspy/setup/v4l2_setup.py --help
+
+    - name: Test V4L2 setup CLI command
+      run: |
+        uv run hilspy-setup-v4l2 --help
+
+    - name: Verify playbook structure
+      run: |
+        test -f src/hilspy/setup/playbooks/setup-v4l2.yml
+        echo "Playbook file exists"
+
+    - name: Test example script
+      run: |
+        uv run python examples/setup_v4l2_example.py
 
   security:
     name: Security Scan
