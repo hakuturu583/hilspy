@@ -14,10 +14,12 @@ dependencies = [
     "numpy>=1.24.0",
     "opencv-python>=4.8.0",
     "cryptography>=41.0.0",
+    "ansible-runner>=2.4.2",
 ]
 
 [project.scripts]
 velodyne-forwarder = "hilspy.velodyne.velodyne_lidar:main"
+hilspy-setup-v4l2 = "hilspy.setup.v4l2_setup:main"
 
 [build-system]
 requires = ["uv_build>=0.9.7,<0.10.0"]

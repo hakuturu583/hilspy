@@ -1,0 +1,48 @@
+---
+- name: Setup V4L2 environment for hilspy camera
+  hosts: localhost
+  connection: local
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Update package cache
+      apt:
+        update_cache: true
+        cache_valid_time: 3600
+      when: ansible_os_family == "Debian"
+
+    - name: Install v4l2loopback-dkms
+      apt:
+        name: v4l2loopback-dkms
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: Install ffmpeg
+      apt:
+        name: ffmpeg
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: Remove existing v4l2loopback module
+      modprobe:
+        name: v4l2loopback
+        state: absent
+      ignore_errors: true
+
+    - name: Load v4l2loopback module with hilspy configuration
+      modprobe:
+        name: v4l2loopback
+        params: 'devices=1 video_nr=0 exclusive_caps=1 card_label="hilspy"'
+        state: present
+
+    - name: Verify v4l2 device exists
+      stat:
+        path: /dev/video0
+      register: video_device
+
+    - name: Display setup result
+      debug:
+        msg: >
+          V4L2 setup completed successfully.
+          Device /dev/video0 is {{ 'available' if video_device.stat.exists else 'not available' }}.
