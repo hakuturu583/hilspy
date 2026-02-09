@@ -22,7 +22,7 @@ velodyne-forwarder = "hilspy.velodyne.velodyne_lidar:main"
 hilspy-setup-v4l2 = "hilspy.setup.v4l2_setup:main"
 
 [build-system]
-requires = ["uv_build>=0.9.7,<0.10.0"]
+requires = ["uv_build>=0.9.7,<0.11.0"]
 build-backend = "uv_build"
 
 [dependency-groups]
