@@ -89,7 +89,7 @@ e2e = {
     "SafetyStatus": {"profile": 5, "data_id": 0x4242, "offset": 0, "signals": ["Crc", "Counter"]},
 }
 with hilspy.open("can://can0", "dbc:chassis.dbc", e2e=e2e) as ecu:
-    ecu.every(0.01, "BrakeCmd", {"Pressure": 12.5, "Request": 1})  # counter and CRC each cycle
+    brake = ecu.every(0.01, "BrakeCmd", {"Pressure": 12.5, "Request": 1})  # counter + CRC per cycle
     for msg in ecu:
         if "e2e" in msg and msg["e2e"] != "Ok":
             print("E2E", msg.name, msg["e2e"])
