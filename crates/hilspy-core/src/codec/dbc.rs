@@ -97,6 +97,7 @@ fn to_db(name: &str, v: &Value) -> Result<db::Value> {
     Ok(match v {
         Value::Bool(b) => db::Value::Int(i64::from(*b)),
         Value::Int(i) => db::Value::Int(*i),
+        Value::UInt(u) => db::Value::Float(*u as f64),
         Value::Float(f) => db::Value::Float(*f),
         Value::Str(s) => db::Value::Str(s.clone()),
         Value::Null | Value::Map(_) | Value::Array(_) | Value::List(_) => {

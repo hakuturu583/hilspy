@@ -31,6 +31,7 @@ with hilspy.open("can://vcan0", "dbc:vehicle.dbc") as ecu:
 | `raw` (default) | none: messages carry `data` (and `id` for CAN) |
 | `dbc:FILE` | CAN frames <-> DBC messages, via [`can-dbc`](https://crates.io/crates/can-dbc) (options `strict`, `scaling`, `decode_choices`, `e2e`) |
 | `fibex:FILE` | CAN / CAN FD frames <-> the frames of an ASAM FIBEX channel, via [`afibex`](https://crates.io/crates/afibex) (option `channel`, and the `dbc:` options); see [FIBEX](#fibex-networks) |
+| `someip:FILE` | SOME/IP messages <-> the methods, events and fields of ASAM FIBEX 4 services, parsed by [`afibex`](https://crates.io/crates/afibex) and checked against [`asomeip`](https://crates.io/crates/asomeip) (options `client_id`, `decode_choices`, `stream`); see [SOME/IP](#someip-services) |
 | `sbf` | Septentrio Binary Format stream <-> blocks, via [`libsbf`](https://crates.io/crates/libsbf); encodes `PVTGeodetic` and `AttEuler` |
 | `nmea` | NMEA 0183 sentences <-> messages via [`nmea`](https://crates.io/crates/nmea) (`GGA`, `RMC`, `GSV`, ...); encodes `GGA`, `RMC`, `VTG`, `HDT`, `ZDA` |
 | `ubx` | u-blox UBX frames <-> messages via [`ublox`](https://crates.io/crates/ublox) (`NAV-PVT`, `NAV-ATT`, `MON-VER`, ...); encodes `NAV-PVT` |
@@ -106,6 +107,46 @@ with hilspy.open("can://can0", "fibex:network.xml", channel="Chassis") as ecu:
   the channel lacks decode as nameless messages. Multiplexed PDUs, high-low
   byte order PDU instances, texttable ranges and piecewise or non-linear
   scaling are rejected when the file is opened.
+
+### SOME/IP services
+
+`someip:FILE` sends and receives the SOME/IP messages of the services an ASAM
+FIBEX 4 file describes, over `udp://` or `tcp://`:
+
+```python
+origin = {"latitude": 35.68, "longitude": 139.69, "altitude": 40.0, "quality": "RTK_FIXED"}
+route = {"origin": origin, "waypoints": [{"id": 1, "speed": 20}], "name": "Route 1"}
+with hilspy.open("udp://192.168.0.20:30490", "someip:services.xml", client_id=0x42) as ecu:
+    ecu.send("VehicleService.SetRoute", route)
+    for msg in ecu:  # responses, events and field notifications
+        print(msg.name, msg["message_type"], msg["session_id"], msg.fields)
+```
+
+* Messages are named `Service.Method` and `Service.Event` (FIBEX short
+  names); a field's accessors are `Service.get_F_field`, `Service.set_F_field`
+  and its notifier `Service.changed_F_field`.
+* Fields: the header (`service_id`, `method_id`, `length`, `client_id`,
+  `session_id`, `protocol_version`, `interface_version`, `message_type`,
+  `return_code`) and the parameters: input parameters for requests and
+  notifications, return parameters for responses (`"message_type":
+  "RESPONSE"`). Structures and unions are dicts, arrays lists or
+  `array.array`s, enums their names (`decode_choices=False` for numbers).
+* Sending fills the header: `message_type` `REQUEST` (methods, accessors) or
+  `NOTIFICATION` (events, notifiers), `return_code` `E_OK`, `client_id` from
+  the option (default 0; notifications 0, as PRS_SOMEIP_00925 requires),
+  `session_id` counting per method from 1. Pass any
+  of them to override (a response echoes the request's `client_id` and
+  `session_id`). A received message sends back as the same bytes.
+* Serialization follows the FIBEX attributes: byte order, bit lengths,
+  length fields of strings, structures, unions and dynamic arrays
+  (`LENGTH-FIELD-SIZE`, `ARRAY-LENGTH-FIELD-SIZE`, `TYPE-FIELD-SIZE`), fixed
+  arrays, UTF-8/UTF-16 and fixed-length strings.
+* A datagram may carry several messages; a TCP stream is cut by the length
+  field (a datagram's incomplete remainder is an error, never joined to the
+  next one; `stream=True` treats source-less packets such as a `file://`
+  replay as a stream). Unsigned 64-bit values above 2^63 are Python ints
+  too. Unknown services or methods, SOME/IP-TP segments and SOME/IP-SD
+  (service discovery) arrive as nameless messages with their bytes.
 
 ### AUTOSAR E2E (alive counter + CRC)
 

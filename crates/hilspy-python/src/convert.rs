@@ -13,7 +13,11 @@ pub(crate) fn value_from_py(obj: &Bound<'_, PyAny>) -> PyResult<Value> {
     } else if obj.is_instance_of::<PyBool>() {
         Ok(Value::Bool(obj.extract()?))
     } else if obj.is_instance_of::<PyInt>() {
-        Ok(Value::Int(obj.extract()?))
+        match obj.extract::<i64>() {
+            Ok(i) => Ok(Value::Int(i)),
+            // An unsigned 64-bit value above i64::MAX.
+            Err(e) => obj.extract::<u64>().map(Value::UInt).map_err(|_| e),
+        }
     } else if obj.is_instance_of::<PyFloat>() {
         Ok(Value::Float(obj.extract()?))
     } else if obj.is_instance_of::<PyString>() {
@@ -152,6 +156,7 @@ pub(crate) fn value_to_py<'py>(py: Python<'py>, v: &Value) -> PyResult<Bound<'py
         Value::Null => py.None().into_bound(py),
         Value::Bool(b) => PyBool::new(py, *b).to_owned().into_any(),
         Value::Int(i) => i.into_pyobject(py)?.into_any(),
+        Value::UInt(u) => u.into_pyobject(py)?.into_any(),
         Value::Float(x) => x.into_pyobject(py)?.into_any(),
         Value::Str(s) => s.into_pyobject(py)?.into_any(),
         Value::Map(m) => fields_to_py(py, m)?.into_any(),
