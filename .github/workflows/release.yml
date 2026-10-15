@@ -1,0 +1,194 @@
+name: Release
+
+# Merging a PR labelled "bump patch" / "bump minor" / "bump major" into the
+# default branch bumps the version (tools/bump_version.py: pyproject.toml,
+# Cargo.toml and both lockfiles), commits "chore: bump version to X", tags
+# vX, builds the wheels and the sdist, creates the GitHub Release and
+# publishes to PyPI (Trusted Publishing, environment "pypi").
+#
+# workflow_dispatch finishes the release of a version that was already bumped
+# (when a later step failed): it builds from the tag vX, or else from the
+# "chore: bump version to X" commit. Every step can be repeated: an existing
+# tag, Release, asset or PyPI file is reused.
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to finish releasing, e.g. 0.2.0
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: read
+    outputs:
+      release: ${{ steps.version.outputs.release }}
+      version: ${{ steps.version.outputs.version }}
+      sha: ${{ steps.version.outputs.sha }}
+      bump_type: ${{ steps.labels.outputs.bump_type }}
+      pr_number: ${{ steps.labels.outputs.pr_number }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # A branch ruleset that blocks direct pushes needs a token allowed
+          # to bypass it (secret GH_PAT); otherwise GITHUB_TOKEN is enough.
+          token: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
+
+      - name: Get the merged PR's bump label
+        if: github.event_name == 'push'
+        id: labels
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: prs } = await github.rest.repos.listPullRequestsAssociatedWithCommit({
+              ...context.repo,
+              commit_sha: context.sha,
+            });
+            const pr = prs.find(p => p.merged_at !== null);
+            if (!pr) {
+              core.info('No merged PR for this commit: no release.');
+              core.setOutput('bump_type', 'none');
+              return;
+            }
+            const labels = pr.labels.map(l => l.name);
+            core.info(`PR #${pr.number} labels: ${labels.join(', ')}`);
+            let bump = 'none';
+            for (const part of ['major', 'minor', 'patch']) {
+              if (labels.includes(`bump ${part}`)) { bump = part; break; }
+            }
+            core.setOutput('bump_type', bump);
+            core.setOutput('pr_number', pr.number);
+
+      - uses: astral-sh/setup-uv@v6
+        if: steps.labels.outputs.bump_type != 'none' && github.event_name == 'push'
+      - uses: dtolnay/rust-toolchain@stable
+        if: steps.labels.outputs.bump_type != 'none' && github.event_name == 'push'
+
+      - name: Bump and commit
+        if: steps.labels.outputs.bump_type != 'none' && github.event_name == 'push'
+        id: bump
+        env:
+          BUMP: ${{ steps.labels.outputs.bump_type }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          version=$(uv run --no-project python tools/bump_version.py "$BUMP")
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add pyproject.toml Cargo.toml uv.lock Cargo.lock
+          git commit -m "chore: bump version to ${version}"
+          git push origin "HEAD:${BRANCH}"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve the version to release
+        id: version
+        env:
+          EVENT: ${{ github.event_name }}
+          BUMPED: ${{ steps.bump.outputs.version }}
+          REQUESTED: ${{ inputs.version }}
+        run: |
+          read_version() {
+            git show "$1:pyproject.toml" | sed -n 's/^version = "\(.*\)"/\1/p' | head -n1
+          }
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            version="${REQUESTED#v}"
+            if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "::error::'$REQUESTED' is not a version like 0.2.0"; exit 1
+            fi
+            if git rev-parse --verify --quiet "refs/tags/v${version}" > /dev/null; then
+              sha=$(git rev-list -n 1 "v${version}")
+            else
+              sha=$(git log -1 --format=%H --grep="^chore: bump version to ${version//./\\.}\$")
+            fi
+            if [ -z "$sha" ] || [ "$(read_version "$sha")" != "$version" ]; then
+              echo "::error::no v${version} tag or bump commit carrying ${version}"; exit 1
+            fi
+          elif [ -n "$BUMPED" ]; then
+            version="$BUMPED"
+            sha=$(git rev-parse HEAD)
+          else
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "Releasing v${version} from ${sha}"
+          {
+            echo "release=true"
+            echo "version=${version}"
+            echo "sha=${sha}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Tag
+        if: steps.version.outputs.release == 'true'
+        env:
+          TAG: v${{ steps.version.outputs.version }}
+          SHA: ${{ steps.version.outputs.sha }}
+        run: |
+          if git ls-remote --exit-code --tags origin "refs/tags/${TAG}" > /dev/null; then
+            echo "${TAG} already exists"
+          else
+            git tag "${TAG}" "${SHA}"
+            git push origin "${TAG}"
+          fi
+
+  dist:
+    needs: bump
+    if: needs.bump.outputs.release == 'true'
+    uses: ./.github/workflows/build-dist.yml
+    with:
+      ref: ${{ needs.bump.outputs.sha }}
+
+  github-release:
+    needs: [bump, dist]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: dist-*
+          path: dist
+          merge-multiple: true
+      - name: Create the Release (or add to it)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: v${{ needs.bump.outputs.version }}
+          BUMP: ${{ needs.bump.outputs.bump_type }}
+          PR: ${{ needs.bump.outputs.pr_number }}
+        run: |
+          if ! gh release view "$TAG" > /dev/null 2>&1; then
+            notes="Install: \`pip install hilspy==${TAG#v}\`"
+            if [ -n "$PR" ]; then notes="${notes}"$'\n\n'"Released by #${PR} (bump ${BUMP})."; fi
+            gh release create "$TAG" --title "hilspy $TAG" --notes "$notes" --generate-notes
+          fi
+          gh release upload "$TAG" dist/* --clobber
+
+  publish:
+    needs: [bump, dist]
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/hilspy/${{ needs.bump.outputs.version }}/
+    permissions:
+      id-token: write  # Trusted Publishing; no token in secrets.
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: dist-*
+          path: dist
+          merge-multiple: true
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true

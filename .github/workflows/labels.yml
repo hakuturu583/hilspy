@@ -1,0 +1,35 @@
+name: Labels
+
+# Create or update the version-bump labels the release workflow reads
+# (.github/labels.json), so a fresh repository or fork has them.
+on:
+  push:
+    paths:
+      - .github/labels.json
+      - .github/workflows/labels.yml
+  workflow_dispatch:
+
+permissions:
+  issues: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const labels = JSON.parse(fs.readFileSync('.github/labels.json', 'utf8'));
+            for (const { name, color, description } of labels) {
+              try {
+                await github.rest.issues.getLabel({ ...context.repo, name });
+                await github.rest.issues.updateLabel({ ...context.repo, name, color, description });
+                core.info(`updated "${name}"`);
+              } catch (error) {
+                if (error.status !== 404) throw error;
+                await github.rest.issues.createLabel({ ...context.repo, name, color, description });
+                core.info(`created "${name}"`);
+              }
+            }

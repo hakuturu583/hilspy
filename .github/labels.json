@@ -1,0 +1,6 @@
+[
+  {"name": "bump patch", "color": "0e8a16", "description": "Release a patch version (0.0.X) when merged: bug fixes, docs, small changes"},
+  {"name": "bump minor", "color": "1d76db", "description": "Release a minor version (0.X.0) when merged: new features"},
+  {"name": "bump major", "color": "b60205", "description": "Release a major version (X.0.0) when merged: breaking changes"},
+  {"name": "no release", "color": "cccccc", "description": "Merge without a release (CI, refactoring that changes nothing shipped)"}
+]

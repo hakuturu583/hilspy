@@ -20,28 +20,35 @@ Ctrl-C.
 
 ## Install
 
-Linux, Python 3.10+. One abi3 wheel serves every Python version.
+Python 3.10+. One abi3 wheel per platform serves every Python version; wheels
+are built for Linux (x86_64, aarch64), macOS (arm64, x86_64) and Windows x64.
+SocketCAN is Linux-only; the virtual bus, DBC and SBF work everywhere.
 
 ```sh
-uv add hilspy                       # or: pip install hilspy
+pip install hilspy
+uv add hilspy
+pip install git+https://github.com/hakuturu583/hilspy   # from source (needs Rust)
 ```
 
-From a checkout (needs a Rust toolchain):
+From a checkout:
 
 ```sh
 uv sync                             # builds the extension with maturin
 uv run pytest
 ```
 
+Versions follow semver and are released by labelling the PR (`bump patch` /
+`bump minor` / `bump major`); see [`docs/releasing.md`](docs/releasing.md).
+
 ## CAN
 
 ```python
 from hilspy.can import Bus, Filter, Frame
 
-with Bus("vcan0") as bus:                          # interface="socketcan" is the default
+with Bus("vcan0") as bus:  # interface="socketcan" is the default
     bus.send(Frame(0x123, b"\x01\x02\x03"))
-    frame = bus.recv(timeout=1.0)                  # Frame or None
-    for frame in bus:                              # until bus.shutdown()
+    frame = bus.recv(timeout=1.0)  # Frame or None
+    for frame in bus:  # until bus.shutdown()
         ...
 ```
 
@@ -74,8 +81,8 @@ db = dbc.load_file("vehicle.dbc")
 frame = db.encode_frame("VehicleSpeed", {"Speed": 42.0, "Accel": 0.5, "Gear": "D", "Counter": 3})
 bus.send(frame)
 
-values = db.decode_frame(bus.recv())               # {"Speed": 42.0, "Gear": "D", ...}
-db.decode("VehicleSpeed", payload, decode_choices=False, scaling=False)   # raw values
+values = db.decode_frame(bus.recv())  # {"Speed": 42.0, "Gear": "D", ...}
+db.decode("VehicleSpeed", payload, decode_choices=False, scaling=False)  # raw values
 ```
 
 `encode` is strict by default: every signal must be given, values must lie in
@@ -99,8 +106,17 @@ blocks = sbf.read_file("capture.sbf")
 
 # Simulated receiver output
 wnc, tow = sbf.gps_time(time.time())
-data = sbf.encode_pvt_geodetic(tow=tow, wnc=wnc, mode=4, latitude=lat_rad, longitude=lon_rad,
-                               height=40.0, vn=1.0, ve=0.0, vu=0.0)
+data = sbf.encode_pvt_geodetic(
+    tow=tow,
+    wnc=wnc,
+    mode=4,
+    latitude=lat_rad,
+    longitude=lon_rad,
+    height=40.0,
+    vn=1.0,
+    ve=0.0,
+    vu=0.0,
+)
 data += sbf.encode_att_euler(tow=tow, wnc=wnc, mode=4, heading=90.0, pitch=0.0, roll=0.0)
 ```
 
