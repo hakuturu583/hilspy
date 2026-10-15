@@ -7,12 +7,19 @@
 //! of codings. What it leaves out is read from the same document with
 //! `roxmltree`, by element ID: the frame triggerings of a channel (CAN
 //! identifier, extended addressing, CAN FD) and the compu methods of a coding
-//! (rational coefficients, `SCALE-LINEAR`, texttable ranges, physical
-//! constraints, units).
+//! (scales with their limits, rational coefficients and texttable names,
+//! physical constraints, units).
 //!
 //! Coded types: unsigned and two's complement integers map onto the DBC
 //! value types; sign-magnitude (`SM`) and one's complement (`1C`) integers
 //! onto [`ValueKind::SignMagnitude`] and [`ValueKind::OnesComplement`].
+//!
+//! Compu methods: `IDENTICAL`, `LINEAR`, `SCALE-LINEAR`, `TEXTTABLE`,
+//! `RAT-FUNC` and `SCALE-RAT-FUNC` (not `FORMULA`). A coding whose scales are
+//! one linear function plus texttable entries for single integers becomes the
+//! signal's factor, offset and value table, as in a DBC; anything else
+//! (texttable ranges, piecewise or rational functions) becomes the signal's
+//! [`Coding`], which the `dbc` encoding and decoding consult instead.
 //!
 //! Layout: a PDU instance's `BIT-POSITION` is the PDU's offset in the frame
 //! (a whole number of bytes). A signal instance's `BIT-POSITION` is read as a
@@ -22,12 +29,15 @@
 //! reads and writes FIBEX.
 
 use std::collections::HashMap;
+use std::ops::Bound;
 use std::path::Path;
 
 use afibex::fibex::{BaseDataType, Category, Encoding, FibexData};
 use roxmltree::{Document, Node};
 
-use crate::dbc::{bits, ByteOrder, Database, Message, Signal, ValueKind};
+use crate::dbc::{
+    bits, ByteOrder, Coding, Conversion, Database, Message, Scale, Signal, ValueKind,
+};
 use crate::error::{Error, Result};
 
 fn bad(msg: impl Into<String>) -> Error {
@@ -101,28 +111,64 @@ struct Triggering {
     frame: String,
 }
 
-/// The physical meaning of a coding: what the DBC model expresses.
+/// The physical meaning of a coding: its scales, range and unit.
 #[derive(Default)]
 struct Compu {
-    linear: Option<(f64, f64)>,
-    choices: Vec<(i64, String)>,
+    scales: Vec<Scale>,
     minimum: Option<f64>,
     maximum: Option<f64>,
     unit: String,
 }
 
+/// What the DBC model's own fields express of a coding's scales.
+struct Plain {
+    factor: f64,
+    offset: f64,
+    choices: Vec<(i64, String)>,
+}
+
 impl Compu {
-    fn set_linear(&mut self, coding: &str, factor: f64, offset: f64) -> Result<()> {
-        match self.linear {
-            Some(l) if l != (factor, offset) => Err(bad(format!(
-                "coding {coding}: scales with different coefficients (piecewise linear) are not \
-                 supported"
-            ))),
-            _ => {
-                self.linear = Some((factor, offset));
-                Ok(())
+    /// The scales as one factor and offset plus exact value table entries,
+    /// when they are that: every name for a single integer and every
+    /// rational scale the same linear function (whatever its limits).
+    fn plain(&self) -> Option<Plain> {
+        let mut linear = None;
+        let mut choices = Vec::new();
+        for scale in &self.scales {
+            match &scale.conversion {
+                Conversion::Text(name) => match (scale.lower, scale.upper) {
+                    (Bound::Included(l), Bound::Included(u))
+                        if l == u && l.fract() == 0.0 && l.abs() < 9e15 =>
+                    {
+                        choices.push((l as i64, name.clone()));
+                    }
+                    _ => return None,
+                },
+                Conversion::Rational {
+                    numerator,
+                    denominator,
+                } => {
+                    let (offset, factor) = match (numerator.as_slice(), denominator.as_slice()) {
+                        ([offset, factor], [d]) => (offset / d, factor / d),
+                        _ => return None,
+                    };
+                    if factor == 0.0 || !factor.is_finite() || !offset.is_finite() {
+                        return None;
+                    }
+                    match linear {
+                        Some(l) if l != (factor, offset) => return None,
+                        _ => linear = Some((factor, offset)),
+                    }
+                }
             }
         }
+        choices.sort_by_key(|(v, _)| *v);
+        let (factor, offset) = linear.unwrap_or((1.0, 0.0));
+        Some(Plain {
+            factor,
+            offset,
+            choices,
+        })
     }
 }
 
@@ -383,33 +429,54 @@ impl Network<'_, '_, '_> {
             )));
         }
         let compu = self.compu(&signal.coding_ref)?;
-        let (factor, offset) = compu.linear.unwrap_or((1.0, 0.0));
-        Ok((
-            name.clone(),
-            Signal {
-                name,
-                start_bit,
-                size,
-                byte_order,
-                signed,
-                kind,
-                factor,
-                offset,
-                minimum: compu.minimum,
-                maximum: compu.maximum,
-                unit: compu.unit,
-                receivers: Vec::new(),
-                comment: signal.desc.clone(),
-                choices: compu.choices,
-                initial_raw: None,
-                is_multiplexor: false,
-                multiplexing: None,
-            },
-        ))
+        let plain = compu.plain();
+        let (factor, offset, choices) = match &plain {
+            Some(p) => (p.factor, p.offset, p.choices.clone()),
+            // The coding converts; the value table lists its names.
+            None => (
+                1.0,
+                0.0,
+                compu
+                    .scales
+                    .iter()
+                    .filter_map(|s| match (&s.conversion, s.lower) {
+                        (Conversion::Text(n), Bound::Included(l)) if l.fract() == 0.0 => {
+                            Some((l as i64, n.clone()))
+                        }
+                        _ => None,
+                    })
+                    .collect(),
+            ),
+        };
+        let mut signal = Signal {
+            name: name.clone(),
+            start_bit,
+            size,
+            byte_order,
+            signed,
+            kind,
+            factor,
+            offset,
+            minimum: compu.minimum,
+            maximum: compu.maximum,
+            unit: compu.unit,
+            receivers: Vec::new(),
+            comment: signal.desc.clone(),
+            choices,
+            initial_raw: None,
+            is_multiplexor: false,
+            multiplexing: None,
+            coding: None,
+        };
+        if plain.is_none() {
+            let (lo, hi) = signal.raw_range();
+            signal.coding = Some(Coding::new(compu.scales, lo, hi, kind.is_integer()));
+        }
+        Ok((name, signal))
     }
 
-    /// The compu methods of a coding: IDENTICAL, LINEAR, SCALE-LINEAR and
-    /// TEXTTABLE.
+    /// The compu methods of a coding: IDENTICAL, LINEAR, SCALE-LINEAR,
+    /// TEXTTABLE, RAT-FUNC and SCALE-RAT-FUNC.
     fn compu(&self, coding: &str) -> Result<Compu> {
         let mut c = Compu::default();
         let Some(node) = self.ids.get(coding).copied() else {
@@ -440,38 +507,49 @@ impl Network<'_, '_, '_> {
                 .into_iter()
                 .flat_map(|s| children(s, "COMPU-SCALE"))
                 .collect();
-            match category {
-                "IDENTICAL" => c.set_linear(coding, 1.0, 0.0)?,
-                "LINEAR" | "SCALE-LINEAR" | "TEXTTABLE" => {
-                    for scale in scales {
-                        let vt = child(scale, "COMPU-CONST").and_then(|k| child(k, "VT"));
-                        let coeffs = child(scale, "COMPU-RATIONAL-COEFFS");
-                        match (vt, coeffs) {
-                            (Some(vt), _) if category != "LINEAR" => {
-                                c.choices
-                                    .push((choice_value(scale, coding)?, text(vt).into()));
-                            }
-                            (None, Some(r)) if category != "TEXTTABLE" => {
-                                let (factor, offset) = rational(r, coding)?;
-                                c.set_linear(coding, factor, offset)?;
-                            }
-                            _ => {
-                                return Err(bad(format!(
-                                    "coding {coding}: unsupported {category} scale"
-                                )))
-                            }
-                        }
-                    }
+            let (names, functions, linear) = match category {
+                "IDENTICAL" => {
+                    c.scales.push(Scale {
+                        lower: Bound::Unbounded,
+                        upper: Bound::Unbounded,
+                        conversion: Conversion::Rational {
+                            numerator: vec![0.0, 1.0],
+                            denominator: vec![1.0],
+                        },
+                    });
+                    continue;
                 }
+                "LINEAR" => (false, true, true),
+                "SCALE-LINEAR" => (true, true, true),
+                "TEXTTABLE" => (true, false, false),
+                "RAT-FUNC" => (false, true, false),
+                "SCALE-RAT-FUNC" => (true, true, false),
                 other => {
                     return Err(bad(format!(
                         "coding {coding}: unsupported compu method {other:?} (supported: \
-                         IDENTICAL, LINEAR, SCALE-LINEAR, TEXTTABLE)"
+                         IDENTICAL, LINEAR, SCALE-LINEAR, TEXTTABLE, RAT-FUNC, SCALE-RAT-FUNC)"
                     )))
                 }
+            };
+            for scale in scales {
+                let vt = child(scale, "COMPU-CONST").and_then(|k| child(k, "VT"));
+                let coeffs = child(scale, "COMPU-RATIONAL-COEFFS");
+                let conversion = match (vt, coeffs) {
+                    (Some(vt), _) if names => Conversion::Text(text(vt).into()),
+                    (None, Some(r)) if functions => rational(r, coding, linear)?,
+                    _ => {
+                        return Err(bad(format!(
+                            "coding {coding}: unsupported {category} scale"
+                        )))
+                    }
+                };
+                c.scales.push(Scale {
+                    lower: bound(scale, "LOWER-LIMIT", coding)?,
+                    upper: bound(scale, "UPPER-LIMIT", coding)?,
+                    conversion,
+                });
             }
         }
-        c.choices.sort_by_key(|(v, _)| *v);
         Ok(c)
     }
 }
@@ -486,36 +564,23 @@ fn limit(scale: Node<'_, '_>, name: &str, coding: &str) -> Result<Option<f64>> {
     }
 }
 
-/// The raw value of a texttable entry (a single value: lower = upper limit).
-fn choice_value(scale: Node<'_, '_>, coding: &str) -> Result<i64> {
-    let lower = child(scale, "LOWER-LIMIT").ok_or_else(|| {
-        bad(format!(
-            "coding {coding}: a texttable scale has no LOWER-LIMIT"
-        ))
-    })?;
-    let value = text(lower);
-    let upper = child(scale, "UPPER-LIMIT").map(text).unwrap_or(value);
-    let parse = |s: &str| {
-        s.parse::<i64>().ok().or_else(|| {
-            s.parse::<f64>()
-                .ok()
-                .filter(|f| f.fract() == 0.0)
-                .map(|f| f as i64)
-        })
+/// A compu scale's raw limit: closed unless `INTERVAL-TYPE` says `OPEN`,
+/// unbounded when absent or `INFINITE`.
+fn bound(scale: Node<'_, '_>, name: &str, coding: &str) -> Result<Bound<f64>> {
+    let Some(l) = child(scale, name) else {
+        return Ok(Bound::Unbounded);
     };
-    match (parse(value), parse(upper)) {
-        (Some(lo), Some(hi)) if lo == hi => Ok(lo),
-        (Some(_), Some(_)) => Err(bad(format!(
-            "coding {coding}: texttable ranges ({value}..{upper}) are not supported"
-        ))),
-        _ => Err(bad(format!(
-            "coding {coding}: texttable limit {value:?} is not an integer"
-        ))),
-    }
+    let value = || number(l, &format!("coding {coding} {name}"));
+    Ok(match attr(l, "INTERVAL-TYPE") {
+        Some("INFINITE") => Bound::Unbounded,
+        Some("OPEN") => Bound::Excluded(value()?),
+        _ => Bound::Included(value()?),
+    })
 }
 
-/// `(factor, offset)` of `COMPU-RATIONAL-COEFFS` `(n0 + n1 x) / d0`.
-fn rational(coeffs: Node<'_, '_>, coding: &str) -> Result<(f64, f64)> {
+/// `COMPU-RATIONAL-COEFFS`: `N(x) / D(x)`, coefficients from the constant
+/// term up. A `linear` method allows `(n0 + n1 x) / d0` only.
+fn rational(coeffs: Node<'_, '_>, coding: &str, linear: bool) -> Result<Conversion> {
     let values = |name| -> Result<Vec<f64>> {
         child(coeffs, name)
             .into_iter()
@@ -524,25 +589,25 @@ fn rational(coeffs: Node<'_, '_>, coding: &str) -> Result<(f64, f64)> {
             .collect()
     };
     let numerator = values("COMPU-NUMERATOR")?;
-    let denominator = values("COMPU-DENOMINATOR")?;
-    let d = match denominator.as_slice() {
-        [] => 1.0,
-        [d] => *d,
-        _ => {
-            return Err(bad(format!(
-                "coding {coding}: only linear rational coefficients are supported"
-            )))
-        }
-    };
-    match numerator.as_slice() {
-        [offset, factor] if d != 0.0 && *factor != 0.0 && (factor / d).is_finite() => {
-            Ok((factor / d, offset / d))
-        }
-        _ => Err(bad(format!(
-            "coding {coding}: linear coefficients need two numerator values, a non-zero factor \
-             and a non-zero denominator"
-        ))),
+    let mut denominator = values("COMPU-DENOMINATOR")?;
+    if denominator.is_empty() {
+        denominator.push(1.0);
     }
+    if numerator.is_empty() || denominator.iter().all(|d| *d == 0.0) {
+        return Err(bad(format!(
+            "coding {coding}: rational coefficients need a numerator and a non-zero denominator"
+        )));
+    }
+    if linear && (numerator.len() > 2 || denominator.len() > 1 || denominator[0] == 0.0) {
+        return Err(bad(format!(
+            "coding {coding}: linear coefficients are at most two numerator values over one \
+             non-zero denominator (a rational function is RAT-FUNC)"
+        )));
+    }
+    Ok(Conversion::Rational {
+        numerator,
+        denominator,
+    })
 }
 
 /// The CAN identifier and format of a frame triggering; `None` for one

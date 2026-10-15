@@ -169,12 +169,13 @@ fn unsupported_content_is_reported() {
     let text = network();
     let cases = [
         (
-            "range",
-            text.replace(
-                "<ho:LOWER-LIMIT>3</ho:LOWER-LIMIT>\n                <ho:UPPER-LIMIT>3</ho:UPPER-LIMIT>",
-                "<ho:LOWER-LIMIT>3</ho:LOWER-LIMIT>\n                <ho:UPPER-LIMIT>7</ho:UPPER-LIMIT>",
+            "nonlinear",
+            text.replacen(
+                "<ho:V>0</ho:V><ho:V>0.01</ho:V>",
+                "<ho:V>0</ho:V><ho:V>0.01</ho:V><ho:V>1</ho:V>",
+                1,
             ),
-            "texttable ranges",
+            "a rational function is RAT-FUNC",
         ),
         (
             "category",
@@ -271,4 +272,100 @@ fn sign_magnitude_and_ones_complement_codings() {
             .all(|(_, v)| *v == Value::Int(0) || *v == Value::Float(0.0)),
         "{zeros:?}"
     );
+}
+
+#[test]
+fn texttable_ranges_piecewise_and_rational_codings() {
+    let db = features();
+    let m = db.message_by_name("Codings").unwrap();
+    // A single linear RAT-FUNC is a plain factor and offset.
+    let ratio = m.signal("Ratio").unwrap();
+    assert_eq!(
+        (ratio.factor, ratio.offset, ratio.coding.is_none()),
+        (1.5, 5.0, true)
+    );
+    let level = m.signal("Level").unwrap();
+    assert!(level.coding.is_some());
+    // The names, by their lower limits.
+    assert_eq!(
+        level.choices,
+        [(0, "Low".into()), (4, "High".into()), (15, "Error".into())]
+    );
+
+    let decode = |data: [u8; 8]| m.decode(&data, &DecodeOptions::default()).unwrap();
+    // Level 9 (High), Parabola 3: (3 - 8)^2, Curve 120: 2 * 120 - 150,
+    // Inverse 9: 1000 / (9 + 1), Ratio 10: (10 + 3 * 10) / 2.
+    assert_eq!(
+        decode([0x39, 120, 9, 10, 0, 0, 0, 0]),
+        named(&[
+            ("Level", Value::Str("High".into())),
+            ("Parabola", Value::Float(25.0)),
+            ("Curve", Value::Float(90.0)),
+            ("Inverse", Value::Float(100.0)),
+            ("Ratio", Value::Float(20.0)),
+        ])
+    );
+    // Level 3 (Low), Parabola 15 (its function's scale is open at 15),
+    // Curve 99: 0.5 * 99, Inverse 0: 1000.
+    assert_eq!(
+        decode([0xF3, 99, 0, 0, 0, 0, 0, 0])[..4],
+        named(&[
+            ("Level", Value::Str("Low".into())),
+            ("Parabola", Value::Str("NotAvailable".into())),
+            ("Curve", Value::Float(49.5)),
+            ("Inverse", Value::Float(1000.0)),
+        ])
+    );
+    // Without names, a texttable-only raw value stays raw.
+    let raw_names = m
+        .decode(
+            &[0xF3, 99, 0, 0, 0, 0, 0, 0],
+            &DecodeOptions {
+                decode_choices: false,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(raw_names[0].1, Value::Int(3));
+    assert_eq!(raw_names[1].1, Value::Int(15));
+
+    let values = named(&[
+        ("Level", Value::Str("High".into())),
+        ("Parabola", Value::Str("NotAvailable".into())),
+        ("Curve", Value::Float(90.0)),
+        ("Inverse", Value::Float(100.0)),
+        ("Ratio", Value::Float(20.0)),
+    ]);
+    let opts = EncodeOptions::default();
+    // Names encode to their lower limits; numbers invert within a scale.
+    assert_eq!(
+        m.encode(&values, &opts).unwrap(),
+        [0xF4, 120, 9, 10, 0, 0, 0, 0]
+    );
+    for (curve, raw) in [(0.0, 0u8), (49.5, 99), (52.0, 101), (360.0, 255)] {
+        let mut v = values.clone();
+        v[2].1 = Value::Float(curve);
+        assert_eq!(m.encode(&v, &opts).unwrap()[1], raw, "{curve}");
+    }
+    for (inverse, raw) in [(1000.0, 0u8), (500.0, 1), (101.0, 9), (1000.0 / 256.0, 255)] {
+        let mut v = values.clone();
+        v[3].1 = Value::Float(inverse);
+        assert_eq!(m.encode(&v, &opts).unwrap()[2], raw, "{inverse}");
+    }
+    let err = |i: usize, value: Value| {
+        let mut v = values.clone();
+        v[i].1 = value;
+        m.encode(&v, &opts).unwrap_err().to_string()
+    };
+    // Physical constraints still apply; a value no scale reaches fails.
+    assert!(err(2, Value::Float(361.0)).contains("maximum"));
+    let e = err(3, Value::Float(2000.0));
+    assert!(e.contains("signal Inverse") && e.contains("outside"), "{e}");
+    // (x - 8)^2 is not monotonic over its scale: it decodes but cannot encode.
+    let e = err(1, Value::Float(25.0));
+    assert!(
+        e.contains("signal Parabola") && e.contains("monotonic"),
+        "{e}"
+    );
+    assert!(err(0, Value::Str("Medium".into())).contains("Low, High, Error"));
 }

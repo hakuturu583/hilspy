@@ -184,3 +184,38 @@ def test_sign_magnitude_and_ones_complement(mem: str) -> None:
     assert decoded.fields == edges
     with hilspy.open(mem, FEATURES) as tx, pytest.raises(hilspy.Error, match="sign-magnitude"):
         tx.send("Encodings", {**values, "SmSmall": -128})
+
+
+def test_texttable_ranges_piecewise_and_rational_codings(mem: str) -> None:
+    values = {
+        "Level": "High",
+        "Parabola": "NotAvailable",
+        "Curve": 90.0,
+        "Inverse": 100.0,
+        "Ratio": 20.0,
+    }
+    data, decoded = round_trip(mem, "Codings", values)
+    # Level High -> 4 (its lower limit), NotAvailable -> 15; Curve 2x - 150 = 90
+    # at 120; Inverse 1000 / (x + 1) = 100 at 9; Ratio (10 + 3x) / 2 = 20 at 10.
+    assert data == bytes([0xF4, 120, 9, 10, 0, 0, 0, 0])
+    assert decoded.fields == values
+    with (
+        hilspy.open(mem, FEATURES) as tx,
+        hilspy.open(mem) as raw,
+        hilspy.open(mem, FEATURES) as rx,
+    ):
+        # Any raw value of a texttable range decodes to its name (Level 14).
+        raw.send(Message(data=bytes([0x3E, 99, 0, 0, 0, 0, 0, 0]), id=0x401))
+        m = rx.recv(timeout=1)
+        assert m is not None
+        assert m.fields == {
+            "Level": "High",
+            "Parabola": 25.0,
+            "Curve": 49.5,
+            "Inverse": 1000.0,
+            "Ratio": 5.0,
+        }
+        with pytest.raises(hilspy.Error, match="signal Parabola.*monotonic"):
+            tx.send("Codings", {**values, "Parabola": 36.0})
+        with pytest.raises(hilspy.Error, match="signal Inverse.*outside"):
+            tx.send("Codings", {**values, "Inverse": 2000.0})

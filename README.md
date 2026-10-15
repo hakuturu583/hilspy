@@ -103,13 +103,19 @@ with hilspy.open("can://can0", "fibex:network.xml", channel="Chassis") as ecu:
 * Coded types: unsigned, two's complement (`2C`, `SIGNED`), sign-magnitude
   (`SM`: the top bit is the sign) and one's complement (`1C`) integers of up
   to 64 bits, and IEEE floats; a negative zero decodes to 0.
-* Codings: `IDENTICAL`, `LINEAR` and `SCALE-LINEAR` (one set of coefficients,
-  plus texttable entries) give physical values, `TEXTTABLE` names work like
-  DBC value tables, and physical constraints are the range `strict` checks.
+* Codings: `IDENTICAL`, `LINEAR`, `SCALE-LINEAR`, `TEXTTABLE`, `RAT-FUNC`
+  and `SCALE-RAT-FUNC` compu methods; physical constraints are the range
+  `strict` checks. A texttable range decodes any raw value in it to its name
+  and encodes the name to its lower limit. Piecewise scales decode by the
+  scale whose raw interval holds the value and encode by inverting the first
+  scale that reaches the physical value; a rational function encodes where it
+  is linear or strictly monotonic over its scale (otherwise sending the signal
+  fails, naming it). A single linear function with exact texttable entries is
+  a plain DBC factor, offset and value table.
 * `strict`, `scaling`, `decode_choices` and `e2e` work as for `dbc:`; frames
   the channel lacks decode as nameless messages. Multiplexed PDUs, high-low
-  byte order PDU instances, texttable ranges and piecewise or non-linear
-  scaling are rejected when the file is opened.
+  byte order PDU instances and `FORMULA` compu methods are rejected when the
+  file is opened.
 
 ### SOME/IP services
 

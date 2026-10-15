@@ -2,6 +2,7 @@
 //! crate, and the encoding of physical signal values to payloads and back.
 
 pub(crate) mod bits;
+pub mod coding;
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -10,6 +11,8 @@ use can_dbc::{
     AttributeDefinition, AttributeValue, AttributeValueType, Dbc, MessageId, MultiplexIndicator,
     NumericValue, SignalExtendedValueType, ValueType,
 };
+
+pub use coding::{Coding, Conversion, Scale};
 
 use crate::error::{Error, Result};
 
@@ -93,6 +96,10 @@ pub struct Signal {
     /// Other signals of the message are multiplexed by this one.
     pub is_multiplexor: bool,
     pub multiplexing: Option<Multiplexing>,
+    /// A conversion that `factor`, `offset` and `choices` cannot express
+    /// (FIBEX compu methods); when set it replaces them. `None` for DBC
+    /// signals.
+    pub coding: Option<Coding>,
 }
 
 impl Signal {
@@ -108,6 +115,18 @@ impl Signal {
             (-(1i128 << (self.size - 1)), (1i128 << (self.size - 1)) - 1)
         } else {
             (0, (1i128 << self.size) - 1)
+        }
+    }
+
+    /// The smallest and largest raw values.
+    pub fn raw_range(&self) -> (f64, f64) {
+        match self.kind {
+            ValueKind::Float32 => (f64::from(f32::MIN), f64::from(f32::MAX)),
+            ValueKind::Float64 => (f64::MIN, f64::MAX),
+            _ => {
+                let (lo, hi) = self.raw_bounds();
+                (lo as f64, hi as f64)
+            }
         }
     }
 
@@ -159,6 +178,9 @@ impl Signal {
 
     /// Physical value of a raw value.
     fn decode_raw(&self, raw: RawValue, options: &DecodeOptions) -> Value {
+        if let Some(coding) = &self.coding {
+            return decode_coded(coding, raw, options);
+        }
         match raw {
             RawValue::Float(r) => Value::Float(if options.scaling {
                 r * self.factor + self.offset
@@ -186,6 +208,9 @@ impl Signal {
 
     /// Bits of the raw value for a physical value.
     fn encode_value(&self, value: &Value, options: &EncodeOptions) -> Result<u64> {
+        if let Some(coding) = &self.coding {
+            return self.encode_coded(coding, value, options);
+        }
         let raw = match value {
             Value::Str(name) => match self.choice_raw(name) {
                 Some(raw) => RawValue::Int(i128::from(raw)),
@@ -242,6 +267,50 @@ impl Signal {
             }
         };
         self.raw_to_bits(raw)
+    }
+
+    /// [`Signal::encode_value`] through the signal's coding.
+    fn encode_coded(&self, coding: &Coding, value: &Value, options: &EncodeOptions) -> Result<u64> {
+        let raw = match value {
+            Value::Str(name) => coding.raw_of_name(name).ok_or_else(|| {
+                Error::encode(format!(
+                    "{:?} is not a value of signal {} (choices: {})",
+                    name,
+                    self.name,
+                    coding.names().collect::<Vec<_>>().join(", ")
+                ))
+            })?,
+            _ => {
+                let v = value.as_f64().unwrap_or_default();
+                if !v.is_finite() && self.kind.is_integer() {
+                    return Err(Error::encode(format!(
+                        "signal {} cannot hold {v}",
+                        self.name
+                    )));
+                }
+                if !options.scaling {
+                    if options.strict {
+                        if let Some(physical) = coding.physical(v) {
+                            self.check_range(physical)?;
+                        }
+                    }
+                    match value {
+                        Value::Int(i) if self.kind.is_integer() => {
+                            return self.raw_to_bits(RawValue::Int(i128::from(*i)))
+                        }
+                        _ => v,
+                    }
+                } else {
+                    if options.strict {
+                        self.check_range(v)?;
+                    }
+                    coding
+                        .raw_of_physical(v)
+                        .map_err(|e| Error::encode(format!("signal {}: {e}", self.name)))?
+                }
+            }
+        };
+        self.raw_to_bits(RawValue::Float(raw))
     }
 
     fn raw_to_bits(&self, raw: RawValue) -> Result<u64> {
@@ -309,6 +378,25 @@ impl Signal {
 enum RawValue {
     Int(i128),
     Float(f64),
+}
+
+/// [`Signal::decode_raw`] through a coding: a name, else the physical value
+/// of the first rational scale holding the raw value, else the raw value.
+fn decode_coded(coding: &Coding, raw: RawValue, options: &DecodeOptions) -> Value {
+    let r = match raw {
+        RawValue::Int(i) => i as f64,
+        RawValue::Float(f) => f,
+    };
+    if options.decode_choices {
+        if let Some(name) = coding.name(r) {
+            return Value::Str(name.to_owned());
+        }
+    }
+    match (options.scaling.then(|| coding.physical(r)).flatten(), raw) {
+        (Some(physical), _) => Value::Float(physical),
+        (None, RawValue::Int(i)) => int_or_float(i),
+        (None, RawValue::Float(f)) => Value::Float(f),
+    }
 }
 
 fn round_raw(r: f64) -> i128 {
@@ -775,6 +863,7 @@ fn convert_signal(dbc: &Dbc, m: &can_dbc::Message, s: &can_dbc::Signal) -> Resul
                 | MultiplexIndicator::MultiplexorAndMultiplexedSignal(_)
         ),
         multiplexing: None,
+        coding: None,
     })
 }
 

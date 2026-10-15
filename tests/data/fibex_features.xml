@@ -29,6 +29,10 @@
             <fx:IDENTIFIER><fx:IDENTIFIER-VALUE>1024</fx:IDENTIFIER-VALUE></fx:IDENTIFIER>
             <fx:FRAME-REF ID-REF="F_Encodings"/>
           </fx:FRAME-TRIGGERING>
+          <fx:FRAME-TRIGGERING ID="FT_Codings" xsi:type="can:FRAME-TRIGGERING-TYPE">
+            <fx:IDENTIFIER><fx:IDENTIFIER-VALUE>1025</fx:IDENTIFIER-VALUE></fx:IDENTIFIER>
+            <fx:FRAME-REF ID-REF="F_Codings"/>
+          </fx:FRAME-TRIGGERING>
           <!-- triggerings -->
         </fx:FRAME-TRIGGERINGS>
       </fx:CHANNEL>
@@ -61,6 +65,38 @@
           </fx:SIGNAL-INSTANCE>
         </fx:SIGNAL-INSTANCES>
       </fx:PDU>
+      <fx:PDU ID="P_Codings">
+        <ho:SHORT-NAME>CodingsPdu</ho:SHORT-NAME>
+        <fx:BYTE-LENGTH>8</fx:BYTE-LENGTH>
+        <fx:PDU-TYPE>APPLICATION</fx:PDU-TYPE>
+        <fx:SIGNAL-INSTANCES>
+          <fx:SIGNAL-INSTANCE ID="SI_Level">
+            <fx:BIT-POSITION>0</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+            <fx:SIGNAL-REF ID-REF="S_Level"/>
+          </fx:SIGNAL-INSTANCE>
+          <fx:SIGNAL-INSTANCE ID="SI_Parabola">
+            <fx:BIT-POSITION>4</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+            <fx:SIGNAL-REF ID-REF="S_Parabola"/>
+          </fx:SIGNAL-INSTANCE>
+          <fx:SIGNAL-INSTANCE ID="SI_Curve">
+            <fx:BIT-POSITION>8</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+            <fx:SIGNAL-REF ID-REF="S_Curve"/>
+          </fx:SIGNAL-INSTANCE>
+          <fx:SIGNAL-INSTANCE ID="SI_Inverse">
+            <fx:BIT-POSITION>16</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+            <fx:SIGNAL-REF ID-REF="S_Inverse"/>
+          </fx:SIGNAL-INSTANCE>
+          <fx:SIGNAL-INSTANCE ID="SI_Ratio">
+            <fx:BIT-POSITION>24</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+            <fx:SIGNAL-REF ID-REF="S_Ratio"/>
+          </fx:SIGNAL-INSTANCE>
+        </fx:SIGNAL-INSTANCES>
+      </fx:PDU>
       <!-- pdus -->
     </fx:PDUS>
     <fx:FRAMES>
@@ -71,6 +107,18 @@
         <fx:PDU-INSTANCES>
           <fx:PDU-INSTANCE ID="F_Encodings_0">
             <fx:PDU-REF ID-REF="P_Encodings"/>
+            <fx:BIT-POSITION>0</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+          </fx:PDU-INSTANCE>
+        </fx:PDU-INSTANCES>
+      </fx:FRAME>
+      <fx:FRAME ID="F_Codings">
+        <ho:SHORT-NAME>Codings</ho:SHORT-NAME>
+        <fx:BYTE-LENGTH>8</fx:BYTE-LENGTH>
+        <fx:FRAME-TYPE>APPLICATION</fx:FRAME-TYPE>
+        <fx:PDU-INSTANCES>
+          <fx:PDU-INSTANCE ID="F_Codings_0">
+            <fx:PDU-REF ID-REF="P_Codings"/>
             <fx:BIT-POSITION>0</fx:BIT-POSITION>
             <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
           </fx:PDU-INSTANCE>
@@ -94,6 +142,26 @@
       <fx:SIGNAL ID="S_OcWide">
         <ho:SHORT-NAME>OcWide</ho:SHORT-NAME>
         <fx:CODING-REF ID-REF="C_Oc16"/>
+      </fx:SIGNAL>
+      <fx:SIGNAL ID="S_Level">
+        <ho:SHORT-NAME>Level</ho:SHORT-NAME>
+        <fx:CODING-REF ID-REF="C_Level"/>
+      </fx:SIGNAL>
+      <fx:SIGNAL ID="S_Parabola">
+        <ho:SHORT-NAME>Parabola</ho:SHORT-NAME>
+        <fx:CODING-REF ID-REF="C_Parabola"/>
+      </fx:SIGNAL>
+      <fx:SIGNAL ID="S_Curve">
+        <ho:SHORT-NAME>Curve</ho:SHORT-NAME>
+        <fx:CODING-REF ID-REF="C_Curve"/>
+      </fx:SIGNAL>
+      <fx:SIGNAL ID="S_Inverse">
+        <ho:SHORT-NAME>Inverse</ho:SHORT-NAME>
+        <fx:CODING-REF ID-REF="C_Inverse"/>
+      </fx:SIGNAL>
+      <fx:SIGNAL ID="S_Ratio">
+        <ho:SHORT-NAME>Ratio</ho:SHORT-NAME>
+        <fx:CODING-REF ID-REF="C_Ratio"/>
       </fx:SIGNAL>
       <!-- signals -->
     </fx:SIGNALS>
@@ -155,6 +223,150 @@
           <ho:COMPU-METHOD>
             <ho:SHORT-NAME>Oc16</ho:SHORT-NAME>
             <ho:CATEGORY>IDENTICAL</ho:CATEGORY>
+          </ho:COMPU-METHOD>
+        </ho:COMPU-METHODS>
+      </fx:CODING>
+      <fx:CODING ID="C_Level">
+        <ho:SHORT-NAME>Level</ho:SHORT-NAME>
+        <ho:CODED-TYPE ho:BASE-DATA-TYPE="A_UINT8" CATEGORY="STANDARD-LENGTH-TYPE" ENCODING="UNSIGNED">
+          <ho:BIT-LENGTH>4</ho:BIT-LENGTH>
+        </ho:CODED-TYPE>
+        <ho:COMPU-METHODS>
+          <ho:COMPU-METHOD>
+            <ho:SHORT-NAME>Level</ho:SHORT-NAME>
+            <ho:CATEGORY>TEXTTABLE</ho:CATEGORY>
+            <ho:COMPU-INTERNAL-TO-PHYS>
+              <ho:COMPU-SCALES>
+                <ho:COMPU-SCALE>
+                  <ho:LOWER-LIMIT>0</ho:LOWER-LIMIT>
+                  <ho:UPPER-LIMIT>3</ho:UPPER-LIMIT>
+                  <ho:COMPU-CONST><ho:VT>Low</ho:VT></ho:COMPU-CONST>
+                </ho:COMPU-SCALE>
+                <ho:COMPU-SCALE>
+                  <ho:LOWER-LIMIT>4</ho:LOWER-LIMIT>
+                  <ho:UPPER-LIMIT>14</ho:UPPER-LIMIT>
+                  <ho:COMPU-CONST><ho:VT>High</ho:VT></ho:COMPU-CONST>
+                </ho:COMPU-SCALE>
+                <ho:COMPU-SCALE>
+                  <ho:LOWER-LIMIT>15</ho:LOWER-LIMIT>
+                  <ho:UPPER-LIMIT>15</ho:UPPER-LIMIT>
+                  <ho:COMPU-CONST><ho:VT>Error</ho:VT></ho:COMPU-CONST>
+                </ho:COMPU-SCALE>
+              </ho:COMPU-SCALES>
+            </ho:COMPU-INTERNAL-TO-PHYS>
+          </ho:COMPU-METHOD>
+        </ho:COMPU-METHODS>
+      </fx:CODING>
+      <fx:CODING ID="C_Curve">
+        <ho:SHORT-NAME>Curve</ho:SHORT-NAME>
+        <ho:CODED-TYPE ho:BASE-DATA-TYPE="A_UINT8" CATEGORY="STANDARD-LENGTH-TYPE" ENCODING="UNSIGNED">
+          <ho:BIT-LENGTH>8</ho:BIT-LENGTH>
+        </ho:CODED-TYPE>
+        <ho:COMPU-METHODS>
+          <ho:COMPU-METHOD>
+            <ho:SHORT-NAME>Curve</ho:SHORT-NAME>
+            <ho:CATEGORY>SCALE-LINEAR</ho:CATEGORY>
+            <ho:PHYS-CONSTRS>
+              <ho:SCALE-CONSTR VALIDITY="VALID">
+                <ho:LOWER-LIMIT>0</ho:LOWER-LIMIT>
+                <ho:UPPER-LIMIT>360</ho:UPPER-LIMIT>
+              </ho:SCALE-CONSTR>
+            </ho:PHYS-CONSTRS>
+            <ho:COMPU-INTERNAL-TO-PHYS>
+              <ho:COMPU-SCALES>
+                <ho:COMPU-SCALE>
+                  <ho:LOWER-LIMIT>0</ho:LOWER-LIMIT>
+                  <ho:UPPER-LIMIT>99</ho:UPPER-LIMIT>
+                  <ho:COMPU-RATIONAL-COEFFS>
+                    <ho:COMPU-NUMERATOR><ho:V>0</ho:V><ho:V>0.5</ho:V></ho:COMPU-NUMERATOR>
+                    <ho:COMPU-DENOMINATOR><ho:V>1</ho:V></ho:COMPU-DENOMINATOR>
+                  </ho:COMPU-RATIONAL-COEFFS>
+                </ho:COMPU-SCALE>
+                <ho:COMPU-SCALE>
+                  <ho:LOWER-LIMIT>100</ho:LOWER-LIMIT>
+                  <ho:UPPER-LIMIT>255</ho:UPPER-LIMIT>
+                  <ho:COMPU-RATIONAL-COEFFS>
+                    <ho:COMPU-NUMERATOR><ho:V>-150</ho:V><ho:V>2</ho:V></ho:COMPU-NUMERATOR>
+                    <ho:COMPU-DENOMINATOR><ho:V>1</ho:V></ho:COMPU-DENOMINATOR>
+                  </ho:COMPU-RATIONAL-COEFFS>
+                </ho:COMPU-SCALE>
+              </ho:COMPU-SCALES>
+            </ho:COMPU-INTERNAL-TO-PHYS>
+          </ho:COMPU-METHOD>
+        </ho:COMPU-METHODS>
+      </fx:CODING>
+      <fx:CODING ID="C_Inverse">
+        <ho:SHORT-NAME>Inverse</ho:SHORT-NAME>
+        <ho:CODED-TYPE ho:BASE-DATA-TYPE="A_UINT8" CATEGORY="STANDARD-LENGTH-TYPE" ENCODING="UNSIGNED">
+          <ho:BIT-LENGTH>8</ho:BIT-LENGTH>
+        </ho:CODED-TYPE>
+        <ho:COMPU-METHODS>
+          <ho:COMPU-METHOD>
+            <ho:SHORT-NAME>Inverse</ho:SHORT-NAME>
+            <ho:CATEGORY>RAT-FUNC</ho:CATEGORY>
+            <ho:COMPU-INTERNAL-TO-PHYS>
+              <ho:COMPU-SCALES>
+                <ho:COMPU-SCALE>
+                  <ho:LOWER-LIMIT>0</ho:LOWER-LIMIT>
+                  <ho:UPPER-LIMIT>255</ho:UPPER-LIMIT>
+                  <ho:COMPU-RATIONAL-COEFFS>
+                    <ho:COMPU-NUMERATOR><ho:V>1000</ho:V></ho:COMPU-NUMERATOR>
+                    <ho:COMPU-DENOMINATOR><ho:V>1</ho:V><ho:V>1</ho:V></ho:COMPU-DENOMINATOR>
+                  </ho:COMPU-RATIONAL-COEFFS>
+                </ho:COMPU-SCALE>
+              </ho:COMPU-SCALES>
+            </ho:COMPU-INTERNAL-TO-PHYS>
+          </ho:COMPU-METHOD>
+        </ho:COMPU-METHODS>
+      </fx:CODING>
+      <fx:CODING ID="C_Ratio">
+        <ho:SHORT-NAME>Ratio</ho:SHORT-NAME>
+        <ho:CODED-TYPE ho:BASE-DATA-TYPE="A_UINT8" CATEGORY="STANDARD-LENGTH-TYPE" ENCODING="UNSIGNED">
+          <ho:BIT-LENGTH>8</ho:BIT-LENGTH>
+        </ho:CODED-TYPE>
+        <ho:COMPU-METHODS>
+          <ho:COMPU-METHOD>
+            <ho:SHORT-NAME>Ratio</ho:SHORT-NAME>
+            <ho:CATEGORY>RAT-FUNC</ho:CATEGORY>
+            <ho:COMPU-INTERNAL-TO-PHYS>
+              <ho:COMPU-SCALES>
+                <ho:COMPU-SCALE>
+                  <ho:COMPU-RATIONAL-COEFFS>
+                    <ho:COMPU-NUMERATOR><ho:V>10</ho:V><ho:V>3</ho:V></ho:COMPU-NUMERATOR>
+                    <ho:COMPU-DENOMINATOR><ho:V>2</ho:V></ho:COMPU-DENOMINATOR>
+                  </ho:COMPU-RATIONAL-COEFFS>
+                </ho:COMPU-SCALE>
+              </ho:COMPU-SCALES>
+            </ho:COMPU-INTERNAL-TO-PHYS>
+          </ho:COMPU-METHOD>
+        </ho:COMPU-METHODS>
+      </fx:CODING>
+      <fx:CODING ID="C_Parabola">
+        <ho:SHORT-NAME>Parabola</ho:SHORT-NAME>
+        <ho:CODED-TYPE ho:BASE-DATA-TYPE="A_UINT8" CATEGORY="STANDARD-LENGTH-TYPE" ENCODING="UNSIGNED">
+          <ho:BIT-LENGTH>4</ho:BIT-LENGTH>
+        </ho:CODED-TYPE>
+        <ho:COMPU-METHODS>
+          <ho:COMPU-METHOD>
+            <ho:SHORT-NAME>Parabola</ho:SHORT-NAME>
+            <ho:CATEGORY>SCALE-RAT-FUNC</ho:CATEGORY>
+            <ho:COMPU-INTERNAL-TO-PHYS>
+              <ho:COMPU-SCALES>
+                <ho:COMPU-SCALE>
+                  <ho:LOWER-LIMIT>0</ho:LOWER-LIMIT>
+                  <ho:UPPER-LIMIT INTERVAL-TYPE="OPEN">15</ho:UPPER-LIMIT>
+                  <ho:COMPU-RATIONAL-COEFFS>
+                    <ho:COMPU-NUMERATOR><ho:V>64</ho:V><ho:V>-16</ho:V><ho:V>1</ho:V></ho:COMPU-NUMERATOR>
+                    <ho:COMPU-DENOMINATOR><ho:V>1</ho:V></ho:COMPU-DENOMINATOR>
+                  </ho:COMPU-RATIONAL-COEFFS>
+                </ho:COMPU-SCALE>
+                <ho:COMPU-SCALE>
+                  <ho:LOWER-LIMIT>15</ho:LOWER-LIMIT>
+                  <ho:UPPER-LIMIT>15</ho:UPPER-LIMIT>
+                  <ho:COMPU-CONST><ho:VT>NotAvailable</ho:VT></ho:COMPU-CONST>
+                </ho:COMPU-SCALE>
+              </ho:COMPU-SCALES>
+            </ho:COMPU-INTERNAL-TO-PHYS>
           </ho:COMPU-METHOD>
         </ho:COMPU-METHODS>
       </fx:CODING>

@@ -131,11 +131,18 @@ deadlocking. A Python exception raised in a plugin travels through the core as
 * `fibex`: `afibex` parses channels, frames, PDUs, signals and coded types;
   `roxmltree` reads, by element ID, what it leaves out (frame triggerings
   with identifier, extended addressing and CAN FD; compu methods with
-  rational coefficients, `SCALE-LINEAR`, texttable limits, physical
+  scale limits, rational coefficients and texttable names, physical
   constraints and units). `fibex::load` turns one channel into a `dbc`
   `Database` (PDU offsets added to signal start bits, clashing names
   qualified as `PDU.Signal`), and the codec is the `dbc` codec over it, so
-  the bit layout, options and E2E are shared. `tests/data/network.dbc`
+  the bit layout, options and E2E are shared. Compu methods that one factor
+  and offset plus exact value table entries cannot express become a
+  per-signal `dbc::Coding` (texttable ranges, piecewise linear and rational
+  scales; `dbc/coding.rs`) that `Signal` encoding and decoding consult
+  instead; DBC signals have none, so their fast path is unchanged. Rational
+  scales encode exactly when linear, else by bisection over a scale on which
+  the function is strictly monotonic (checked at every integer raw value up
+  to 2^16 of them, else at 2^16 evenly spaced points). `tests/data/network.dbc`
   describes the fixture's Body channel; the tests require identical models
   and payloads.
 * `someip:FILE`: `afibex` parses the FIBEX 4 services (methods, events,
