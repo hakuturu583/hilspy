@@ -62,10 +62,36 @@ The whole public API:
 | `Channel.send(message)` / `send(name, fields)` | encode and send |
 | `Channel.recv(timeout=None) -> Message \| None` | next message (iterate the channel for all) |
 | `Channel.every(period, message_or_name, fields=None, *, duration=None) -> Periodic` | cyclic send from a Rust thread; `update()`, `stop()`, `period`, `sent_count` |
-| `Channel.close()` | also via `with` |
+| `Channel.close()` | also via `with` / `async with` |
+| `await Channel.asend(...)`, `await Channel.arecv(timeout=None)`, `async for msg in channel` | asyncio |
+| `hilspy.merge(*channels)` | `(channel, message)` from several buses as they arrive (`for` / `async for`) |
 | `hilspy.Message(name=None, fields=None, *, data=None, id=None, extended=None, fd=False)` | `.name`, `.fields`, `msg["field"]`, `.data`, `.id`, `.timestamp` |
 | `hilspy.register_transport(scheme, factory)` / `register_codec(name, factory)` | plugins |
 | `hilspy.Error` | bad URL/codec/option, encode/decode failure, closed channel |
+
+### asyncio and several buses at once
+
+Every channel also has `await ch.asend(...)`, `await ch.arecv(timeout)`,
+`async for msg in ch` and `async with`. `hilspy.merge(*channels)` receives from
+many buses at once, yielding `(channel, message)` as messages arrive, with
+`for` or `async for`:
+
+```python
+async with (
+    hilspy.open("can://can0", "dbc:powertrain.dbc") as can0,
+    hilspy.open("can://can1", "dbc:chassis.dbc") as can1,
+    hilspy.open("tcp://192.168.3.1:28784", "sbf") as gnss,
+    hilspy.merge(can0, can1, gnss) as buses,
+):
+    async for bus, msg in buses:
+        if bus is gnss and msg.name == "PVTGeodetic":
+            await can1.asend("GnssPosition", {"Lat": msg["latitude"], "Lon": msg["longitude"]})
+```
+
+Each bus is received on its own Rust thread, so awaiting never blocks the
+event loop and a quiet or slow bus does not delay the others. A channel has
+one consumer at a time: once received with `arecv`/`async for`/`merge`, its
+synchronous `recv` refuses.
 
 A message with a name goes through the codec; a nameless one
 (`Message(data=b"...", id=0x123)`) is sent as is. Messages the codec does not
@@ -126,6 +152,7 @@ uv run python examples/virtual_ecu.py --url can://vcan0
 uv run python examples/gnss_simulator.py "tcp://127.0.0.1:28784?listen"
 uv run python examples/gnss_simulator.py "file://sim.sbf?write" --seconds 5
 uv run python examples/sbf_dump.py file://sim.sbf
+uv run python examples/multi_bus.py                                # asyncio: CAN + GNSS at once
 ```
 
 ## Development

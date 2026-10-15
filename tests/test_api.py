@@ -15,6 +15,7 @@ def test_public_surface_is_minimal() -> None:
         "Error",
         "Message",
         "Periodic",
+        "merge",
         "open",
         "register_codec",
         "register_transport",

@@ -112,6 +112,61 @@ impl Channel {
         Periodic::start(Arc::clone(&self.inner), period, message, duration)
     }
 
+    /// Receive on a background thread, handing every message (or receive
+    /// error) to `deliver` as it arrives, until `deliver` returns `false`,
+    /// the subscription is stopped or the channel closes (then `deliver` gets
+    /// `Err(Error::Closed)` once). One thread per subscribed channel lets a
+    /// program serve many buses at once without polling them in turn.
+    ///
+    /// The subscription is the channel's only consumer meanwhile: `recv`
+    /// from elsewhere would take messages from it.
+    pub fn subscribe<F>(&self, mut deliver: F) -> Result<Subscription>
+    where
+        F: FnMut(Result<Message>) -> bool + Send + 'static,
+    {
+        if self.is_closed() {
+            return Err(Error::Closed);
+        }
+        let stop = Arc::new(AtomicBool::new(false));
+        let channel = self.clone();
+        let flag = Arc::clone(&stop);
+        let thread = std::thread::Builder::new()
+            .name("hilspy-subscription".into())
+            .spawn(move || {
+                let mut backoff = Duration::ZERO;
+                while !flag.load(Ordering::Acquire) {
+                    match channel.recv(Some(SUBSCRIPTION_POLL)) {
+                        Ok(Some(m)) => {
+                            backoff = Duration::ZERO;
+                            if !deliver(Ok(m)) {
+                                break;
+                            }
+                        }
+                        Ok(None) => backoff = Duration::ZERO,
+                        Err(Error::Closed) => {
+                            deliver(Err(Error::Closed));
+                            break;
+                        }
+                        // A packet that does not decode does not end the
+                        // stream; an error that repeats at once (a failing
+                        // transport) is retried ever more slowly, so it
+                        // neither spins nor floods the consumer.
+                        Err(e) => {
+                            if !deliver(Err(e)) {
+                                break;
+                            }
+                            sleep_unless_stopped(&flag, backoff);
+                            backoff = (backoff * 2).clamp(ERROR_BACKOFF_MIN, ERROR_BACKOFF_MAX);
+                        }
+                    }
+                }
+            })?;
+        Ok(Subscription {
+            stop,
+            thread: Mutex::new(Some(thread)),
+        })
+    }
+
     pub fn is_closed(&self) -> bool {
         self.inner.closed.load(Ordering::Acquire)
     }
@@ -122,6 +177,59 @@ impl Channel {
         if !self.inner.closed.swap(true, Ordering::AcqRel) {
             self.inner.transport.close();
         }
+    }
+}
+
+/// How often a subscription thread checks whether it was stopped.
+const SUBSCRIPTION_POLL: Duration = Duration::from_millis(50);
+/// Delay before retrying after consecutive receive errors (doubling from the
+/// first to the second value; the first error is retried at once).
+const ERROR_BACKOFF_MIN: Duration = Duration::from_millis(10);
+const ERROR_BACKOFF_MAX: Duration = Duration::from_secs(1);
+
+/// Sleep `total`, waking early once `stop` is set.
+fn sleep_unless_stopped(stop: &AtomicBool, total: Duration) {
+    let end = Instant::now() + total;
+    while !stop.load(Ordering::Acquire) {
+        let now = Instant::now();
+        if now >= end {
+            break;
+        }
+        std::thread::sleep((end - now).min(SUBSCRIPTION_POLL));
+    }
+}
+
+/// A running [`Channel::subscribe`]; dropping it stops it.
+pub struct Subscription {
+    stop: Arc<AtomicBool>,
+    thread: Mutex<Option<JoinHandle<()>>>,
+}
+
+impl Subscription {
+    /// Stop delivering and wait for the receive thread (idempotent; at most
+    /// one poll interval, plus a delivery in progress).
+    pub fn stop(&self) {
+        self.stop.store(true, Ordering::Release);
+        let thread = self.thread.lock().unwrap().take();
+        if let Some(t) = thread {
+            if t.thread().id() != std::thread::current().id() {
+                let _ = t.join();
+            }
+        }
+    }
+
+    pub fn is_running(&self) -> bool {
+        self.thread
+            .lock()
+            .unwrap()
+            .as_ref()
+            .is_some_and(|t| !t.is_finished())
+    }
+}
+
+impl Drop for Subscription {
+    fn drop(&mut self) {
+        self.stop();
     }
 }
 
@@ -381,6 +489,81 @@ mod tests {
         assert!(!task.is_running());
         let sent = task.sent_count();
         assert!((1..=7).contains(&sent), "sent {sent}");
+    }
+
+    #[test]
+    fn subscriptions_serve_several_buses_at_once() {
+        use std::sync::mpsc;
+        let (tx, rx) = mpsc::channel::<(usize, Result<Message>)>();
+        let buses: Vec<Channel> = (0..3)
+            .map(|i| Channel::open(&format!("mem://t-sub-{i}"), "raw", Options::new()).unwrap())
+            .collect();
+        let subs: Vec<Subscription> = buses
+            .iter()
+            .enumerate()
+            .map(|(i, bus)| {
+                let tx = tx.clone();
+                bus.subscribe(move |m| tx.send((i, m)).is_ok()).unwrap()
+            })
+            .collect();
+        for i in (0..3).rev() {
+            let sender = Channel::open(&format!("mem://t-sub-{i}"), "raw", Options::new()).unwrap();
+            sender
+                .send(&Message::raw(Packet::bytes(vec![i as u8])))
+                .unwrap();
+        }
+        let mut got: Vec<(usize, Vec<u8>)> = (0..3)
+            .map(|_| {
+                let (i, m) = rx.recv_timeout(Duration::from_secs(5)).unwrap();
+                (i, m.unwrap().packet.unwrap().data)
+            })
+            .collect();
+        got.sort();
+        assert_eq!(got, vec![(0, vec![0]), (1, vec![1]), (2, vec![2])]);
+        // Closing a bus ends its subscription with one Closed.
+        buses[1].close();
+        let (i, m) = rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert!(i == 1 && matches!(m, Err(Error::Closed)));
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while subs[1].is_running() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(!subs[1].is_running());
+        subs[0].stop();
+        assert!(!subs[0].is_running());
+        assert!(buses[1].subscribe(|_| true).is_err());
+    }
+
+    #[test]
+    fn persistent_receive_errors_back_off() {
+        struct Failing;
+        impl Transport for Failing {
+            fn send(&self, _: &Packet) -> Result<()> {
+                Ok(())
+            }
+            fn recv(&self, _: Option<Duration>) -> Result<Option<Packet>> {
+                Err(Error::Decode("broken".into()))
+            }
+        }
+        let ch = Channel::new(
+            Arc::new(Failing),
+            codec::open("raw", Options::new()).unwrap(),
+        );
+        let errors = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let count = Arc::clone(&errors);
+        let sub = ch
+            .subscribe(move |m| {
+                assert!(m.is_err());
+                count.fetch_add(1, Ordering::Relaxed);
+                true
+            })
+            .unwrap();
+        std::thread::sleep(Duration::from_millis(500));
+        sub.stop();
+        // 0 + 10 + 20 + 40 + 80 + 160 ms ... : about 7 errors in 500 ms,
+        // not millions.
+        let n = errors.load(Ordering::Relaxed);
+        assert!((2..=12).contains(&n), "{n} errors");
     }
 
     #[test]

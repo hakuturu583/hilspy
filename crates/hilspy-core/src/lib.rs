@@ -21,7 +21,7 @@ pub mod transport;
 pub mod url;
 pub mod value;
 
-pub use channel::{Channel, Periodic};
+pub use channel::{Channel, Periodic, Subscription};
 pub use codec::Codec;
 pub use error::{Error, Result};
 pub use message::{CanHeader, Message, Packet};
