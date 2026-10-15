@@ -211,14 +211,6 @@ fn unsupported_content_is_reported() {
             "BrakePressure of PDU BrakePdu: its bits are not one signal",
         ),
         (
-            "pdu-order",
-            text.replace(
-                "<fx:PDU-REF ID-REF=\"P_Speed\"/>\n            <fx:BIT-POSITION>0</fx:BIT-POSITION>\n            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>",
-                "<fx:PDU-REF ID-REF=\"P_Speed\"/>\n            <fx:BIT-POSITION>0</fx:BIT-POSITION>\n            <fx:IS-HIGH-LOW-BYTE-ORDER>true</fx:IS-HIGH-LOW-BYTE-ORDER>",
-            ),
-            "high-low byte order PDU instances",
-        ),
-        (
             "identifier",
             text.replace(">419369524<", ">0x40000000<"),
             "not a CAN identifier",
@@ -420,4 +412,70 @@ fn pdus_at_bit_offsets() {
     // A: bits 4..14; B: byte 2 bits 3..0; Tail: bits 27..35.
     assert_eq!(data, [0x50, 0x3A, 0x0C, 0xB8, 0x05, 0, 0, 0]);
     assert_eq!(m.decode(&data, &DecodeOptions::default()).unwrap(), values);
+}
+
+#[test]
+fn high_low_pdu_instances() {
+    let db = features();
+    let m = db.message_by_name("Swapped").unwrap();
+    let layout: Vec<_> = m
+        .signals
+        .iter()
+        .map(|s| (s.name.as_str(), s.start_bit, s.byte_order))
+        .collect();
+    // SwappedPdu (4 bytes, MSB at bit 15) fills bytes 1-4, its last byte
+    // first: Intel SwapA (PDU bits 0-11) becomes Motorola from frame bit 27,
+    // Motorola SwapB (PDU bytes 2-3) becomes Intel from frame bit 8.
+    // NarrowPdu (1 byte, MSB at bit 45) is bits 45..40 and 55..54.
+    assert_eq!(
+        layout,
+        [
+            ("SwapA", 27, ByteOrder::BigEndian),
+            ("SwapB", 8, ByteOrder::LittleEndian),
+            ("SwapC", 45, ByteOrder::BigEndian),
+        ]
+    );
+    let values = named(&[
+        ("SwapA", Value::Int(0xABC)),
+        ("SwapB", Value::Int(0x1234)),
+        ("SwapC", Value::Int(0x5A)),
+    ]);
+    let payload = m.encode(&values, &EncodeOptions::default()).unwrap();
+    // The PDU's bytes BC 0A 12 34 (A little endian, B big endian), reversed
+    // into frame bytes 1-4; 0x5A = 010110 in byte 5 bits 5..0, 10 in byte 6
+    // bits 7..6.
+    assert_eq!(payload, [0x00, 0x34, 0x12, 0x0A, 0xBC, 0x16, 0x80, 0x00]);
+    assert_eq!(
+        m.decode(&payload, &DecodeOptions::default()).unwrap(),
+        values
+    );
+
+    // Low-high instances are unchanged: the same PDU low-high at byte 1.
+    let text = std::fs::read_to_string(data("fibex_features.xml"))
+        .unwrap()
+        .replace(
+            "<fx:BIT-POSITION>15</fx:BIT-POSITION>\n            <fx:IS-HIGH-LOW-BYTE-ORDER>true",
+            "<fx:BIT-POSITION>8</fx:BIT-POSITION>\n            <fx:IS-HIGH-LOW-BYTE-ORDER>false",
+        );
+    let path = variant("low-high", &text);
+    let db = load(&path, None).unwrap();
+    std::fs::remove_file(path).unwrap();
+    let m = db.message_by_name("Swapped").unwrap();
+    let payload = m.encode(&values, &EncodeOptions::default()).unwrap();
+    assert_eq!(&payload[..5], [0x00, 0xBC, 0x0A, 0x12, 0x34]);
+
+    // Off a byte boundary, the Motorola signal across PDU bytes is split.
+    let text = std::fs::read_to_string(data("fibex_features.xml"))
+        .unwrap()
+        .replace(
+            "<fx:BIT-POSITION>15</fx:BIT-POSITION>\n            <fx:IS-HIGH-LOW-BYTE-ORDER>true",
+            "<fx:BIT-POSITION>13</fx:BIT-POSITION>\n            <fx:IS-HIGH-LOW-BYTE-ORDER>true",
+        );
+    let path = variant("high-low-split", &text);
+    let e = load_err(&path, None);
+    std::fs::remove_file(path).unwrap();
+    assert!(
+        e.contains("signal SwapB of PDU SwappedPdu: its bits are not one signal"),
+        "{e}"
+    );
 }

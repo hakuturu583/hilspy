@@ -100,9 +100,12 @@ with hilspy.open("can://can0", "fibex:network.xml", channel="Chassis") as ecu:
   becomes `PDU.Signal`. A signal's `BIT-POSITION` is read as a DBC start bit
   within its PDU: the least significant bit for Intel, the most significant
   for Motorola (`IS-HIGH-LOW-BYTE-ORDER`). A PDU instance's `BIT-POSITION`
-  is its least significant bit in the frame, at any bit; a signal whose bits
-  a PDU at a non-byte offset splits (a Motorola signal across PDU bytes) is
-  rejected, as is one past the end of the frame.
+  is the PDU's least significant bit in the frame, at any bit; a high-low
+  instance holds the PDU big-endian, its `BIT-POSITION` the PDU's most
+  significant bit as for a Motorola signal (so the PDU's last byte comes
+  first, and its Intel signals are Motorola in the frame and vice versa). A
+  signal that a PDU off a byte boundary splits (one crossing PDU bytes in
+  the other byte order) is rejected, as is one past the end of the frame.
 * Coded types: unsigned, two's complement (`2C`, `SIGNED`), sign-magnitude
   (`SM`: the top bit is the sign) and one's complement (`1C`) integers of up
   to 64 bits, and IEEE floats; a negative zero decodes to 0.
@@ -116,9 +119,8 @@ with hilspy.open("can://can0", "fibex:network.xml", channel="Chassis") as ecu:
   fails, naming it). A single linear function with exact texttable entries is
   a plain DBC factor, offset and value table.
 * `strict`, `scaling`, `decode_choices` and `e2e` work as for `dbc:`; frames
-  the channel lacks decode as nameless messages. Multiplexed PDUs, high-low
-  byte order PDU instances and `FORMULA` compu methods are rejected when the
-  file is opened.
+  the channel lacks decode as nameless messages. Multiplexed PDUs and
+  `FORMULA` compu methods are rejected when the file is opened.
 
 ### SOME/IP services
 

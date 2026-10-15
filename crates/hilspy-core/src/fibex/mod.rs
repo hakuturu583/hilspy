@@ -26,11 +26,16 @@
 //! significant bit for `IS-HIGH-LOW-BYTE-ORDER` false (Intel, the default),
 //! the most significant bit for true (Motorola), as `canmatrix` reads and
 //! writes FIBEX. A PDU instance's `BIT-POSITION` places the PDU's bits in the
-//! frame: PDU bit `b` (numbered like a start bit) is frame bit `offset + b`.
-//! A signal's frame bits are those of its PDU bits ([`Placement`]); they must
-//! again form one DBC signal, which they always do at a byte offset. At
-//! another offset, an Intel signal stays Intel, while a Motorola signal that
-//! crosses a byte of its PDU is split in the frame and rejected.
+//! frame: for a low-high instance (`IS-HIGH-LOW-BYTE-ORDER` false, the
+//! default) PDU bit `b` (numbered like a start bit) is frame bit
+//! `offset + b`; a high-low instance holds the PDU big-endian, as a Motorola
+//! field of the PDU's length whose most significant bit is at the position,
+//! so PDU bit `b` is value bit `b` of that field and the PDU's last byte comes
+//! first. A signal's frame bits are those of its PDU bits ([`Placement`]);
+//! they must again form one DBC signal, which they always do at a byte
+//! boundary (a high-low instance turns Intel signals into Motorola ones and
+//! back). Elsewhere, a signal that crosses a byte of its PDU against the
+//! instance's order is split in the frame and rejected.
 
 use std::collections::HashMap;
 use std::ops::Bound;
@@ -326,15 +331,6 @@ impl Network<'_, '_, '_> {
             if pdu.multiplexer.is_some() {
                 return Err(bad(format!(
                     "PDU {pdu_name}: multiplexed PDUs are not supported"
-                )));
-            }
-            // A high-low PDU instance would place the PDU's bytes in another
-            // order than its signals' positions describe; reject it rather
-            // than map signals to the wrong bytes.
-            if instance.is_high_low_byte_order == Some(true) {
-                return Err(bad(format!(
-                    "PDU {pdu_name} in frame {name}: high-low byte order PDU instances are \
-                     not supported"
                 )));
             }
             let offset = instance.bit_position.unwrap_or(0);

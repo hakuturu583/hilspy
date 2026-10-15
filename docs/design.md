@@ -134,7 +134,8 @@ deadlocking. A Python exception raised in a plugin travels through the core as
   scale limits, rational coefficients and texttable names, physical
   constraints and units). `fibex::load` turns one channel into a `dbc`
   `Database` (each signal's PDU bits mapped through its PDU instance to
-  frame bits, which `dbc::bits::layout` turns back into a start bit and byte
+  frame bits, low-high as an offset, high-low as the value bits of a
+  Motorola field of the PDU's length, which `dbc::bits::layout` turns back into a start bit and byte
   order; clashing names qualified as `PDU.Signal`), and the codec is the `dbc` codec over it, so
   the bit layout, options and E2E are shared. Compu methods that one factor
   and offset plus exact value table entries cannot express become a

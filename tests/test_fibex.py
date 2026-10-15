@@ -224,7 +224,7 @@ def test_texttable_ranges_piecewise_and_rational_codings(mem: str) -> None:
 FEATURES_DBC = DATA / "fibex_features.dbc"
 
 
-@pytest.mark.parametrize("name", ["Shifted"])
+@pytest.mark.parametrize("name", ["Shifted", "Swapped"])
 def test_features_match_the_dbc(mem: str, name: str) -> None:
     """Frames of the features fixture give the payloads of the equivalent DBC (and cantools)."""
     rng = random.Random(name)
