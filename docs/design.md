@@ -101,6 +101,9 @@ deadlocking. A Python exception raised in a plugin travels through the core as
 * `tcp://`: reader threads push chunks into a queue; a server broadcasts sends
   to every connected client and drops broken ones. A client channel ends when
   the connection does.
+* `serial://`: the `serialport` crate (built without libudev, so wheels need
+  no system library); a reader and a cloned writer handle, reads in 100 ms
+  slices so close is noticed; packets are stream chunks like TCP's.
 * `file://`: replay in 64 KiB chunks (ends at EOF, or `?follow`), or record
   packet bytes (`?write`, `?append`).
 

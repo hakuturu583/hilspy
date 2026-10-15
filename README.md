@@ -23,6 +23,7 @@ with hilspy.open("can://vcan0", "dbc:vehicle.dbc") as ecu:
 | `tcp://host:port` | TCP client; `tcp://addr:port?listen` serves every connected client |
 | `mem://name` | in-process bus (tests, simulated ECUs in one process) |
 | `file://path` | replay a recording; `?write` / `?append` records one |
+| `serial:///dev/ttyUSB0` | serial port (`?baud=115200`, `data_bits`, `parity`, `stop_bits`, `flow`); `serial://COM3` on Windows |
 
 | Codec | |
 | --- | --- |

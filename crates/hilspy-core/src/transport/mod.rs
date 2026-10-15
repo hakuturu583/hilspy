@@ -9,6 +9,7 @@
 //! | `tcp://host:port` | TCP client; packets are stream chunks |
 //! | `tcp://addr:port?listen` | TCP server; sends go to every connected client |
 //! | `file://path` | replay a recording (`?follow`), or record one (`?write`, `?append`) |
+//! | `serial://PORT` | a serial port (`?baud=`, `data_bits`, `parity`, `stop_bits`, `flow`); packets are stream chunks |
 //!
 //! Other schemes are added with [`register`].
 
@@ -17,6 +18,7 @@ pub(crate) mod can_frame;
 mod can_socket;
 mod file;
 mod mem;
+mod serial;
 mod tcp;
 mod udp;
 
@@ -57,6 +59,10 @@ fn registry() -> &'static RwLock<HashMap<String, Factory>> {
         m.insert(
             "udp".into(),
             Arc::new(|e| Ok(Arc::new(udp::Udp::open(e)?) as Arc<dyn Transport>)),
+        );
+        m.insert(
+            "serial".into(),
+            Arc::new(|e| Ok(Arc::new(serial::Serial::open(e)?) as Arc<dyn Transport>)),
         );
         m.insert(
             "tcp".into(),
