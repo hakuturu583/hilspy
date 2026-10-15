@@ -101,6 +101,10 @@ deadlocking. A Python exception raised in a plugin travels through the core as
 * `tcp://`: reader threads push chunks into a queue; a server broadcasts sends
   to every connected client and drops broken ones. A client channel ends when
   the connection does.
+* `file://` CAN logs (`transport/can_log.rs`): BLF and ASC through
+  `blf_asc`, candump through `socketcan::dump` (Linux, like `can://`); each
+  data frame is a packet with its CAN header and recorded time; `?realtime`
+  spaces replayed frames as recorded. Raw files stay byte streams.
 * `serial://`: the `serialport` crate (built without libudev, so wheels need
   no system library); a reader and a cloned writer handle, reads in 100 ms
   slices so close is noticed; packets are stream chunks like TCP's.
@@ -165,6 +169,6 @@ A scenario-side "HIL bridge" opens one channel per device: each simulation
 step turns ground truth (CARLA ego pose and velocity) into device traffic
 (`tcp://...?listen` + `sbf` for a GNSS receiver, `can://` + `dbc:` cyclic
 messages via `every()`), and decodes the device under test's output back into
-observations. Next: candump/BLF logs behind the same traits.
+observations.
 A simulated LiDAR is `udp://driver:2368` + `lidar:MODEL`, sending the
 raycast point cloud of each revolution.

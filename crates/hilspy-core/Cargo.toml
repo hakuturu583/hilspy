@@ -17,6 +17,7 @@ ublox.workspace = true
 rtcm-rs.workspace = true
 serde_json.workspace = true
 autosar-e2e.workspace = true
+blf_asc.workspace = true
 thiserror.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]

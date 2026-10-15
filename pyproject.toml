@@ -11,7 +11,7 @@ license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
 requires-python = ">=3.10"
 authors = [{ name = "Masaya Kataoka", email = "ms.kataoka@gmail.com" }]
-keywords = ["hils", "can", "socketcan", "vcan", "ethernet", "udp", "tcp", "serial", "dbc", "sbf", "septentrio", "gnss", "nmea", "ublox", "rtcm", "lidar", "hesai", "velodyne"]
+keywords = ["hils", "can", "socketcan", "vcan", "ethernet", "udp", "tcp", "serial", "dbc", "blf", "candump", "autosar", "e2e", "sbf", "septentrio", "gnss", "nmea", "ublox", "rtcm", "lidar", "hesai", "velodyne"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",

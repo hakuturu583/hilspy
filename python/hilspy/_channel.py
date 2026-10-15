@@ -342,7 +342,8 @@ def open(url: str, codec: str = "raw", *, clock: Clock | None = None, **options:
     Transports: ``can://vcan0`` (Linux SocketCAN; ``?fd``, ``?echo``,
     ``?filter=0x100:0x700``), ``udp://host:port`` (``?listen``, ``?bind=``),
     ``tcp://host:port`` (``?listen``), ``mem://name`` (in-process),
-    ``file://path`` (``?write``), ``serial:///dev/ttyUSB0`` (``?baud=``,
+    ``file://path`` (``?write``; ``.blf``/``.asc``/``?format=candump`` CAN
+    logs, ``?realtime``), ``serial:///dev/ttyUSB0`` (``?baud=``,
     ``parity``, ...). Codecs: ``raw``, ``dbc:FILE`` (options
     ``strict``, ``scaling``, ``decode_choices``), ``sbf``, ``nmea``
     (option ``talker``), ``ubx``, ``rtcm``, ``lidar:MODEL``

@@ -6,7 +6,9 @@
 //! * `file://out.sbf?write` (or `?append`) writes every sent packet's bytes;
 //!   it receives nothing.
 //!
-//! Only packet bytes are stored: CAN identifiers do not survive a file.
+//! Only packet bytes are stored in a raw file. CAN logs keep identifiers and
+//! times: `file://drive.blf`, `file://drive.asc`, `file://drive.log?format=candump`
+//! (see [`super::can_log`]; options `realtime`, `interface`, `channel`).
 
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
@@ -14,6 +16,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+use std::sync::Arc;
+
+use super::can_log::{CanLog, Format};
 use super::Transport;
 use crate::error::{Error, Result};
 use crate::message::{now_timestamp, Packet};
@@ -33,14 +38,54 @@ pub(crate) struct FileTransport {
     closed: AtomicBool,
 }
 
+/// A raw file, or a CAN log by `?format=` or extension.
+pub(crate) fn open(endpoint: Endpoint) -> Result<Arc<dyn Transport>> {
+    let mut o = endpoint.options;
+    let format = match o.take_str("format")? {
+        None => Format::of_path(&endpoint.address),
+        Some(f) if f.eq_ignore_ascii_case("raw") => None,
+        Some(f) => Some(Format::parse(&f).ok_or_else(|| {
+            Error::Config(format!(
+                "file:// format {f:?} is not raw, candump, blf or asc"
+            ))
+        })?),
+    };
+    let Some(format) = format else {
+        return Ok(Arc::new(FileTransport::open(&endpoint.address, o)?));
+    };
+    let write = o.take_bool("write", false)?;
+    if o.take_bool("append", false)? || o.take_bool("follow", false)? {
+        return Err(Error::Config(
+            "CAN logs are read or written whole: no ?append or ?follow".into(),
+        ));
+    }
+    let realtime = o.take_bool("realtime", false)?;
+    let interface = o.take_str("interface")?;
+    let channel = o
+        .take_str("channel")?
+        .map(|c| {
+            c.parse::<u16>()
+                .map_err(|_| Error::Config(format!("option channel: {c:?} is not a number")))
+        })
+        .transpose()?;
+    o.finish("file://")?;
+    Ok(Arc::new(CanLog::open(
+        &endpoint.address,
+        format,
+        write,
+        realtime,
+        interface,
+        channel,
+    )?))
+}
+
 impl FileTransport {
-    pub(crate) fn open(endpoint: Endpoint) -> Result<Self> {
-        let mut o = endpoint.options;
+    fn open(path: &str, mut o: crate::value::Options) -> Result<Self> {
         let write = o.take_bool("write", false)?;
         let append = o.take_bool("append", false)?;
         let follow = o.take_bool("follow", false)?;
         o.finish("file://")?;
-        let path = endpoint.address;
+        let path = path.to_owned();
         let with_path =
             |e: std::io::Error| Error::Io(std::io::Error::new(e.kind(), format!("{path}: {e}")));
         let (file, mode) = if write || append {
