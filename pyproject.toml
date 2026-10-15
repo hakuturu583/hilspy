@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "hilspy"
-version = "0.1.0"
+version = "0.2.0"
 description = "HILS I/O for Python on a Rust core: CAN/CAN FD over SocketCAN (vcan) or an in-process virtual bus, DBC encoding, and Septentrio Binary Format (SBF) parsing"
 readme = "README.md"
 license = "Apache-2.0"
