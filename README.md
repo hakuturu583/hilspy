@@ -235,6 +235,12 @@ msg = lamp.recv()  # msg.bus == "lin", msg.id == 0x10, msg.checksum == 0x49
 * Not covered: the master/slave header-response split (a sender sends the
   whole frame), event-triggered and sporadic frame collision resolution, and
   LDF files.
+* Not yet checked against a tool-exported FIBEX file: the schedule table and
+  checksum element names above follow the test fixture
+  (`tests/data/lin_flexray.xml`), not a published schema, and some tools
+  describe LIN schedules as `RELATIVELY-SCHEDULED-TIMING`s instead. A file
+  laid out differently still decodes, but may lack cycle times or fall back
+  to the protocol version's checksum model.
 
 #### FlexRay channels
 
