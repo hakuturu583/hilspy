@@ -22,9 +22,24 @@ pub enum ByteOrder {
 /// How the raw bits of a signal are interpreted.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ValueKind {
+    /// Unsigned, or two's complement when [`Signal::signed`] (the DBC kinds).
     Integer,
+    /// Sign and magnitude: the top bit is the sign, the rest the magnitude.
+    SignMagnitude,
+    /// One's complement: a negative value is the bitwise NOT of its magnitude.
+    OnesComplement,
     Float32,
     Float64,
+}
+
+impl ValueKind {
+    /// Whether raw values are integers (not IEEE floats).
+    pub fn is_integer(self) -> bool {
+        matches!(
+            self,
+            ValueKind::Integer | ValueKind::SignMagnitude | ValueKind::OnesComplement
+        )
+    }
 }
 
 /// A physical signal value: what `encode` takes and `decode` returns.
@@ -82,7 +97,14 @@ pub struct Signal {
 
 impl Signal {
     fn raw_bounds(&self) -> (i128, i128) {
-        if self.signed {
+        if matches!(
+            self.kind,
+            ValueKind::SignMagnitude | ValueKind::OnesComplement
+        ) {
+            // Symmetric: both have a negative zero instead of a minimum.
+            let max = (1i128 << (self.size - 1)) - 1;
+            (-max, max)
+        } else if self.signed {
             (-(1i128 << (self.size - 1)), (1i128 << (self.size - 1)) - 1)
         } else {
             (0, (1i128 << self.size) - 1)
@@ -91,7 +113,7 @@ impl Signal {
 
     /// Whether integer raw values scale to integer physical values.
     fn integral_scaling(&self) -> bool {
-        self.kind == ValueKind::Integer && self.factor.fract() == 0.0 && self.offset.fract() == 0.0
+        self.kind.is_integer() && self.factor.fract() == 0.0 && self.offset.fract() == 0.0
     }
 
     /// The raw value of a name in the value table.
@@ -114,6 +136,18 @@ impl Signal {
         match self.kind {
             ValueKind::Float32 => RawValue::Float(f64::from(f32::from_bits(bits as u32))),
             ValueKind::Float64 => RawValue::Float(f64::from_bits(bits)),
+            ValueKind::SignMagnitude | ValueKind::OnesComplement => {
+                let sign = 1u64 << (self.size - 1);
+                let negative = bits & sign != 0;
+                let magnitude = if negative && self.kind == ValueKind::OnesComplement {
+                    !bits & (sign - 1)
+                } else {
+                    bits & (sign - 1)
+                };
+                // Negative zero decodes to 0.
+                let magnitude = i128::from(magnitude);
+                RawValue::Int(if negative { -magnitude } else { magnitude })
+            }
             ValueKind::Integer if self.signed && self.size < 64 => {
                 let shift = 64 - self.size;
                 RawValue::Int(((bits << shift) as i64 >> shift) as i128)
@@ -170,7 +204,7 @@ impl Signal {
             },
             _ => {
                 let phys = value.as_f64().unwrap_or_default();
-                if !phys.is_finite() && self.kind == ValueKind::Integer {
+                if !phys.is_finite() && self.kind.is_integer() {
                     return Err(Error::encode(format!(
                         "signal {} cannot hold {phys}",
                         self.name
@@ -186,12 +220,12 @@ impl Signal {
                     self.check_range(physical)?;
                 }
                 if !options.scaling {
-                    match (value, self.kind) {
-                        (Value::Int(i), ValueKind::Integer) => RawValue::Int(i128::from(*i)),
-                        (_, ValueKind::Integer) => RawValue::Int(round_raw(phys)),
+                    match value {
+                        Value::Int(i) if self.kind.is_integer() => RawValue::Int(i128::from(*i)),
+                        _ if self.kind.is_integer() => RawValue::Int(round_raw(phys)),
                         _ => RawValue::Float(phys),
                     }
-                } else if self.kind != ValueKind::Integer {
+                } else if !self.kind.is_integer() {
                     RawValue::Float((phys - self.offset) / self.factor)
                 } else if let (Value::Int(i), true) = (value, self.integral_scaling()) {
                     // Exact integer arithmetic (64-bit raw values exceed f64).
@@ -216,17 +250,20 @@ impl Signal {
             (ValueKind::Float32, RawValue::Int(r)) => Ok(u64::from((r as f32).to_bits())),
             (ValueKind::Float64, RawValue::Float(r)) => Ok(r.to_bits()),
             (ValueKind::Float64, RawValue::Int(r)) => Ok((r as f64).to_bits()),
-            (ValueKind::Integer, RawValue::Float(r)) => {
-                self.raw_to_bits(RawValue::Int(round_raw(r)))
-            }
-            (ValueKind::Integer, RawValue::Int(r)) => {
+            (_, RawValue::Float(r)) => self.raw_to_bits(RawValue::Int(round_raw(r))),
+            (kind, RawValue::Int(r)) => {
                 let (lo, hi) = self.raw_bounds();
                 if r < lo || r > hi {
                     return Err(Error::encode(format!(
                         "signal {}: raw value {r} does not fit in {} {} bits ({lo}..={hi})",
                         self.name,
                         self.size,
-                        if self.signed { "signed" } else { "unsigned" }
+                        match kind {
+                            ValueKind::SignMagnitude => "sign-magnitude",
+                            ValueKind::OnesComplement => "one's complement",
+                            _ if self.signed => "signed",
+                            _ => "unsigned",
+                        }
                     )));
                 }
                 let mask = if self.size == 64 {
@@ -234,7 +271,13 @@ impl Signal {
                 } else {
                     (1u64 << self.size) - 1
                 };
-                Ok((r as i64 as u64) & mask)
+                let sign = 1u64 << (self.size - 1);
+                let magnitude = r.unsigned_abs() as u64;
+                Ok(match kind {
+                    ValueKind::SignMagnitude if r < 0 => sign | magnitude,
+                    ValueKind::OnesComplement if r < 0 => !magnitude & mask,
+                    _ => (r as i64 as u64) & mask,
+                })
             }
         }
     }

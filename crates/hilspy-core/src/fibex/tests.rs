@@ -223,3 +223,52 @@ fn unsupported_content_is_reported() {
         std::fs::remove_file(path).unwrap();
     }
 }
+
+fn features() -> Database {
+    load(data("fibex_features.xml"), None).unwrap()
+}
+
+fn named(v: &[(&str, Value)]) -> Vec<(String, Value)> {
+    v.iter().map(|(n, v)| (n.to_string(), v.clone())).collect()
+}
+
+#[test]
+fn sign_magnitude_and_ones_complement_codings() {
+    let db = features();
+    let m = db.message_by_name("Encodings").unwrap();
+    let kinds: Vec<_> = m.signals.iter().map(|s| (s.kind, s.signed)).collect();
+    assert_eq!(
+        kinds,
+        [
+            (ValueKind::SignMagnitude, true),
+            (ValueKind::OnesComplement, true),
+            (ValueKind::SignMagnitude, true),
+            (ValueKind::OnesComplement, true),
+        ]
+    );
+    let values = named(&[
+        ("SmSmall", Value::Int(-5)),
+        ("OcSmall", Value::Int(-5)),
+        ("SmWide", Value::Float(-100.5)),
+        ("OcWide", Value::Int(-2)),
+    ]);
+    let data = m.encode(&values, &EncodeOptions::default()).unwrap();
+    // -5: 0x85 (sign + magnitude), 0xFA (NOT 5); -100.5 / 0.5 = -201 =
+    // 0x80C9 little endian; -2 = NOT 2 = 0xFFFD big endian in bytes 6-7.
+    assert_eq!(data, [0x85, 0xFA, 0xC9, 0x80, 0, 0, 0xFF, 0xFD]);
+    let decoded = m.decode(&data, &DecodeOptions::default()).unwrap();
+    assert_eq!(decoded, values);
+    // Negative zeros decode to 0.
+    let zeros = m
+        .decode(
+            &[0x80, 0xFF, 0x00, 0x80, 0, 0, 0xFF, 0xFF],
+            &DecodeOptions::default(),
+        )
+        .unwrap();
+    assert!(
+        zeros
+            .iter()
+            .all(|(_, v)| *v == Value::Int(0) || *v == Value::Float(0.0)),
+        "{zeros:?}"
+    );
+}

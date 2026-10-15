@@ -1,0 +1,164 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Layouts and codings beyond tests/data/network.xml for the fibex codec.
+     tests/data/fibex_features.dbc describes the frames that a DBC can express
+     the same way. -->
+<fx:FIBEX xmlns:fx="http://www.asam.net/xml/fbx" xmlns:ho="http://www.asam.net/xml" xmlns:can="http://www.asam.net/xml/fbx/can" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" VERSION="4.1.2">
+  <fx:PROJECT ID="PRJ_FEATURES">
+    <ho:SHORT-NAME>HilspyFibexFeatures</ho:SHORT-NAME>
+  </fx:PROJECT>
+  <fx:ELEMENTS>
+    <fx:CLUSTERS>
+      <fx:CLUSTER ID="CL_FEATURES" xsi:type="can:CLUSTER-TYPE">
+        <ho:SHORT-NAME>FeaturesCan</ho:SHORT-NAME>
+        <fx:SPEED>500000</fx:SPEED>
+        <fx:IS-HIGH-LOW-BIT-ORDER>false</fx:IS-HIGH-LOW-BIT-ORDER>
+        <fx:BIT-COUNTING-POLICY>SAWTOOTH</fx:BIT-COUNTING-POLICY>
+        <fx:PROTOCOL xsi:type="can:PROTOCOL-TYPE">CAN</fx:PROTOCOL>
+        <fx:PROTOCOL-VERSION>2.0</fx:PROTOCOL-VERSION>
+        <fx:CHANNEL-REFS>
+          <fx:CHANNEL-REF ID-REF="CH_FEATURES"/>
+        </fx:CHANNEL-REFS>
+        <fx:MEDIUM>ELECTRICAL</fx:MEDIUM>
+      </fx:CLUSTER>
+    </fx:CLUSTERS>
+    <fx:CHANNELS>
+      <fx:CHANNEL ID="CH_FEATURES">
+        <ho:SHORT-NAME>Features</ho:SHORT-NAME>
+        <fx:FRAME-TRIGGERINGS>
+          <fx:FRAME-TRIGGERING ID="FT_Encodings" xsi:type="can:FRAME-TRIGGERING-TYPE">
+            <fx:IDENTIFIER><fx:IDENTIFIER-VALUE>1024</fx:IDENTIFIER-VALUE></fx:IDENTIFIER>
+            <fx:FRAME-REF ID-REF="F_Encodings"/>
+          </fx:FRAME-TRIGGERING>
+          <!-- triggerings -->
+        </fx:FRAME-TRIGGERINGS>
+      </fx:CHANNEL>
+    </fx:CHANNELS>
+    <fx:PDUS>
+      <fx:PDU ID="P_Encodings">
+        <ho:SHORT-NAME>EncodingsPdu</ho:SHORT-NAME>
+        <fx:BYTE-LENGTH>8</fx:BYTE-LENGTH>
+        <fx:PDU-TYPE>APPLICATION</fx:PDU-TYPE>
+        <fx:SIGNAL-INSTANCES>
+          <fx:SIGNAL-INSTANCE ID="SI_SmSmall">
+            <fx:BIT-POSITION>0</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+            <fx:SIGNAL-REF ID-REF="S_SmSmall"/>
+          </fx:SIGNAL-INSTANCE>
+          <fx:SIGNAL-INSTANCE ID="SI_OcSmall">
+            <fx:BIT-POSITION>8</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+            <fx:SIGNAL-REF ID-REF="S_OcSmall"/>
+          </fx:SIGNAL-INSTANCE>
+          <fx:SIGNAL-INSTANCE ID="SI_SmWide">
+            <fx:BIT-POSITION>16</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+            <fx:SIGNAL-REF ID-REF="S_SmWide"/>
+          </fx:SIGNAL-INSTANCE>
+          <fx:SIGNAL-INSTANCE ID="SI_OcWide">
+            <fx:BIT-POSITION>55</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>true</fx:IS-HIGH-LOW-BYTE-ORDER>
+            <fx:SIGNAL-REF ID-REF="S_OcWide"/>
+          </fx:SIGNAL-INSTANCE>
+        </fx:SIGNAL-INSTANCES>
+      </fx:PDU>
+      <!-- pdus -->
+    </fx:PDUS>
+    <fx:FRAMES>
+      <fx:FRAME ID="F_Encodings">
+        <ho:SHORT-NAME>Encodings</ho:SHORT-NAME>
+        <fx:BYTE-LENGTH>8</fx:BYTE-LENGTH>
+        <fx:FRAME-TYPE>APPLICATION</fx:FRAME-TYPE>
+        <fx:PDU-INSTANCES>
+          <fx:PDU-INSTANCE ID="F_Encodings_0">
+            <fx:PDU-REF ID-REF="P_Encodings"/>
+            <fx:BIT-POSITION>0</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+          </fx:PDU-INSTANCE>
+        </fx:PDU-INSTANCES>
+      </fx:FRAME>
+      <!-- frames -->
+    </fx:FRAMES>
+    <fx:SIGNALS>
+      <fx:SIGNAL ID="S_SmSmall">
+        <ho:SHORT-NAME>SmSmall</ho:SHORT-NAME>
+        <fx:CODING-REF ID-REF="C_Sm8"/>
+      </fx:SIGNAL>
+      <fx:SIGNAL ID="S_OcSmall">
+        <ho:SHORT-NAME>OcSmall</ho:SHORT-NAME>
+        <fx:CODING-REF ID-REF="C_Oc8"/>
+      </fx:SIGNAL>
+      <fx:SIGNAL ID="S_SmWide">
+        <ho:SHORT-NAME>SmWide</ho:SHORT-NAME>
+        <fx:CODING-REF ID-REF="C_Sm16"/>
+      </fx:SIGNAL>
+      <fx:SIGNAL ID="S_OcWide">
+        <ho:SHORT-NAME>OcWide</ho:SHORT-NAME>
+        <fx:CODING-REF ID-REF="C_Oc16"/>
+      </fx:SIGNAL>
+      <!-- signals -->
+    </fx:SIGNALS>
+  </fx:ELEMENTS>
+  <fx:PROCESSING-INFORMATION>
+    <fx:CODINGS>
+      <fx:CODING ID="C_Sm8">
+        <ho:SHORT-NAME>Sm8</ho:SHORT-NAME>
+        <ho:CODED-TYPE ho:BASE-DATA-TYPE="A_INT8" CATEGORY="STANDARD-LENGTH-TYPE" ENCODING="SM">
+          <ho:BIT-LENGTH>8</ho:BIT-LENGTH>
+        </ho:CODED-TYPE>
+        <ho:COMPU-METHODS>
+          <ho:COMPU-METHOD>
+            <ho:SHORT-NAME>Sm8</ho:SHORT-NAME>
+            <ho:CATEGORY>IDENTICAL</ho:CATEGORY>
+          </ho:COMPU-METHOD>
+        </ho:COMPU-METHODS>
+      </fx:CODING>
+      <fx:CODING ID="C_Oc8">
+        <ho:SHORT-NAME>Oc8</ho:SHORT-NAME>
+        <ho:CODED-TYPE ho:BASE-DATA-TYPE="A_INT8" CATEGORY="STANDARD-LENGTH-TYPE" ENCODING="1C">
+          <ho:BIT-LENGTH>8</ho:BIT-LENGTH>
+        </ho:CODED-TYPE>
+        <ho:COMPU-METHODS>
+          <ho:COMPU-METHOD>
+            <ho:SHORT-NAME>Oc8</ho:SHORT-NAME>
+            <ho:CATEGORY>IDENTICAL</ho:CATEGORY>
+          </ho:COMPU-METHOD>
+        </ho:COMPU-METHODS>
+      </fx:CODING>
+      <fx:CODING ID="C_Sm16">
+        <ho:SHORT-NAME>Sm16</ho:SHORT-NAME>
+        <ho:CODED-TYPE ho:BASE-DATA-TYPE="A_INT16" CATEGORY="STANDARD-LENGTH-TYPE" ENCODING="SM">
+          <ho:BIT-LENGTH>16</ho:BIT-LENGTH>
+        </ho:CODED-TYPE>
+        <ho:COMPU-METHODS>
+          <ho:COMPU-METHOD>
+            <ho:SHORT-NAME>Sm16</ho:SHORT-NAME>
+            <ho:CATEGORY>LINEAR</ho:CATEGORY>
+            <ho:COMPU-INTERNAL-TO-PHYS>
+              <ho:COMPU-SCALES>
+                <ho:COMPU-SCALE>
+                  <ho:COMPU-RATIONAL-COEFFS>
+                    <ho:COMPU-NUMERATOR><ho:V>0</ho:V><ho:V>0.5</ho:V></ho:COMPU-NUMERATOR>
+                    <ho:COMPU-DENOMINATOR><ho:V>1</ho:V></ho:COMPU-DENOMINATOR>
+                  </ho:COMPU-RATIONAL-COEFFS>
+                </ho:COMPU-SCALE>
+              </ho:COMPU-SCALES>
+            </ho:COMPU-INTERNAL-TO-PHYS>
+          </ho:COMPU-METHOD>
+        </ho:COMPU-METHODS>
+      </fx:CODING>
+      <fx:CODING ID="C_Oc16">
+        <ho:SHORT-NAME>Oc16</ho:SHORT-NAME>
+        <ho:CODED-TYPE ho:BASE-DATA-TYPE="A_INT16" CATEGORY="STANDARD-LENGTH-TYPE" ENCODING="1C">
+          <ho:BIT-LENGTH>16</ho:BIT-LENGTH>
+        </ho:CODED-TYPE>
+        <ho:COMPU-METHODS>
+          <ho:COMPU-METHOD>
+            <ho:SHORT-NAME>Oc16</ho:SHORT-NAME>
+            <ho:CATEGORY>IDENTICAL</ho:CATEGORY>
+          </ho:COMPU-METHOD>
+        </ho:COMPU-METHODS>
+      </fx:CODING>
+      <!-- codings -->
+    </fx:CODINGS>
+  </fx:PROCESSING-INFORMATION>
+</fx:FIBEX>

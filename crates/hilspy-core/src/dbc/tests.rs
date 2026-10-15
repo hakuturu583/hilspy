@@ -263,3 +263,78 @@ fn raw_values_are_range_checked_physically() {
     over[1].1 = Value::Int(33000);
     assert!(m.encode(&over, &raw).is_err());
 }
+
+/// A one-signal message: an integer at bit 0, little endian.
+fn single(kind: ValueKind, size: u32) -> Message {
+    let mut signal = convert_single(size);
+    signal.kind = kind;
+    signal.signed = true;
+    Message {
+        id: 1,
+        extended: false,
+        name: "M".into(),
+        size: 8,
+        transmitter: None,
+        signals: vec![signal],
+        comment: None,
+        cycle_time_ms: None,
+        fd: false,
+    }
+}
+
+fn convert_single(size: u32) -> Signal {
+    let text = format!(
+        "VERSION \"\"\n\nNS_ :\n\nBS_:\n\nBU_:\n\nBO_ 1 M: 8 Vector__XXX\n SG_ S : 0|{size}@1- (1,0) [0|0] \"\" Vector__XXX\n"
+    );
+    Database::parse(&text).unwrap().messages[0].signals[0].clone()
+}
+
+#[test]
+fn sign_magnitude_and_ones_complement() {
+    let raw = |m: &Message, v: i64| {
+        let data = m
+            .encode(&values(&[("S", Value::Int(v))]), &EncodeOptions::default())
+            .map(|d| u64::from_le_bytes(d.try_into().unwrap()));
+        data.map_err(|e| e.to_string())
+    };
+    let decode = |m: &Message, bits: u64| {
+        m.decode(&bits.to_le_bytes(), &DecodeOptions::default())
+            .unwrap()[0]
+            .1
+            .clone()
+    };
+    let sm = single(ValueKind::SignMagnitude, 8);
+    assert_eq!(raw(&sm, 0), Ok(0x00));
+    assert_eq!(raw(&sm, 127), Ok(0x7F));
+    assert_eq!(raw(&sm, -127), Ok(0xFF));
+    assert_eq!(raw(&sm, -1), Ok(0x81));
+    assert!(raw(&sm, 128).unwrap_err().contains("sign-magnitude"));
+    assert!(raw(&sm, -128).is_err());
+    assert_eq!(decode(&sm, 0xFF), Value::Int(-127));
+    assert_eq!(decode(&sm, 0x81), Value::Int(-1));
+    assert_eq!(decode(&sm, 0x7F), Value::Int(127));
+    // Negative zero.
+    assert_eq!(decode(&sm, 0x80), Value::Int(0));
+
+    let oc = single(ValueKind::OnesComplement, 8);
+    assert_eq!(raw(&oc, 0), Ok(0x00));
+    assert_eq!(raw(&oc, 127), Ok(0x7F));
+    assert_eq!(raw(&oc, -127), Ok(0x80));
+    assert_eq!(raw(&oc, -1), Ok(0xFE));
+    assert!(raw(&oc, -128).unwrap_err().contains("one's complement"));
+    assert_eq!(decode(&oc, 0x80), Value::Int(-127));
+    assert_eq!(decode(&oc, 0xFE), Value::Int(-1));
+    assert_eq!(decode(&oc, 0xFF), Value::Int(0));
+
+    // 64 bits: the magnitude is 63 bits wide.
+    let max = i64::MAX;
+    let sm = single(ValueKind::SignMagnitude, 64);
+    assert_eq!(raw(&sm, -max), Ok(u64::MAX));
+    assert_eq!(decode(&sm, u64::MAX), Value::Int(-max));
+    assert_eq!(decode(&sm, 1 << 63), Value::Int(0));
+    let oc = single(ValueKind::OnesComplement, 64);
+    assert_eq!(raw(&oc, -max), Ok(1 << 63));
+    assert_eq!(decode(&oc, 1 << 63), Value::Int(-max));
+    assert_eq!(decode(&oc, u64::MAX), Value::Int(0));
+    assert_eq!(raw(&oc, max), Ok(max as u64));
+}

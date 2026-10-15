@@ -155,3 +155,32 @@ def test_every_on_a_clock(mem: str) -> None:
         clock.advance(0.01)
         got = drain(rx)
         assert [m["Gear"] for m in got] == ["R"]
+
+
+FEATURES = f"fibex:{DATA / 'fibex_features.xml'}"
+
+
+def round_trip(mem: str, name: str, values: dict[str, Any]) -> tuple[bytes, Message]:
+    """Send `values` through the features fixture: the payload and the decoded message."""
+    with (
+        hilspy.open(mem, FEATURES) as tx,
+        hilspy.open(mem) as raw,
+        hilspy.open(mem, FEATURES) as rx,
+    ):
+        tx.send(name, values)
+        frame, decoded = raw.recv(timeout=1), rx.recv(timeout=1)
+        assert frame is not None and frame.data is not None and decoded is not None
+        return frame.data, decoded
+
+
+def test_sign_magnitude_and_ones_complement(mem: str) -> None:
+    values = {"SmSmall": -5, "OcSmall": -5, "SmWide": -100.5, "OcWide": -2}
+    data, decoded = round_trip(mem, "Encodings", values)
+    assert data == bytes([0x85, 0xFA, 0xC9, 0x80, 0, 0, 0xFF, 0xFD])
+    assert decoded.fields == values
+    edges = {"SmSmall": -127, "OcSmall": 127, "SmWide": 16383.5, "OcWide": -32767}
+    data, decoded = round_trip(f"{mem}-edges", "Encodings", edges)
+    assert data == bytes([0xFF, 0x7F, 0xFF, 0x7F, 0, 0, 0x80, 0x00])
+    assert decoded.fields == edges
+    with hilspy.open(mem, FEATURES) as tx, pytest.raises(hilspy.Error, match="sign-magnitude"):
+        tx.send("Encodings", {**values, "SmSmall": -128})

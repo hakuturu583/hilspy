@@ -119,6 +119,8 @@ deadlocking. A Python exception raised in a plugin travels through the core as
   `SIG_VALTYPE_` floats and multiplexing (`M`/`mN` and `SG_MUL_VAL_` ranges).
   Bit layout: Intel signals occupy `start..start+size`; Motorola signals are
   `size` bits from the start bit's position in most-significant-first order.
+  Integer raw values are unsigned or two's complement (the DBC value types),
+  or sign-magnitude / one's complement (`ValueKind`, for FIBEX codings).
   The tests cross-check payloads against `cantools`.
 * `dbc` + `e2e`: `codec/e2e.rs` maps a per-message configuration (a
   mapping option) onto an `autosar-e2e` profile; a sender instance protects

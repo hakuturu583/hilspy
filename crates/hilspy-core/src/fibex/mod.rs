@@ -10,6 +10,10 @@
 //! (rational coefficients, `SCALE-LINEAR`, texttable ranges, physical
 //! constraints, units).
 //!
+//! Coded types: unsigned and two's complement integers map onto the DBC
+//! value types; sign-magnitude (`SM`) and one's complement (`1C`) integers
+//! onto [`ValueKind::SignMagnitude`] and [`ValueKind::OnesComplement`].
+//!
 //! Layout: a PDU instance's `BIT-POSITION` is the PDU's offset in the frame
 //! (a whole number of bytes). A signal instance's `BIT-POSITION` is read as a
 //! DBC start bit within its PDU (bit 0 is the least significant bit of byte
@@ -345,21 +349,25 @@ impl Network<'_, '_, '_> {
                 _ => return Err(bad(format!("{what}: a float is 32 or 64 bits, not {size}"))),
             }
         } else {
-            let signed = match &coded.encoding {
-                Some(Encoding::Signed | Encoding::E2C) => true,
-                Some(Encoding::Unsigned | Encoding::Bit) => false,
-                None => matches!(
-                    coded.base_data_type,
-                    Some(
-                        BaseDataType::AInt8
-                            | BaseDataType::AInt16
-                            | BaseDataType::AInt32
-                            | BaseDataType::AInt64
-                    )
+            match &coded.encoding {
+                Some(Encoding::Signed | Encoding::E2C) => (ValueKind::Integer, true),
+                Some(Encoding::Unsigned | Encoding::Bit) => (ValueKind::Integer, false),
+                Some(Encoding::SM) => (ValueKind::SignMagnitude, true),
+                Some(Encoding::E1C) => (ValueKind::OnesComplement, true),
+                None => (
+                    ValueKind::Integer,
+                    matches!(
+                        coded.base_data_type,
+                        Some(
+                            BaseDataType::AInt8
+                                | BaseDataType::AInt16
+                                | BaseDataType::AInt32
+                                | BaseDataType::AInt64
+                        )
+                    ),
                 ),
                 Some(e) => return Err(bad(format!("{what}: unsupported encoding {e:?}"))),
-            };
-            (ValueKind::Integer, signed)
+            }
         };
         let start_bit = instance
             .bit_position
