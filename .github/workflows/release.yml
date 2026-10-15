@@ -1,7 +1,8 @@
 name: Release
 
 # Merging a PR labelled "bump patch" / "bump minor" / "bump major" into the
-# default branch bumps the version (tools/bump_version.py: pyproject.toml,
+# default branch bumps the version by the highest label among the PRs merged
+# since the last release tag (tools/bump_version.py: pyproject.toml,
 # Cargo.toml and both lockfiles), commits "chore: bump version to X", tags
 # vX, builds the wheels and the sdist, creates the GitHub Release and
 # publishes to PyPI (Trusted Publishing, environment "pypi").
@@ -23,6 +24,10 @@ on:
 permissions:
   contents: read
 
+# Runs are serialized. GitHub keeps only the newest pending run of a group and
+# cancels older pending ones, so a run never relies on its own commit alone:
+# it releases everything merged since the last v* tag (see "Collect the bump
+# labels"), which covers the merges of any run that was cancelled.
 concurrency:
   group: release
   cancel-in-progress: false
@@ -38,39 +43,58 @@ jobs:
       version: ${{ steps.version.outputs.version }}
       sha: ${{ steps.version.outputs.sha }}
       bump_type: ${{ steps.labels.outputs.bump_type }}
-      pr_number: ${{ steps.labels.outputs.pr_number }}
+      pr_numbers: ${{ steps.labels.outputs.pr_numbers }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          # The branch tip, not the triggering commit: merges that landed
+          # while this run was pending are released by it too.
+          ref: ${{ github.event_name == 'push' && github.ref_name || '' }}
           # A branch ruleset that blocks direct pushes needs a token allowed
           # to bypass it (secret GH_PAT); otherwise GITHUB_TOKEN is enough.
           token: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
 
-      - name: Get the merged PR's bump label
+      - name: List the commits merged since the last release
+        if: github.event_name == 'push'
+        id: range
+        run: |
+          last=$(git describe --tags --abbrev=0 --match 'v[0-9]*.[0-9]*.[0-9]*' HEAD 2>/dev/null || true)
+          echo "Last release tag: ${last:-(none)}"
+          # First-parent history: one merge (or squash) commit per merged PR.
+          commits=$(git rev-list --first-parent "${last:+${last}..}HEAD" | tr '\n' ' ')
+          echo "commits=${commits}" >> "$GITHUB_OUTPUT"
+
+      - name: Collect the bump labels of the PRs merged since then
         if: github.event_name == 'push'
         id: labels
         uses: actions/github-script@v7
+        env:
+          COMMITS: ${{ steps.range.outputs.commits }}
+          BRANCH: ${{ github.ref_name }}
         with:
           script: |
-            const { data: prs } = await github.rest.repos.listPullRequestsAssociatedWithCommit({
-              ...context.repo,
-              commit_sha: context.sha,
-            });
-            const pr = prs.find(p => p.merged_at !== null);
-            if (!pr) {
-              core.info('No merged PR for this commit: no release.');
-              core.setOutput('bump_type', 'none');
-              return;
+            const order = ['none', 'patch', 'minor', 'major'];
+            const prs = new Map();
+            for (const sha of process.env.COMMITS.split(' ').filter(Boolean)) {
+              const { data } = await github.rest.repos.listPullRequestsAssociatedWithCommit({
+                ...context.repo,
+                commit_sha: sha,
+              });
+              for (const pr of data) {
+                if (pr.merged_at && pr.base.ref === process.env.BRANCH) prs.set(pr.number, pr);
+              }
             }
-            const labels = pr.labels.map(l => l.name);
-            core.info(`PR #${pr.number} labels: ${labels.join(', ')}`);
             let bump = 'none';
-            for (const part of ['major', 'minor', 'patch']) {
-              if (labels.includes(`bump ${part}`)) { bump = part; break; }
+            for (const pr of prs.values()) {
+              const labels = pr.labels.map(l => l.name);
+              const own = ['major', 'minor', 'patch'].find(p => labels.includes(`bump ${p}`)) || 'none';
+              core.info(`#${pr.number} ${pr.title}: ${own}`);
+              if (order.indexOf(own) > order.indexOf(bump)) bump = own;
             }
+            core.info(`Release: ${bump}`);
             core.setOutput('bump_type', bump);
-            core.setOutput('pr_number', pr.number);
+            core.setOutput('pr_numbers', [...prs.keys()].sort((a, b) => a - b).join(' '));
 
       - uses: astral-sh/setup-uv@v6
         if: steps.labels.outputs.bump_type != 'none' && github.event_name == 'push'
@@ -89,7 +113,16 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add pyproject.toml Cargo.toml uv.lock Cargo.lock
           git commit -m "chore: bump version to ${version}"
-          git push origin "HEAD:${BRANCH}"
+          if ! git push origin "HEAD:${BRANCH}"; then
+            # A merge landed after the checkout; it queued a newer run, which
+            # releases this run's merges together with it.
+            git fetch origin "${BRANCH}"
+            if [ "$(git rev-parse "origin/${BRANCH}")" != "$(git rev-parse HEAD~1)" ]; then
+              echo "::notice::${BRANCH} moved on; the next release run covers these merges."
+              exit 0
+            fi
+            exit 1
+          fi
           echo "version=${version}" >> "$GITHUB_OUTPUT"
 
       - name: Resolve the version to release
@@ -166,11 +199,13 @@ jobs:
           GH_REPO: ${{ github.repository }}
           TAG: v${{ needs.bump.outputs.version }}
           BUMP: ${{ needs.bump.outputs.bump_type }}
-          PR: ${{ needs.bump.outputs.pr_number }}
+          PRS: ${{ needs.bump.outputs.pr_numbers }}
         run: |
           if ! gh release view "$TAG" > /dev/null 2>&1; then
             notes="Install: \`pip install hilspy==${TAG#v}\`"
-            if [ -n "$PR" ]; then notes="${notes}"$'\n\n'"Released by #${PR} (bump ${BUMP})."; fi
+            if [ -n "$PRS" ]; then
+              notes="${notes}"$'\n\n'"Released by $(printf '#%s ' $PRS)(bump ${BUMP})."
+            fi
             gh release create "$TAG" --title "hilspy $TAG" --notes "$notes" --generate-notes
           fi
           gh release upload "$TAG" dist/* --clobber
