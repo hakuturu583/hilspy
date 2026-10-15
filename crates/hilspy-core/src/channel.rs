@@ -491,6 +491,12 @@ fn tick(clock: &Clock, inner: Arc<Inner>, shared: Arc<Shared>, end: Option<i64>,
         Err(e) => state.last_error = Some(e.to_string()),
     }
     let next = at.saturating_add(i64::try_from(state.period.as_nanos()).unwrap_or(i64::MAX));
+    // A send due at or after the end is never made: stop now, not when the
+    // clock reaches it.
+    if end.is_some_and(|e| next >= e) {
+        state.stopped = true;
+        return;
+    }
     drop(state);
     clock.schedule(
         next,
@@ -605,11 +611,26 @@ mod tests {
         assert!(got
             .iter()
             .all(|m| (m.timestamp().unwrap() - 100.35).abs() < 1e-9));
-        clock.advance(10.0).unwrap();
-        // The duration ends it: sends at 100.0 .. 100.4.
+        // The duration ends it: sends at 100.0 .. 100.4, and it stops with
+        // the last one.
+        clock.advance_to(100.4).unwrap();
         assert_eq!(p.sent_count(), 5);
         assert!(!p.is_running());
         assert_eq!(clock.pending(), 0);
+        assert_eq!(clock.next_due(), None);
+
+        // A duration that is not a whole number of periods.
+        let p = tx
+            .every(
+                Duration::from_millis(100),
+                Message::raw(Packet::bytes(vec![2])),
+                Some(Duration::from_millis(250)),
+            )
+            .unwrap();
+        clock.advance(0.2).unwrap();
+        assert_eq!(p.sent_count(), 3);
+        assert!(!p.is_running());
+        assert_eq!(clock.next_due(), None);
     }
 
     #[test]

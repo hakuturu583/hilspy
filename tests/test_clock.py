@@ -49,8 +49,11 @@ def test_duration_and_errors(mem: str) -> None:
     clock = hilspy.Clock()
     with hilspy.open(mem, clock=clock) as ch:
         p = ch.every(0.1, hilspy.Message(data=b"x"), duration=0.25)
+        clock.advance(0.2)
+        # The third send is the last: it stops there, with nothing pending.
+        assert p.sent_count == 3 and not p.running and clock.next_due is None
         clock.advance(1.0)
-        assert p.sent_count == 3 and not p.running
+        assert p.sent_count == 3
     with pytest.raises(hilspy.Error, match="back"):
         clock.advance_to(0.5)
     with pytest.raises(hilspy.Error):
