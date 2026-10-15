@@ -3,7 +3,7 @@
 //!
 //! A [`Channel`] composes a [`Transport`] (how packets travel: `can://`,
 //! `udp://`, `tcp://`, `mem://`) with a [`Codec`] (what they mean: `raw`,
-//! `dbc:FILE`, `sbf`, `lidar:MODEL`). Both are pluggable: [`transport::register`] and
+//! `dbc:FILE`, `fibex:FILE`, `sbf`, `lidar:MODEL`). Both are pluggable: [`transport::register`] and
 //! [`codec::register`] add schemes and codecs, and the Python bindings use
 //! them to accept transports and codecs written in Python.
 //!
@@ -15,6 +15,7 @@ pub mod clock;
 pub mod codec;
 pub mod dbc;
 pub mod error;
+pub mod fibex;
 pub mod lidar;
 pub mod message;
 mod queue;

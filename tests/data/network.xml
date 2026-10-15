@@ -1,0 +1,607 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Test network for the fibex codec. tests/data/network.dbc describes the
+     Body channel the same way. -->
+<fx:FIBEX xmlns:fx="http://www.asam.net/xml/fbx" xmlns:ho="http://www.asam.net/xml" xmlns:can="http://www.asam.net/xml/fbx/can" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" VERSION="4.1.2">
+  <fx:PROJECT ID="PRJ_HILSPY">
+    <ho:SHORT-NAME>HilspyTestNetwork</ho:SHORT-NAME>
+  </fx:PROJECT>
+  <fx:ELEMENTS>
+    <fx:CLUSTERS>
+      <fx:CLUSTER ID="CL_BODY" xsi:type="can:CLUSTER-TYPE">
+        <ho:SHORT-NAME>BodyCan</ho:SHORT-NAME>
+        <fx:SPEED>500000</fx:SPEED>
+        <fx:IS-HIGH-LOW-BIT-ORDER>false</fx:IS-HIGH-LOW-BIT-ORDER>
+        <fx:BIT-COUNTING-POLICY>SAWTOOTH</fx:BIT-COUNTING-POLICY>
+        <fx:PROTOCOL xsi:type="can:PROTOCOL-TYPE">CAN</fx:PROTOCOL>
+        <fx:PROTOCOL-VERSION>2.0</fx:PROTOCOL-VERSION>
+        <fx:CHANNEL-REFS>
+          <fx:CHANNEL-REF ID-REF="CH_BODY"/>
+        </fx:CHANNEL-REFS>
+        <fx:MEDIUM>ELECTRICAL</fx:MEDIUM>
+      </fx:CLUSTER>
+      <fx:CLUSTER ID="CL_CHASSIS" xsi:type="can:CLUSTER-TYPE">
+        <ho:SHORT-NAME>ChassisCan</ho:SHORT-NAME>
+        <fx:SPEED>500000</fx:SPEED>
+        <fx:IS-HIGH-LOW-BIT-ORDER>false</fx:IS-HIGH-LOW-BIT-ORDER>
+        <fx:BIT-COUNTING-POLICY>SAWTOOTH</fx:BIT-COUNTING-POLICY>
+        <fx:PROTOCOL xsi:type="can:PROTOCOL-TYPE">CAN</fx:PROTOCOL>
+        <fx:PROTOCOL-VERSION>2.0</fx:PROTOCOL-VERSION>
+        <fx:CHANNEL-REFS>
+          <fx:CHANNEL-REF ID-REF="CH_CHASSIS"/>
+        </fx:CHANNEL-REFS>
+        <fx:MEDIUM>ELECTRICAL</fx:MEDIUM>
+      </fx:CLUSTER>
+    </fx:CLUSTERS>
+    <fx:CHANNELS>
+      <fx:CHANNEL ID="CH_BODY">
+        <ho:SHORT-NAME>Body</ho:SHORT-NAME>
+        <fx:FRAME-TRIGGERINGS>
+          <fx:FRAME-TRIGGERING ID="FT_VehicleStatus_Body" xsi:type="can:FRAME-TRIGGERING-TYPE">
+            <fx:TIMINGS>
+              <fx:CYCLIC-TIMING>
+                <fx:REPEATING-TIME-RANGE><fx:VALUE>PT0.01S</fx:VALUE></fx:REPEATING-TIME-RANGE>
+              </fx:CYCLIC-TIMING>
+            </fx:TIMINGS>
+            <fx:IDENTIFIER><fx:IDENTIFIER-VALUE>256</fx:IDENTIFIER-VALUE></fx:IDENTIFIER>
+            <fx:FRAME-REF ID-REF="F_VehicleStatus"/>
+          </fx:FRAME-TRIGGERING>
+          <fx:FRAME-TRIGGERING ID="FT_SteeringCmd" xsi:type="can:FRAME-TRIGGERING-TYPE">
+            <fx:IDENTIFIER><fx:IDENTIFIER-VALUE EXTENDED-ADDRESSING="true">419369524</fx:IDENTIFIER-VALUE></fx:IDENTIFIER>
+            <fx:FRAME-REF ID-REF="F_SteeringCmd"/>
+          </fx:FRAME-TRIGGERING>
+          <fx:FRAME-TRIGGERING ID="FT_RadarObjects" xsi:type="can:FRAME-TRIGGERING-TYPE">
+            <fx:IDENTIFIER><fx:IDENTIFIER-VALUE>512</fx:IDENTIFIER-VALUE></fx:IDENTIFIER>
+            <fx:FRAME-REF ID-REF="F_RadarObjects"/>
+            <can:CAN-FRAME-TX-BEHAVIOR>CAN-FD</can:CAN-FRAME-TX-BEHAVIOR>
+            <can:CAN-FRAME-RX-BEHAVIOR>CAN-FD</can:CAN-FRAME-RX-BEHAVIOR>
+          </fx:FRAME-TRIGGERING>
+        </fx:FRAME-TRIGGERINGS>
+      </fx:CHANNEL>
+      <fx:CHANNEL ID="CH_CHASSIS">
+        <ho:SHORT-NAME>Chassis</ho:SHORT-NAME>
+        <fx:FRAME-TRIGGERINGS>
+          <fx:FRAME-TRIGGERING ID="FT_VehicleStatus_Chassis" xsi:type="can:FRAME-TRIGGERING-TYPE">
+            <fx:IDENTIFIER><fx:IDENTIFIER-VALUE>257</fx:IDENTIFIER-VALUE></fx:IDENTIFIER>
+            <fx:FRAME-REF ID-REF="F_VehicleStatus"/>
+          </fx:FRAME-TRIGGERING>
+          <fx:FRAME-TRIGGERING ID="FT_WheelSpeeds" xsi:type="can:FRAME-TRIGGERING-TYPE">
+            <fx:IDENTIFIER><fx:IDENTIFIER-VALUE>768</fx:IDENTIFIER-VALUE></fx:IDENTIFIER>
+            <fx:FRAME-REF ID-REF="F_WheelSpeeds"/>
+          </fx:FRAME-TRIGGERING>
+        </fx:FRAME-TRIGGERINGS>
+      </fx:CHANNEL>
+    </fx:CHANNELS>
+    <fx:PDUS>
+      <fx:PDU ID="P_Speed">
+        <ho:SHORT-NAME>SpeedPdu</ho:SHORT-NAME>
+        <fx:BYTE-LENGTH>4</fx:BYTE-LENGTH>
+        <fx:PDU-TYPE>APPLICATION</fx:PDU-TYPE>
+        <fx:SIGNAL-INSTANCES>
+          <fx:SIGNAL-INSTANCE ID="SI_Speed">
+            <fx:BIT-POSITION>0</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+            <fx:SIGNAL-REF ID-REF="S_Speed"/>
+          </fx:SIGNAL-INSTANCE>
+          <fx:SIGNAL-INSTANCE ID="SI_Gear">
+            <fx:BIT-POSITION>16</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+            <fx:SIGNAL-REF ID-REF="S_Gear"/>
+          </fx:SIGNAL-INSTANCE>
+        </fx:SIGNAL-INSTANCES>
+      </fx:PDU>
+      <fx:PDU ID="P_Brake">
+        <ho:SHORT-NAME>BrakePdu</ho:SHORT-NAME>
+        <fx:BYTE-LENGTH>4</fx:BYTE-LENGTH>
+        <fx:PDU-TYPE>APPLICATION</fx:PDU-TYPE>
+        <fx:SIGNAL-INSTANCES>
+          <fx:SIGNAL-INSTANCE ID="SI_BrakePressure">
+            <fx:BIT-POSITION>7</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>true</fx:IS-HIGH-LOW-BYTE-ORDER>
+            <fx:SIGNAL-REF ID-REF="S_BrakePressure"/>
+          </fx:SIGNAL-INSTANCE>
+          <fx:SIGNAL-INSTANCE ID="SI_BrakeActive">
+            <fx:BIT-POSITION>8</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+            <fx:SIGNAL-REF ID-REF="S_BrakeActive"/>
+          </fx:SIGNAL-INSTANCE>
+        </fx:SIGNAL-INSTANCES>
+      </fx:PDU>
+      <fx:PDU ID="P_Steering">
+        <ho:SHORT-NAME>SteeringPdu</ho:SHORT-NAME>
+        <fx:BYTE-LENGTH>8</fx:BYTE-LENGTH>
+        <fx:PDU-TYPE>APPLICATION</fx:PDU-TYPE>
+        <fx:SIGNAL-INSTANCES>
+          <fx:SIGNAL-INSTANCE ID="SI_SteeringAngle">
+            <fx:BIT-POSITION>7</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>true</fx:IS-HIGH-LOW-BYTE-ORDER>
+            <fx:SIGNAL-REF ID-REF="S_SteeringAngle"/>
+          </fx:SIGNAL-INSTANCE>
+          <fx:SIGNAL-INSTANCE ID="SI_Torque">
+            <fx:BIT-POSITION>16</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+            <fx:SIGNAL-REF ID-REF="S_Torque"/>
+          </fx:SIGNAL-INSTANCE>
+          <fx:SIGNAL-INSTANCE ID="SI_Enable">
+            <fx:BIT-POSITION>24</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+            <fx:SIGNAL-REF ID-REF="S_Enable"/>
+          </fx:SIGNAL-INSTANCE>
+        </fx:SIGNAL-INSTANCES>
+      </fx:PDU>
+      <fx:PDU ID="P_Radar">
+        <ho:SHORT-NAME>RadarPdu</ho:SHORT-NAME>
+        <fx:BYTE-LENGTH>16</fx:BYTE-LENGTH>
+        <fx:PDU-TYPE>APPLICATION</fx:PDU-TYPE>
+        <fx:SIGNAL-INSTANCES>
+          <fx:SIGNAL-INSTANCE ID="SI_ObjectCount">
+            <fx:BIT-POSITION>0</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+            <fx:SIGNAL-REF ID-REF="S_ObjectCount"/>
+          </fx:SIGNAL-INSTANCE>
+          <fx:SIGNAL-INSTANCE ID="SI_Distance">
+            <fx:BIT-POSITION>8</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+            <fx:SIGNAL-REF ID-REF="S_Distance"/>
+          </fx:SIGNAL-INSTANCE>
+          <fx:SIGNAL-INSTANCE ID="SI_RadarStatus">
+            <fx:BIT-POSITION>127</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>true</fx:IS-HIGH-LOW-BYTE-ORDER>
+            <fx:SIGNAL-REF ID-REF="S_RadarStatus"/>
+          </fx:SIGNAL-INSTANCE>
+        </fx:SIGNAL-INSTANCES>
+      </fx:PDU>
+      <fx:PDU ID="P_Front">
+        <ho:SHORT-NAME>Front</ho:SHORT-NAME>
+        <fx:BYTE-LENGTH>4</fx:BYTE-LENGTH>
+        <fx:PDU-TYPE>APPLICATION</fx:PDU-TYPE>
+        <fx:SIGNAL-INSTANCES>
+          <fx:SIGNAL-INSTANCE ID="SI_FrontLeft">
+            <fx:BIT-POSITION>0</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+            <fx:SIGNAL-REF ID-REF="S_WheelLeft"/>
+          </fx:SIGNAL-INSTANCE>
+          <fx:SIGNAL-INSTANCE ID="SI_FrontRight">
+            <fx:BIT-POSITION>16</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+            <fx:SIGNAL-REF ID-REF="S_WheelRight"/>
+          </fx:SIGNAL-INSTANCE>
+        </fx:SIGNAL-INSTANCES>
+      </fx:PDU>
+      <fx:PDU ID="P_Rear">
+        <ho:SHORT-NAME>Rear</ho:SHORT-NAME>
+        <fx:BYTE-LENGTH>4</fx:BYTE-LENGTH>
+        <fx:PDU-TYPE>APPLICATION</fx:PDU-TYPE>
+        <fx:SIGNAL-INSTANCES>
+          <fx:SIGNAL-INSTANCE ID="SI_RearLeft">
+            <fx:BIT-POSITION>0</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+            <fx:SIGNAL-REF ID-REF="S_WheelLeft"/>
+          </fx:SIGNAL-INSTANCE>
+          <fx:SIGNAL-INSTANCE ID="SI_RearRight">
+            <fx:BIT-POSITION>16</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+            <fx:SIGNAL-REF ID-REF="S_WheelRight"/>
+          </fx:SIGNAL-INSTANCE>
+        </fx:SIGNAL-INSTANCES>
+      </fx:PDU>
+    </fx:PDUS>
+    <fx:FRAMES>
+      <fx:FRAME ID="F_VehicleStatus">
+        <ho:SHORT-NAME>VehicleStatus</ho:SHORT-NAME>
+        <ho:DESC>Speed, gear and brake</ho:DESC>
+        <fx:BYTE-LENGTH>8</fx:BYTE-LENGTH>
+        <fx:FRAME-TYPE>APPLICATION</fx:FRAME-TYPE>
+        <fx:PDU-INSTANCES>
+          <fx:PDU-INSTANCE ID="F_VehicleStatus_0">
+            <fx:PDU-REF ID-REF="P_Speed"/>
+            <fx:BIT-POSITION>0</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+          </fx:PDU-INSTANCE>
+          <fx:PDU-INSTANCE ID="F_VehicleStatus_1">
+            <fx:PDU-REF ID-REF="P_Brake"/>
+            <fx:BIT-POSITION>32</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+          </fx:PDU-INSTANCE>
+        </fx:PDU-INSTANCES>
+      </fx:FRAME>
+      <fx:FRAME ID="F_SteeringCmd">
+        <ho:SHORT-NAME>SteeringCmd</ho:SHORT-NAME>
+        <fx:BYTE-LENGTH>8</fx:BYTE-LENGTH>
+        <fx:FRAME-TYPE>APPLICATION</fx:FRAME-TYPE>
+        <fx:PDU-INSTANCES>
+          <fx:PDU-INSTANCE ID="F_SteeringCmd_0">
+            <fx:PDU-REF ID-REF="P_Steering"/>
+            <fx:BIT-POSITION>0</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+          </fx:PDU-INSTANCE>
+        </fx:PDU-INSTANCES>
+      </fx:FRAME>
+      <fx:FRAME ID="F_RadarObjects">
+        <ho:SHORT-NAME>RadarObjects</ho:SHORT-NAME>
+        <fx:BYTE-LENGTH>16</fx:BYTE-LENGTH>
+        <fx:FRAME-TYPE>APPLICATION</fx:FRAME-TYPE>
+        <fx:PDU-INSTANCES>
+          <fx:PDU-INSTANCE ID="F_RadarObjects_0">
+            <fx:PDU-REF ID-REF="P_Radar"/>
+            <fx:BIT-POSITION>0</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+          </fx:PDU-INSTANCE>
+        </fx:PDU-INSTANCES>
+      </fx:FRAME>
+      <fx:FRAME ID="F_WheelSpeeds">
+        <ho:SHORT-NAME>WheelSpeeds</ho:SHORT-NAME>
+        <fx:BYTE-LENGTH>8</fx:BYTE-LENGTH>
+        <fx:FRAME-TYPE>APPLICATION</fx:FRAME-TYPE>
+        <fx:PDU-INSTANCES>
+          <fx:PDU-INSTANCE ID="F_WheelSpeeds_0">
+            <fx:PDU-REF ID-REF="P_Front"/>
+            <fx:BIT-POSITION>0</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+          </fx:PDU-INSTANCE>
+          <fx:PDU-INSTANCE ID="F_WheelSpeeds_1">
+            <fx:PDU-REF ID-REF="P_Rear"/>
+            <fx:BIT-POSITION>32</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+          </fx:PDU-INSTANCE>
+        </fx:PDU-INSTANCES>
+      </fx:FRAME>
+    </fx:FRAMES>
+    <fx:SIGNALS>
+      <fx:SIGNAL ID="S_Speed">
+        <ho:SHORT-NAME>Speed</ho:SHORT-NAME>
+        <ho:DESC>Vehicle speed</ho:DESC>
+        <fx:CODING-REF ID-REF="C_Speed"/>
+      </fx:SIGNAL>
+      <fx:SIGNAL ID="S_Gear">
+        <ho:SHORT-NAME>Gear</ho:SHORT-NAME>
+        <fx:CODING-REF ID-REF="C_Gear"/>
+      </fx:SIGNAL>
+      <fx:SIGNAL ID="S_BrakePressure">
+        <ho:SHORT-NAME>BrakePressure</ho:SHORT-NAME>
+        <fx:CODING-REF ID-REF="C_Pressure"/>
+      </fx:SIGNAL>
+      <fx:SIGNAL ID="S_BrakeActive">
+        <ho:SHORT-NAME>BrakeActive</ho:SHORT-NAME>
+        <fx:CODING-REF ID-REF="C_Flag"/>
+      </fx:SIGNAL>
+      <fx:SIGNAL ID="S_SteeringAngle">
+        <ho:SHORT-NAME>SteeringAngle</ho:SHORT-NAME>
+        <fx:CODING-REF ID-REF="C_Angle"/>
+      </fx:SIGNAL>
+      <fx:SIGNAL ID="S_Torque">
+        <ho:SHORT-NAME>Torque</ho:SHORT-NAME>
+        <fx:CODING-REF ID-REF="C_Torque"/>
+      </fx:SIGNAL>
+      <fx:SIGNAL ID="S_Enable">
+        <ho:SHORT-NAME>Enable</ho:SHORT-NAME>
+        <fx:CODING-REF ID-REF="C_Flag"/>
+      </fx:SIGNAL>
+      <fx:SIGNAL ID="S_ObjectCount">
+        <ho:SHORT-NAME>ObjectCount</ho:SHORT-NAME>
+        <fx:CODING-REF ID-REF="C_Count"/>
+      </fx:SIGNAL>
+      <fx:SIGNAL ID="S_Distance">
+        <ho:SHORT-NAME>Distance</ho:SHORT-NAME>
+        <fx:CODING-REF ID-REF="C_Distance"/>
+      </fx:SIGNAL>
+      <fx:SIGNAL ID="S_RadarStatus">
+        <ho:SHORT-NAME>RadarStatus</ho:SHORT-NAME>
+        <fx:CODING-REF ID-REF="C_RadarStatus"/>
+      </fx:SIGNAL>
+      <fx:SIGNAL ID="S_WheelLeft">
+        <ho:SHORT-NAME>Left</ho:SHORT-NAME>
+        <fx:CODING-REF ID-REF="C_Wheel"/>
+      </fx:SIGNAL>
+      <fx:SIGNAL ID="S_WheelRight">
+        <ho:SHORT-NAME>Right</ho:SHORT-NAME>
+        <fx:CODING-REF ID-REF="C_Wheel"/>
+      </fx:SIGNAL>
+    </fx:SIGNALS>
+  </fx:ELEMENTS>
+  <fx:PROCESSING-INFORMATION>
+    <ho:UNIT-SPEC>
+      <ho:UNITS>
+        <ho:UNIT ID="U_KMH">
+          <ho:SHORT-NAME>KMH</ho:SHORT-NAME>
+          <ho:DISPLAY-NAME>km/h</ho:DISPLAY-NAME>
+        </ho:UNIT>
+        <ho:UNIT ID="U_BAR">
+          <ho:SHORT-NAME>BAR</ho:SHORT-NAME>
+          <ho:DISPLAY-NAME>bar</ho:DISPLAY-NAME>
+        </ho:UNIT>
+        <ho:UNIT ID="U_DEG">
+          <ho:SHORT-NAME>DEG</ho:SHORT-NAME>
+          <ho:DISPLAY-NAME>deg</ho:DISPLAY-NAME>
+        </ho:UNIT>
+        <ho:UNIT ID="U_NM">
+          <ho:SHORT-NAME>NM</ho:SHORT-NAME>
+          <ho:DISPLAY-NAME>Nm</ho:DISPLAY-NAME>
+        </ho:UNIT>
+        <ho:UNIT ID="U_M">
+          <ho:SHORT-NAME>M</ho:SHORT-NAME>
+          <ho:DISPLAY-NAME>m</ho:DISPLAY-NAME>
+        </ho:UNIT>
+      </ho:UNITS>
+    </ho:UNIT-SPEC>
+    <fx:CODINGS>
+      <fx:CODING ID="C_Speed">
+        <ho:SHORT-NAME>Speed</ho:SHORT-NAME>
+        <ho:CODED-TYPE ho:BASE-DATA-TYPE="A_UINT16" CATEGORY="STANDARD-LENGTH-TYPE" ENCODING="UNSIGNED">
+          <ho:BIT-LENGTH>16</ho:BIT-LENGTH>
+        </ho:CODED-TYPE>
+        <ho:COMPU-METHODS>
+          <ho:COMPU-METHOD>
+            <ho:SHORT-NAME>Speed</ho:SHORT-NAME>
+            <ho:CATEGORY>LINEAR</ho:CATEGORY>
+            <ho:UNIT-REF ID-REF="U_KMH"/>
+            <ho:PHYS-CONSTRS>
+              <ho:SCALE-CONSTR VALIDITY="VALID">
+                <ho:LOWER-LIMIT>0</ho:LOWER-LIMIT>
+                <ho:UPPER-LIMIT>655.35</ho:UPPER-LIMIT>
+              </ho:SCALE-CONSTR>
+            </ho:PHYS-CONSTRS>
+            <ho:COMPU-INTERNAL-TO-PHYS>
+              <ho:COMPU-SCALES>
+              <ho:COMPU-SCALE>
+                <ho:COMPU-RATIONAL-COEFFS>
+                  <ho:COMPU-NUMERATOR><ho:V>0</ho:V><ho:V>0.01</ho:V></ho:COMPU-NUMERATOR>
+                  <ho:COMPU-DENOMINATOR><ho:V>1</ho:V></ho:COMPU-DENOMINATOR>
+                </ho:COMPU-RATIONAL-COEFFS>
+              </ho:COMPU-SCALE>
+              </ho:COMPU-SCALES>
+            </ho:COMPU-INTERNAL-TO-PHYS>
+          </ho:COMPU-METHOD>
+        </ho:COMPU-METHODS>
+      </fx:CODING>
+      <fx:CODING ID="C_Gear">
+        <ho:SHORT-NAME>Gear</ho:SHORT-NAME>
+        <ho:CODED-TYPE ho:BASE-DATA-TYPE="A_UINT8" CATEGORY="STANDARD-LENGTH-TYPE" ENCODING="UNSIGNED">
+          <ho:BIT-LENGTH>4</ho:BIT-LENGTH>
+        </ho:CODED-TYPE>
+        <ho:COMPU-METHODS>
+          <ho:COMPU-METHOD>
+            <ho:SHORT-NAME>Gear</ho:SHORT-NAME>
+            <ho:CATEGORY>TEXTTABLE</ho:CATEGORY>
+            <ho:COMPU-INTERNAL-TO-PHYS>
+              <ho:COMPU-SCALES>
+              <ho:COMPU-SCALE>
+                <ho:LOWER-LIMIT>0</ho:LOWER-LIMIT>
+                <ho:UPPER-LIMIT>0</ho:UPPER-LIMIT>
+                <ho:COMPU-CONST><ho:VT>P</ho:VT></ho:COMPU-CONST>
+              </ho:COMPU-SCALE>
+              <ho:COMPU-SCALE>
+                <ho:LOWER-LIMIT>1</ho:LOWER-LIMIT>
+                <ho:UPPER-LIMIT>1</ho:UPPER-LIMIT>
+                <ho:COMPU-CONST><ho:VT>R</ho:VT></ho:COMPU-CONST>
+              </ho:COMPU-SCALE>
+              <ho:COMPU-SCALE>
+                <ho:LOWER-LIMIT>2</ho:LOWER-LIMIT>
+                <ho:UPPER-LIMIT>2</ho:UPPER-LIMIT>
+                <ho:COMPU-CONST><ho:VT>N</ho:VT></ho:COMPU-CONST>
+              </ho:COMPU-SCALE>
+              <ho:COMPU-SCALE>
+                <ho:LOWER-LIMIT>3</ho:LOWER-LIMIT>
+                <ho:UPPER-LIMIT>3</ho:UPPER-LIMIT>
+                <ho:COMPU-CONST><ho:VT>D</ho:VT></ho:COMPU-CONST>
+              </ho:COMPU-SCALE>
+              </ho:COMPU-SCALES>
+            </ho:COMPU-INTERNAL-TO-PHYS>
+          </ho:COMPU-METHOD>
+        </ho:COMPU-METHODS>
+      </fx:CODING>
+      <fx:CODING ID="C_Pressure">
+        <ho:SHORT-NAME>Pressure</ho:SHORT-NAME>
+        <ho:CODED-TYPE ho:BASE-DATA-TYPE="A_UINT16" CATEGORY="STANDARD-LENGTH-TYPE" ENCODING="UNSIGNED">
+          <ho:BIT-LENGTH>12</ho:BIT-LENGTH>
+        </ho:CODED-TYPE>
+        <ho:COMPU-METHODS>
+          <ho:COMPU-METHOD>
+            <ho:SHORT-NAME>Pressure</ho:SHORT-NAME>
+            <ho:CATEGORY>LINEAR</ho:CATEGORY>
+            <ho:UNIT-REF ID-REF="U_BAR"/>
+            <ho:PHYS-CONSTRS>
+              <ho:SCALE-CONSTR VALIDITY="VALID">
+                <ho:LOWER-LIMIT>0</ho:LOWER-LIMIT>
+                <ho:UPPER-LIMIT>409.5</ho:UPPER-LIMIT>
+              </ho:SCALE-CONSTR>
+            </ho:PHYS-CONSTRS>
+            <ho:COMPU-INTERNAL-TO-PHYS>
+              <ho:COMPU-SCALES>
+              <ho:COMPU-SCALE>
+                <ho:COMPU-RATIONAL-COEFFS>
+                  <ho:COMPU-NUMERATOR><ho:V>0</ho:V><ho:V>0.1</ho:V></ho:COMPU-NUMERATOR>
+                  <ho:COMPU-DENOMINATOR><ho:V>1</ho:V></ho:COMPU-DENOMINATOR>
+                </ho:COMPU-RATIONAL-COEFFS>
+              </ho:COMPU-SCALE>
+              </ho:COMPU-SCALES>
+            </ho:COMPU-INTERNAL-TO-PHYS>
+          </ho:COMPU-METHOD>
+        </ho:COMPU-METHODS>
+      </fx:CODING>
+      <fx:CODING ID="C_Flag">
+        <ho:SHORT-NAME>Flag</ho:SHORT-NAME>
+        <ho:CODED-TYPE ho:BASE-DATA-TYPE="A_UINT8" CATEGORY="STANDARD-LENGTH-TYPE" ENCODING="UNSIGNED">
+          <ho:BIT-LENGTH>1</ho:BIT-LENGTH>
+        </ho:CODED-TYPE>
+        <ho:COMPU-METHODS>
+          <ho:COMPU-METHOD>
+            <ho:SHORT-NAME>Flag</ho:SHORT-NAME>
+            <ho:CATEGORY>IDENTICAL</ho:CATEGORY>
+            <ho:PHYS-CONSTRS>
+              <ho:SCALE-CONSTR VALIDITY="VALID">
+                <ho:LOWER-LIMIT>0</ho:LOWER-LIMIT>
+                <ho:UPPER-LIMIT>1</ho:UPPER-LIMIT>
+              </ho:SCALE-CONSTR>
+            </ho:PHYS-CONSTRS>
+          </ho:COMPU-METHOD>
+        </ho:COMPU-METHODS>
+      </fx:CODING>
+      <fx:CODING ID="C_Angle">
+        <ho:SHORT-NAME>Angle</ho:SHORT-NAME>
+        <ho:CODED-TYPE ho:BASE-DATA-TYPE="A_INT16" CATEGORY="STANDARD-LENGTH-TYPE" ENCODING="2C">
+          <ho:BIT-LENGTH>16</ho:BIT-LENGTH>
+        </ho:CODED-TYPE>
+        <ho:COMPU-METHODS>
+          <ho:COMPU-METHOD>
+            <ho:SHORT-NAME>Angle</ho:SHORT-NAME>
+            <ho:CATEGORY>LINEAR</ho:CATEGORY>
+            <ho:UNIT-REF ID-REF="U_DEG"/>
+            <ho:PHYS-CONSTRS>
+              <ho:SCALE-CONSTR VALIDITY="VALID">
+                <ho:LOWER-LIMIT>-780</ho:LOWER-LIMIT>
+                <ho:UPPER-LIMIT>780</ho:UPPER-LIMIT>
+              </ho:SCALE-CONSTR>
+            </ho:PHYS-CONSTRS>
+            <ho:COMPU-INTERNAL-TO-PHYS>
+              <ho:COMPU-SCALES>
+              <ho:COMPU-SCALE>
+                <ho:COMPU-RATIONAL-COEFFS>
+                  <ho:COMPU-NUMERATOR><ho:V>0</ho:V><ho:V>0.1</ho:V></ho:COMPU-NUMERATOR>
+                  <ho:COMPU-DENOMINATOR><ho:V>1</ho:V></ho:COMPU-DENOMINATOR>
+                </ho:COMPU-RATIONAL-COEFFS>
+              </ho:COMPU-SCALE>
+              </ho:COMPU-SCALES>
+            </ho:COMPU-INTERNAL-TO-PHYS>
+          </ho:COMPU-METHOD>
+        </ho:COMPU-METHODS>
+      </fx:CODING>
+      <fx:CODING ID="C_Torque">
+        <ho:SHORT-NAME>Torque</ho:SHORT-NAME>
+        <ho:CODED-TYPE ho:BASE-DATA-TYPE="A_INT8" CATEGORY="STANDARD-LENGTH-TYPE" ENCODING="2C">
+          <ho:BIT-LENGTH>8</ho:BIT-LENGTH>
+        </ho:CODED-TYPE>
+        <ho:COMPU-METHODS>
+          <ho:COMPU-METHOD>
+            <ho:SHORT-NAME>Torque</ho:SHORT-NAME>
+            <ho:CATEGORY>SCALE-LINEAR</ho:CATEGORY>
+            <ho:UNIT-REF ID-REF="U_NM"/>
+            <ho:PHYS-CONSTRS>
+              <ho:SCALE-CONSTR VALIDITY="VALID">
+                <ho:LOWER-LIMIT>-6.4</ho:LOWER-LIMIT>
+                <ho:UPPER-LIMIT>6.3</ho:UPPER-LIMIT>
+              </ho:SCALE-CONSTR>
+            </ho:PHYS-CONSTRS>
+            <ho:COMPU-INTERNAL-TO-PHYS>
+              <ho:COMPU-SCALES>
+              <ho:COMPU-SCALE>
+                <ho:LOWER-LIMIT>-128</ho:LOWER-LIMIT>
+                <ho:UPPER-LIMIT>126</ho:UPPER-LIMIT>
+                <ho:COMPU-RATIONAL-COEFFS>
+                  <ho:COMPU-NUMERATOR><ho:V>0</ho:V><ho:V>0.05</ho:V></ho:COMPU-NUMERATOR>
+                  <ho:COMPU-DENOMINATOR><ho:V>1</ho:V></ho:COMPU-DENOMINATOR>
+                </ho:COMPU-RATIONAL-COEFFS>
+              </ho:COMPU-SCALE>
+              <ho:COMPU-SCALE>
+                <ho:LOWER-LIMIT>127</ho:LOWER-LIMIT>
+                <ho:UPPER-LIMIT>127</ho:UPPER-LIMIT>
+                <ho:COMPU-CONST><ho:VT>Invalid</ho:VT></ho:COMPU-CONST>
+              </ho:COMPU-SCALE>
+              </ho:COMPU-SCALES>
+            </ho:COMPU-INTERNAL-TO-PHYS>
+          </ho:COMPU-METHOD>
+        </ho:COMPU-METHODS>
+      </fx:CODING>
+      <fx:CODING ID="C_Count">
+        <ho:SHORT-NAME>Count</ho:SHORT-NAME>
+        <ho:CODED-TYPE ho:BASE-DATA-TYPE="A_UINT8" CATEGORY="STANDARD-LENGTH-TYPE" ENCODING="UNSIGNED">
+          <ho:BIT-LENGTH>8</ho:BIT-LENGTH>
+        </ho:CODED-TYPE>
+        <ho:COMPU-METHODS>
+          <ho:COMPU-METHOD>
+            <ho:SHORT-NAME>Count</ho:SHORT-NAME>
+            <ho:CATEGORY>IDENTICAL</ho:CATEGORY>
+          </ho:COMPU-METHOD>
+        </ho:COMPU-METHODS>
+      </fx:CODING>
+      <fx:CODING ID="C_Distance">
+        <ho:SHORT-NAME>Distance</ho:SHORT-NAME>
+        <ho:CODED-TYPE ho:BASE-DATA-TYPE="A_UINT16" CATEGORY="STANDARD-LENGTH-TYPE" ENCODING="UNSIGNED">
+          <ho:BIT-LENGTH>16</ho:BIT-LENGTH>
+        </ho:CODED-TYPE>
+        <ho:COMPU-METHODS>
+          <ho:COMPU-METHOD>
+            <ho:SHORT-NAME>Distance</ho:SHORT-NAME>
+            <ho:CATEGORY>LINEAR</ho:CATEGORY>
+            <ho:UNIT-REF ID-REF="U_M"/>
+            <ho:PHYS-CONSTRS>
+              <ho:SCALE-CONSTR VALIDITY="VALID">
+                <ho:LOWER-LIMIT>0</ho:LOWER-LIMIT>
+                <ho:UPPER-LIMIT>655.35</ho:UPPER-LIMIT>
+              </ho:SCALE-CONSTR>
+            </ho:PHYS-CONSTRS>
+            <ho:COMPU-INTERNAL-TO-PHYS>
+              <ho:COMPU-SCALES>
+              <ho:COMPU-SCALE>
+                <ho:COMPU-RATIONAL-COEFFS>
+                  <ho:COMPU-NUMERATOR><ho:V>0</ho:V><ho:V>1</ho:V></ho:COMPU-NUMERATOR>
+                  <ho:COMPU-DENOMINATOR><ho:V>100</ho:V></ho:COMPU-DENOMINATOR>
+                </ho:COMPU-RATIONAL-COEFFS>
+              </ho:COMPU-SCALE>
+              </ho:COMPU-SCALES>
+            </ho:COMPU-INTERNAL-TO-PHYS>
+          </ho:COMPU-METHOD>
+        </ho:COMPU-METHODS>
+      </fx:CODING>
+      <fx:CODING ID="C_RadarStatus">
+        <ho:SHORT-NAME>RadarStatus</ho:SHORT-NAME>
+        <ho:CODED-TYPE ho:BASE-DATA-TYPE="A_UINT8" CATEGORY="STANDARD-LENGTH-TYPE" ENCODING="UNSIGNED">
+          <ho:BIT-LENGTH>2</ho:BIT-LENGTH>
+        </ho:CODED-TYPE>
+        <ho:COMPU-METHODS>
+          <ho:COMPU-METHOD>
+            <ho:SHORT-NAME>RadarStatus</ho:SHORT-NAME>
+            <ho:CATEGORY>TEXTTABLE</ho:CATEGORY>
+            <ho:COMPU-INTERNAL-TO-PHYS>
+              <ho:COMPU-SCALES>
+              <ho:COMPU-SCALE>
+                <ho:LOWER-LIMIT>0</ho:LOWER-LIMIT>
+                <ho:UPPER-LIMIT>0</ho:UPPER-LIMIT>
+                <ho:COMPU-CONST><ho:VT>Ok</ho:VT></ho:COMPU-CONST>
+              </ho:COMPU-SCALE>
+              <ho:COMPU-SCALE>
+                <ho:LOWER-LIMIT>1</ho:LOWER-LIMIT>
+                <ho:UPPER-LIMIT>1</ho:UPPER-LIMIT>
+                <ho:COMPU-CONST><ho:VT>Degraded</ho:VT></ho:COMPU-CONST>
+              </ho:COMPU-SCALE>
+              <ho:COMPU-SCALE>
+                <ho:LOWER-LIMIT>2</ho:LOWER-LIMIT>
+                <ho:UPPER-LIMIT>2</ho:UPPER-LIMIT>
+                <ho:COMPU-CONST><ho:VT>Blocked</ho:VT></ho:COMPU-CONST>
+              </ho:COMPU-SCALE>
+              </ho:COMPU-SCALES>
+            </ho:COMPU-INTERNAL-TO-PHYS>
+          </ho:COMPU-METHOD>
+        </ho:COMPU-METHODS>
+      </fx:CODING>
+      <fx:CODING ID="C_Wheel">
+        <ho:SHORT-NAME>Wheel</ho:SHORT-NAME>
+        <ho:CODED-TYPE ho:BASE-DATA-TYPE="A_UINT16" CATEGORY="STANDARD-LENGTH-TYPE" ENCODING="UNSIGNED">
+          <ho:BIT-LENGTH>16</ho:BIT-LENGTH>
+        </ho:CODED-TYPE>
+        <ho:COMPU-METHODS>
+          <ho:COMPU-METHOD>
+            <ho:SHORT-NAME>Wheel</ho:SHORT-NAME>
+            <ho:CATEGORY>LINEAR</ho:CATEGORY>
+            <ho:UNIT-REF ID-REF="U_KMH"/>
+            <ho:PHYS-CONSTRS>
+              <ho:SCALE-CONSTR VALIDITY="VALID">
+                <ho:LOWER-LIMIT>0</ho:LOWER-LIMIT>
+                <ho:UPPER-LIMIT>655.35</ho:UPPER-LIMIT>
+              </ho:SCALE-CONSTR>
+            </ho:PHYS-CONSTRS>
+            <ho:COMPU-INTERNAL-TO-PHYS>
+              <ho:COMPU-SCALES>
+              <ho:COMPU-SCALE>
+                <ho:COMPU-RATIONAL-COEFFS>
+                  <ho:COMPU-NUMERATOR><ho:V>0</ho:V><ho:V>0.01</ho:V></ho:COMPU-NUMERATOR>
+                  <ho:COMPU-DENOMINATOR><ho:V>1</ho:V></ho:COMPU-DENOMINATOR>
+                </ho:COMPU-RATIONAL-COEFFS>
+              </ho:COMPU-SCALE>
+              </ho:COMPU-SCALES>
+            </ho:COMPU-INTERNAL-TO-PHYS>
+          </ho:COMPU-METHOD>
+        </ho:COMPU-METHODS>
+      </fx:CODING>
+    </fx:CODINGS>
+  </fx:PROCESSING-INFORMATION>
+</fx:FIBEX>

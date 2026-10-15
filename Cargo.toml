@@ -12,6 +12,8 @@ repository = "https://github.com/hakuturu583/hilspy"
 [workspace.dependencies]
 hilspy-core = { path = "crates/hilspy-core" }
 can-dbc = "10.0.0"
+afibex = "0.11"
+roxmltree = "0.21"
 libsbf = "0.18.0"
 socketcan = { version = "4.0.0", default-features = false, features = ["dump"] }
 thiserror = "2"
