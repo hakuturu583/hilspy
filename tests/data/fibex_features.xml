@@ -41,7 +41,10 @@
             <fx:IDENTIFIER><fx:IDENTIFIER-VALUE>1027</fx:IDENTIFIER-VALUE></fx:IDENTIFIER>
             <fx:FRAME-REF ID-REF="F_Swapped"/>
           </fx:FRAME-TRIGGERING>
-          <!-- triggerings -->
+          <fx:FRAME-TRIGGERING ID="FT_Multiplexed" xsi:type="can:FRAME-TRIGGERING-TYPE">
+            <fx:IDENTIFIER><fx:IDENTIFIER-VALUE>1028</fx:IDENTIFIER-VALUE></fx:IDENTIFIER>
+            <fx:FRAME-REF ID-REF="F_Multiplexed"/>
+          </fx:FRAME-TRIGGERING>
         </fx:FRAME-TRIGGERINGS>
       </fx:CHANNEL>
     </fx:CHANNELS>
@@ -163,7 +166,102 @@
           </fx:SIGNAL-INSTANCE>
         </fx:SIGNAL-INSTANCES>
       </fx:PDU>
-      <!-- pdus -->
+      <fx:PDU ID="P_Mux">
+        <ho:SHORT-NAME>MuxPdu</ho:SHORT-NAME>
+        <fx:BYTE-LENGTH>8</fx:BYTE-LENGTH>
+        <fx:PDU-TYPE>APPLICATION</fx:PDU-TYPE>
+        <fx:MULTIPLEXER>
+          <fx:SWITCH ID="SW_Mux">
+            <ho:SHORT-NAME>Mux</ho:SHORT-NAME>
+            <fx:BIT-POSITION>0</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+            <ho:BIT-LENGTH>8</ho:BIT-LENGTH>
+          </fx:SWITCH>
+          <fx:DYNAMIC-PART ID="DP_Mux">
+            <ho:SHORT-NAME>MuxDynamic</ho:SHORT-NAME>
+            <fx:SEGMENT-POSITIONS>
+              <fx:SEGMENT-POSITION>
+                <fx:BIT-POSITION>8</fx:BIT-POSITION>
+                <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+                <ho:BIT-LENGTH>24</ho:BIT-LENGTH>
+              </fx:SEGMENT-POSITION>
+            </fx:SEGMENT-POSITIONS>
+            <fx:SWITCHED-PDU-INSTANCES>
+              <fx:SWITCHED-PDU-INSTANCE ID="SPI_Mux3">
+                <fx:PDU-REF ID-REF="P_MuxB"/>
+                <fx:SWITCH-CODE>3</fx:SWITCH-CODE>
+              </fx:SWITCHED-PDU-INSTANCE>
+              <fx:SWITCHED-PDU-INSTANCE ID="SPI_Mux1">
+                <fx:PDU-REF ID-REF="P_MuxA"/>
+                <fx:SWITCH-CODE>1</fx:SWITCH-CODE>
+              </fx:SWITCHED-PDU-INSTANCE>
+              <fx:SWITCHED-PDU-INSTANCE ID="SPI_Mux2">
+                <fx:PDU-REF ID-REF="P_MuxB"/>
+                <fx:SWITCH-CODE>2</fx:SWITCH-CODE>
+              </fx:SWITCHED-PDU-INSTANCE>
+            </fx:SWITCHED-PDU-INSTANCES>
+          </fx:DYNAMIC-PART>
+          <fx:STATIC-PART ID="ST_Mux">
+            <ho:SHORT-NAME>MuxStatic</ho:SHORT-NAME>
+            <fx:SEGMENT-POSITIONS>
+              <fx:SEGMENT-POSITION>
+                <fx:BIT-POSITION>48</fx:BIT-POSITION>
+                <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+                <ho:BIT-LENGTH>8</ho:BIT-LENGTH>
+              </fx:SEGMENT-POSITION>
+            </fx:SEGMENT-POSITIONS>
+            <fx:STATIC-PDU-INSTANCE ID="SPI_MuxStatic">
+              <fx:PDU-REF ID-REF="P_MuxStatic"/>
+            </fx:STATIC-PDU-INSTANCE>
+          </fx:STATIC-PART>
+        </fx:MULTIPLEXER>
+      </fx:PDU>
+      <fx:PDU ID="P_MuxA">
+        <ho:SHORT-NAME>MuxA</ho:SHORT-NAME>
+        <fx:BYTE-LENGTH>8</fx:BYTE-LENGTH>
+        <fx:PDU-TYPE>APPLICATION</fx:PDU-TYPE>
+        <fx:SIGNAL-INSTANCES>
+          <fx:SIGNAL-INSTANCE ID="SI_MuxA16">
+            <fx:BIT-POSITION>8</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+            <fx:SIGNAL-REF ID-REF="S_A16"/>
+          </fx:SIGNAL-INSTANCE>
+          <fx:SIGNAL-INSTANCE ID="SI_MuxA8">
+            <fx:BIT-POSITION>31</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>true</fx:IS-HIGH-LOW-BYTE-ORDER>
+            <fx:SIGNAL-REF ID-REF="S_A8"/>
+          </fx:SIGNAL-INSTANCE>
+        </fx:SIGNAL-INSTANCES>
+      </fx:PDU>
+      <fx:PDU ID="P_MuxB">
+        <ho:SHORT-NAME>MuxB</ho:SHORT-NAME>
+        <fx:BYTE-LENGTH>8</fx:BYTE-LENGTH>
+        <fx:PDU-TYPE>APPLICATION</fx:PDU-TYPE>
+        <fx:SIGNAL-INSTANCES>
+          <fx:SIGNAL-INSTANCE ID="SI_MuxB16">
+            <fx:BIT-POSITION>8</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+            <fx:SIGNAL-REF ID-REF="S_B16"/>
+          </fx:SIGNAL-INSTANCE>
+          <fx:SIGNAL-INSTANCE ID="SI_MuxB4">
+            <fx:BIT-POSITION>24</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+            <fx:SIGNAL-REF ID-REF="S_B4"/>
+          </fx:SIGNAL-INSTANCE>
+        </fx:SIGNAL-INSTANCES>
+      </fx:PDU>
+      <fx:PDU ID="P_MuxStatic">
+        <ho:SHORT-NAME>MuxStatic</ho:SHORT-NAME>
+        <fx:BYTE-LENGTH>8</fx:BYTE-LENGTH>
+        <fx:PDU-TYPE>APPLICATION</fx:PDU-TYPE>
+        <fx:SIGNAL-INSTANCES>
+          <fx:SIGNAL-INSTANCE ID="SI_Counter">
+            <fx:BIT-POSITION>48</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+            <fx:SIGNAL-REF ID-REF="S_Counter"/>
+          </fx:SIGNAL-INSTANCE>
+        </fx:SIGNAL-INSTANCES>
+      </fx:PDU>
     </fx:PDUS>
     <fx:FRAMES>
       <fx:FRAME ID="F_Encodings">
@@ -224,7 +322,18 @@
           </fx:PDU-INSTANCE>
         </fx:PDU-INSTANCES>
       </fx:FRAME>
-      <!-- frames -->
+      <fx:FRAME ID="F_Multiplexed">
+        <ho:SHORT-NAME>Multiplexed</ho:SHORT-NAME>
+        <fx:BYTE-LENGTH>8</fx:BYTE-LENGTH>
+        <fx:FRAME-TYPE>APPLICATION</fx:FRAME-TYPE>
+        <fx:PDU-INSTANCES>
+          <fx:PDU-INSTANCE ID="F_Multiplexed_0">
+            <fx:PDU-REF ID-REF="P_Mux"/>
+            <fx:BIT-POSITION>0</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+          </fx:PDU-INSTANCE>
+        </fx:PDU-INSTANCES>
+      </fx:FRAME>
     </fx:FRAMES>
     <fx:SIGNALS>
       <fx:SIGNAL ID="S_SmSmall">
@@ -287,7 +396,26 @@
         <ho:SHORT-NAME>SwapC</ho:SHORT-NAME>
         <fx:CODING-REF ID-REF="C_U8"/>
       </fx:SIGNAL>
-      <!-- signals -->
+      <fx:SIGNAL ID="S_A16">
+        <ho:SHORT-NAME>A16</ho:SHORT-NAME>
+        <fx:CODING-REF ID-REF="C_U16"/>
+      </fx:SIGNAL>
+      <fx:SIGNAL ID="S_A8">
+        <ho:SHORT-NAME>A8</ho:SHORT-NAME>
+        <fx:CODING-REF ID-REF="C_U8"/>
+      </fx:SIGNAL>
+      <fx:SIGNAL ID="S_B16">
+        <ho:SHORT-NAME>B16</ho:SHORT-NAME>
+        <fx:CODING-REF ID-REF="C_U16"/>
+      </fx:SIGNAL>
+      <fx:SIGNAL ID="S_B4">
+        <ho:SHORT-NAME>B4</ho:SHORT-NAME>
+        <fx:CODING-REF ID-REF="C_U4"/>
+      </fx:SIGNAL>
+      <fx:SIGNAL ID="S_Counter">
+        <ho:SHORT-NAME>Counter</ho:SHORT-NAME>
+        <fx:CODING-REF ID-REF="C_U8"/>
+      </fx:SIGNAL>
     </fx:SIGNALS>
   </fx:ELEMENTS>
   <fx:PROCESSING-INFORMATION>
@@ -554,7 +682,6 @@
           </ho:COMPU-METHOD>
         </ho:COMPU-METHODS>
       </fx:CODING>
-      <!-- codings -->
     </fx:CODINGS>
   </fx:PROCESSING-INFORMATION>
 </fx:FIBEX>

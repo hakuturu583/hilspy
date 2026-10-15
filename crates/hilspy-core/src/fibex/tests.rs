@@ -479,3 +479,150 @@ fn high_low_pdu_instances() {
         "{e}"
     );
 }
+
+#[test]
+fn multiplexed_pdus() {
+    let db = features();
+    let m = db.message_by_name("Multiplexed").unwrap();
+    let mux: Vec<_> = m
+        .signals
+        .iter()
+        .map(|s| {
+            (
+                s.name.as_str(),
+                s.is_multiplexor,
+                s.multiplexing
+                    .as_ref()
+                    .map(|x| (x.multiplexor, x.ranges.clone())),
+            )
+        })
+        .collect();
+    assert_eq!(
+        mux,
+        [
+            ("Mux", true, None),
+            ("A16", false, Some((0, vec![(1, 1)]))),
+            ("A8", false, Some((0, vec![(1, 1)]))),
+            ("B16", false, Some((0, vec![(2, 3)]))),
+            ("B4", false, Some((0, vec![(2, 3)]))),
+            ("Counter", false, None),
+        ]
+    );
+    let opts = EncodeOptions::default();
+    let cases = [
+        (
+            named(&[
+                ("Mux", Value::Int(1)),
+                ("A16", Value::Int(0x1234)),
+                ("A8", Value::Int(0xAB)),
+                ("Counter", Value::Int(7)),
+            ]),
+            [1, 0x34, 0x12, 0xAB, 0, 0, 7, 0],
+        ),
+        (
+            named(&[
+                ("Mux", Value::Int(2)),
+                ("B16", Value::Int(0xBEEF)),
+                ("B4", Value::Int(0x9)),
+                ("Counter", Value::Int(8)),
+            ]),
+            [2, 0xEF, 0xBE, 0x09, 0, 0, 8, 0],
+        ),
+        (
+            named(&[
+                ("Mux", Value::Int(3)),
+                ("B16", Value::Int(1)),
+                ("B4", Value::Int(0xF)),
+                ("Counter", Value::Int(9)),
+            ]),
+            [3, 0x01, 0x00, 0x0F, 0, 0, 9, 0],
+        ),
+    ];
+    for (values, bytes) in cases {
+        let data = m.encode(&values, &opts).unwrap();
+        assert_eq!(data, bytes, "{values:?}");
+        assert_eq!(m.decode(&data, &DecodeOptions::default()).unwrap(), values);
+    }
+    // A switched PDU's signal is absent under another code.
+    let e = m
+        .encode(
+            &named(&[
+                ("Mux", Value::Int(1)),
+                ("A16", Value::Int(0)),
+                ("A8", Value::Int(0)),
+                ("B4", Value::Int(0)),
+                ("Counter", Value::Int(0)),
+            ]),
+            &opts,
+        )
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("B4") && e.contains("not present"), "{e}");
+    // Only the switch and the static part under an unknown code.
+    let decoded = m
+        .decode(&[9, 1, 2, 3, 0, 0, 5, 0], &DecodeOptions::default())
+        .unwrap();
+    assert_eq!(
+        decoded,
+        named(&[("Mux", Value::Int(9)), ("Counter", Value::Int(5))])
+    );
+}
+
+#[test]
+fn unsupported_multiplexing_is_reported() {
+    let text = std::fs::read_to_string(data("fibex_features.xml")).unwrap();
+    let cases = [
+        (
+            "code",
+            text.replace(
+                "<fx:SWITCH-CODE>3</fx:SWITCH-CODE>",
+                "<fx:SWITCH-CODE>256</fx:SWITCH-CODE>",
+            ),
+            "switch code 256 does not fit in the 8 bits of switch Mux",
+        ),
+        (
+            "duplicate",
+            text.replace(
+                "<fx:SWITCH-CODE>3</fx:SWITCH-CODE>",
+                "<fx:SWITCH-CODE>2</fx:SWITCH-CODE>",
+            ),
+            "distinct integer SWITCH-CODE",
+        ),
+        (
+            "position",
+            text.replace(
+                "<fx:PDU-REF ID-REF=\"P_MuxA\"/>",
+                "<fx:PDU-REF ID-REF=\"P_MuxA\"/><fx:BIT-POSITION>8</fx:BIT-POSITION>",
+            ),
+            "must be at bit 0",
+        ),
+        (
+            "nested",
+            text.replace(
+                "<fx:PDU-REF ID-REF=\"P_MuxStatic\"/>",
+                "<fx:PDU-REF ID-REF=\"P_Mux\"/>",
+            ),
+            "nested multiplexing",
+        ),
+        (
+            "switch",
+            text.replace(
+                "<fx:BIT-POSITION>0</fx:BIT-POSITION>\n            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>\n            <ho:BIT-LENGTH>8</ho:BIT-LENGTH>",
+                "<fx:BIT-POSITION>60</fx:BIT-POSITION>\n            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>\n            <ho:BIT-LENGTH>8</ho:BIT-LENGTH>",
+            ),
+            "switch Mux from bit 60 do not fit",
+        ),
+        (
+            "dynamic",
+            without(&text, "<fx:DYNAMIC-PART ID=\"DP_Mux\">", "</fx:DYNAMIC-PART>"),
+            "no DYNAMIC-PART",
+        ),
+    ];
+    for (name, changed, expected) in cases {
+        assert_ne!(changed, text, "{name}: the fixture changed");
+        let path = variant(name, &changed);
+        let e = load_err(&path, None);
+        std::fs::remove_file(path).unwrap();
+        assert!(e.contains(expected), "{name}: {e}");
+    }
+}

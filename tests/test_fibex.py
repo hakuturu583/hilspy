@@ -248,3 +248,35 @@ def test_features_match_the_dbc(mem: str, name: str) -> None:
             fibex_raw.send(b)
             back = fibex.recv(timeout=1)
             assert back is not None and back.fields == values
+
+
+MULTIPLEXED: dict[int, dict[str, Any]] = {
+    1: {"Mux": 1, "A16": 0x1234, "A8": 0xAB, "Counter": 7},
+    2: {"Mux": 2, "B16": 0xBEEF, "B4": 9, "Counter": 8},
+    3: {"Mux": 3, "B16": 1, "B4": 15, "Counter": 9},
+}
+
+
+@pytest.mark.parametrize("code", list(MULTIPLEXED))
+def test_multiplexed_pdu_matches_the_dbc(mem: str, code: int) -> None:
+    """Every switch code gives the payload of the DBC (`M`, `mN` and `SG_MUL_VAL_`)."""
+    values = MULTIPLEXED[code]
+    dbc_spec = f"dbc:{FEATURES_DBC}"
+    fibex_bus, dbc_bus = f"{mem}-fibex", f"{mem}-dbc"
+    with (
+        hilspy.open(fibex_bus, FEATURES) as fibex,
+        hilspy.open(fibex_bus) as fibex_raw,
+        hilspy.open(dbc_bus, dbc_spec) as dbc,
+        hilspy.open(dbc_bus) as dbc_raw,
+    ):
+        fibex.send("Multiplexed", values)
+        dbc.send("Multiplexed", values)
+        a, b = fibex_raw.recv(timeout=1), dbc_raw.recv(timeout=1)
+        assert a is not None and b is not None and a.data == b.data
+        assert a.data is not None and a.data[0] == code
+        # Each decodes the other's frame to the same fields.
+        fibex_raw.send(b)
+        dbc_raw.send(a)
+        from_dbc, from_fibex = fibex.recv(timeout=1), dbc.recv(timeout=1)
+        assert from_dbc is not None and from_fibex is not None
+        assert from_dbc.fields == from_fibex.fields == values

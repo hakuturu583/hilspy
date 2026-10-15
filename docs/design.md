@@ -136,7 +136,9 @@ deadlocking. A Python exception raised in a plugin travels through the core as
   `Database` (each signal's PDU bits mapped through its PDU instance to
   frame bits, low-high as an offset, high-low as the value bits of a
   Motorola field of the PDU's length, which `dbc::bits::layout` turns back into a start bit and byte
-  order; clashing names qualified as `PDU.Signal`), and the codec is the `dbc` codec over it, so
+  order; clashing names qualified as `PDU.Signal`; a multiplexed PDU's switch
+  becomes the multiplexor and its switched PDUs' signals are multiplexed on
+  their switch codes, in the multiplexed PDU's bit numbering), and the codec is the `dbc` codec over it, so
   the bit layout, options and E2E are shared. Compu methods that one factor
   and offset plus exact value table entries cannot express become a
   per-signal `dbc::Coding` (texttable ranges, piecewise linear and rational

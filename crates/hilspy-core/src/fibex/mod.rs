@@ -10,6 +10,15 @@
 //! (scales with their limits, rational coefficients and texttable names,
 //! physical constraints, units).
 //!
+//! Multiplexed PDUs: the `SWITCH` becomes a multiplexor signal, each switched
+//! PDU's signals are multiplexed on its `SWITCH-CODE`s (consecutive codes of
+//! one PDU merged into ranges, like `SG_MUL_VAL_`), and the `STATIC-PART`'s
+//! signals are plain. `afibex` reads the switch and the dynamic part; the
+//! static part, which it skips, comes from `roxmltree`. Switched and static
+//! PDUs are laid out in the multiplexed PDU's bit numbering (AUTOSAR copies
+//! segments at the same positions; `canmatrix` writes them so), so their
+//! instances must be at bit 0, low-high.
+//!
 //! Coded types: unsigned and two's complement integers map onto the DBC
 //! value types; sign-magnitude (`SM`) and one's complement (`1C`) integers
 //! onto [`ValueKind::SignMagnitude`] and [`ValueKind::OnesComplement`].
@@ -31,21 +40,23 @@
 //! `offset + b`; a high-low instance holds the PDU big-endian, as a Motorola
 //! field of the PDU's length whose most significant bit is at the position,
 //! so PDU bit `b` is value bit `b` of that field and the PDU's last byte comes
-//! first. A signal's frame bits are those of its PDU bits ([`Placement`]);
-//! they must again form one DBC signal, which they always do at a byte
-//! boundary (a high-low instance turns Intel signals into Motorola ones and
-//! back). Elsewhere, a signal that crosses a byte of its PDU against the
-//! instance's order is split in the frame and rejected.
+//! first. A signal's frame bits are those of its PDU bits (`Placement`); they
+//! must again form one DBC signal, which they always do at a byte boundary (a
+//! high-low instance turns Intel signals into Motorola ones and back). Off a
+//! byte boundary an Intel signal still does, while a Motorola signal that
+//! crosses a byte of its PDU is split in the frame and rejected.
 
 use std::collections::HashMap;
 use std::ops::Bound;
 use std::path::Path;
 
-use afibex::fibex::{BaseDataType, Category, Encoding, FibexData};
+use afibex::fibex::{
+    BaseDataType, Category, Encoding, FibexData, Pdu, PduInstance, SignalInstance,
+};
 use roxmltree::{Document, Node};
 
 use crate::dbc::{
-    bits, ByteOrder, Coding, Conversion, Database, Message, Scale, Signal, ValueKind,
+    bits, ByteOrder, Coding, Conversion, Database, Message, Multiplexing, Scale, Signal, ValueKind,
 };
 use crate::error::{Error, Result};
 
@@ -187,6 +198,9 @@ struct Placement {
     /// start bit: byte * 8 + bit, bit 0 the least significant).
     bits: Vec<(usize, u32)>,
     frame_len: usize,
+    /// For errors: the frame's name and the instance's `BIT-POSITION`.
+    frame: String,
+    offset: u32,
 }
 
 impl Placement {
@@ -195,7 +209,7 @@ impl Placement {
     /// position is the PDU's least significant bit and PDU bit `b` is frame
     /// bit `offset + b`. High-low: the PDU is a Motorola field whose most
     /// significant bit is at the position, so its last byte comes first.
-    fn new(offset: u32, high_low: bool, len: usize, frame_len: usize) -> Option<Self> {
+    fn new(offset: u32, high_low: bool, len: usize, frame_len: usize, frame: &str) -> Option<Self> {
         let size = u32::try_from(len * 8).ok()?;
         let bits = if high_low {
             bits::positions(offset, size, ByteOrder::BigEndian, frame_len)?
@@ -207,21 +221,35 @@ impl Placement {
                 .map(|b| ((b / 8) as usize, b % 8))
                 .collect()
         };
-        Some(Self { bits, frame_len })
+        Some(Self {
+            bits,
+            frame_len,
+            frame: frame.to_owned(),
+            offset,
+        })
     }
 
-    /// Move a signal positioned in a PDU of `len` bytes to the frame;
-    /// `None` if its bits are not one DBC signal there.
-    fn apply(&self, signal: &mut Signal, len: usize) -> Option<()> {
-        let in_pdu = bits::positions(signal.start_bit, signal.size, signal.byte_order, len)?;
-        let in_frame: Vec<_> = in_pdu
-            .into_iter()
-            .map(|(byte, bit)| self.bits[byte * 8 + bit as usize])
-            .collect();
-        let (start, order) = bits::layout(&in_frame, signal.byte_order, self.frame_len)?;
+    /// Move signal `name` of PDU `pdu`, positioned in the placed PDU of `len`
+    /// bytes, to the frame; an error if its bits are not one DBC signal there.
+    fn apply(&self, signal: &mut Signal, len: usize, pdu: &str, name: &str) -> Result<()> {
+        let layout = bits::positions(signal.start_bit, signal.size, signal.byte_order, len)
+            .and_then(|in_pdu| {
+                let in_frame: Vec<_> = in_pdu
+                    .into_iter()
+                    .map(|(byte, bit)| self.bits[byte * 8 + bit as usize])
+                    .collect();
+                bits::layout(&in_frame, signal.byte_order, self.frame_len)
+            });
+        let (start, order) = layout.ok_or_else(|| {
+            bad(format!(
+                "signal {name} of PDU {pdu}: its bits are not one signal in frame {} (a signal \
+                 that crosses a byte of a PDU placed at bit {}, not at a byte boundary)",
+                self.frame, self.offset
+            ))
+        })?;
         signal.start_bit = start;
         signal.byte_order = order;
-        Some(())
+        Ok(())
     }
 }
 
@@ -328,31 +356,16 @@ impl Network<'_, '_, '_> {
                 .short_name
                 .clone()
                 .unwrap_or_else(|| instance.pdu_ref.clone());
-            if pdu.multiplexer.is_some() {
-                return Err(bad(format!(
-                    "PDU {pdu_name}: multiplexed PDUs are not supported"
-                )));
-            }
             let offset = instance.bit_position.unwrap_or(0);
             let len = pdu.byte_length as usize;
             let high_low = instance.is_high_low_byte_order == Some(true);
-            let place = Placement::new(offset, high_low, len, size).ok_or_else(|| {
+            let place = Placement::new(offset, high_low, len, size, &name).ok_or_else(|| {
                 bad(format!(
                     "PDU {pdu_name} ({len} bytes at bit {offset}) does not fit in frame {name} \
                      ({size} bytes)"
                 ))
             })?;
-            for s in &pdu.signal_instances {
-                let (signal_name, mut signal) = self.signal(&pdu_name, s, len)?;
-                place.apply(&mut signal, len).ok_or_else(|| {
-                    bad(format!(
-                        "signal {signal_name} of PDU {pdu_name}: its bits are not one signal in \
-                         frame {name} (a signal that crosses a byte of a PDU placed at bit \
-                         {offset}, not at a byte boundary)"
-                    ))
-                })?;
-                signals.push((pdu_name.clone(), signal_name, signal));
-            }
+            self.pdu_signals(&instance.pdu_ref, pdu, &pdu_name, &place, &mut signals)?;
         }
         let mut count: HashMap<&str, Vec<&str>> = HashMap::new();
         for (pdu, signal, _) in &signals {
@@ -389,6 +402,186 @@ impl Network<'_, '_, '_> {
             cycle_time_ms: None,
             fd: t.fd || size > 8,
         })
+    }
+
+    /// The signals of a PDU placed in a frame, as (PDU name, signal name,
+    /// signal): its signal instances and, for a multiplexed PDU, the switch
+    /// (the multiplexor), the signals of each switched PDU (multiplexed on its
+    /// switch codes) and those of the static part (plain signals). Switched
+    /// and static PDUs are laid out in the multiplexed PDU's bits, as
+    /// AUTOSAR copies their segments.
+    fn pdu_signals(
+        &self,
+        id: &str,
+        pdu: &Pdu,
+        pdu_name: &str,
+        place: &Placement,
+        out: &mut Vec<(String, String, Signal)>,
+    ) -> Result<()> {
+        let len = pdu.byte_length as usize;
+        let add = |out: &mut Vec<_>,
+                   owner: &str,
+                   instances: &[SignalInstance],
+                   mux: Option<Multiplexing>| {
+            for s in instances {
+                let (name, mut signal) = self.signal(owner, s, len)?;
+                place.apply(&mut signal, len, owner, &name)?;
+                signal.multiplexing = mux.clone();
+                out.push((owner.to_owned(), name, signal));
+            }
+            Ok::<_, Error>(())
+        };
+        add(out, pdu_name, &pdu.signal_instances, None)?;
+        let xml = self.ids.get(id).and_then(|n| child(*n, "MULTIPLEXER"));
+        let Some(mux) = &pdu.multiplexer else {
+            return match xml {
+                Some(_) => Err(bad(format!(
+                    "PDU {pdu_name}: its MULTIPLEXER has no DYNAMIC-PART with a SEGMENT-POSITION"
+                ))),
+                None => Ok(()),
+            };
+        };
+        let what = format!("multiplexed PDU {pdu_name}");
+        // The switch.
+        let sw = &mux.switch;
+        let switch_name = sw.short_name.clone().unwrap_or_else(|| "Switch".into());
+        let order = if sw.is_high_low_byte_order {
+            ByteOrder::BigEndian
+        } else {
+            ByteOrder::LittleEndian
+        };
+        if !bits::fits(sw.bit_position, sw.bit_length, order, len) {
+            return Err(bad(format!(
+                "{what}: the {} bits of switch {switch_name} from bit {} do not fit in {len} \
+                 bytes",
+                sw.bit_length, sw.bit_position
+            )));
+        }
+        let mut switch = Signal {
+            name: switch_name.clone(),
+            start_bit: sw.bit_position,
+            size: sw.bit_length,
+            byte_order: order,
+            signed: false,
+            kind: ValueKind::Integer,
+            factor: 1.0,
+            offset: 0.0,
+            minimum: None,
+            maximum: None,
+            unit: String::new(),
+            receivers: Vec::new(),
+            comment: None,
+            choices: Vec::new(),
+            initial_raw: None,
+            is_multiplexor: true,
+            multiplexing: None,
+            coding: None,
+        };
+        place.apply(&mut switch, len, pdu_name, &switch_name)?;
+        let multiplexor = out.len();
+        out.push((pdu_name.to_owned(), switch_name, switch));
+        // The dynamic part: switch codes by switched PDU, in code order.
+        let switched = &mux.dynamic_part.pdu_instances_switch_map;
+        let listed = xml
+            .into_iter()
+            .flat_map(|x| x.descendants())
+            .filter(|n| n.is_element() && n.tag_name().name() == "SWITCHED-PDU-INSTANCE")
+            .count();
+        if listed != switched.len() {
+            return Err(bad(format!(
+                "{what}: every SWITCHED-PDU-INSTANCE needs a PDU-REF and a distinct integer \
+                 SWITCH-CODE"
+            )));
+        }
+        let mut codes: Vec<(&u64, &PduInstance)> = switched.iter().collect();
+        codes.sort_by_key(|(code, _)| **code);
+        let mut groups: Vec<(&str, Vec<(u64, u64)>)> = Vec::new();
+        for (&code, instance) in codes {
+            if sw.bit_length < 64 && code >> sw.bit_length != 0 {
+                return Err(bad(format!(
+                    "{what}: switch code {code} does not fit in the {} bits of switch {}",
+                    sw.bit_length,
+                    mux.switch.short_name.as_deref().unwrap_or("Switch")
+                )));
+            }
+            self.check_inner_instance(
+                &what,
+                instance.bit_position,
+                instance.is_high_low_byte_order,
+            )?;
+            let ranges = match groups.iter_mut().find(|(r, _)| *r == instance.pdu_ref) {
+                Some((_, ranges)) => ranges,
+                None => {
+                    groups.push((&instance.pdu_ref, Vec::new()));
+                    &mut groups.last_mut().expect("just pushed").1
+                }
+            };
+            match ranges.last_mut() {
+                Some((_, hi)) if *hi + 1 == code => *hi = code,
+                _ => ranges.push((code, code)),
+            }
+        }
+        for (pdu_ref, ranges) in groups {
+            let (inner, inner_name) = self.inner_pdu(&what, pdu_ref)?;
+            let mux = Multiplexing {
+                multiplexor,
+                ranges,
+            };
+            add(out, &inner_name, &inner.signal_instances, Some(mux))?;
+        }
+        // The static part.
+        let statics = xml
+            .into_iter()
+            .flat_map(|x| children(x, "STATIC-PART"))
+            .flat_map(|p| children(p, "STATIC-PDU-INSTANCE"));
+        for instance in statics {
+            let pdu_ref = child(instance, "PDU-REF")
+                .and_then(|r| attr(r, "ID-REF"))
+                .ok_or_else(|| bad(format!("{what}: a STATIC-PDU-INSTANCE has no PDU-REF")))?;
+            let position = child(instance, "BIT-POSITION")
+                .map(|p| number(p, &format!("{what} static part BIT-POSITION")))
+                .transpose()?;
+            let high_low = child(instance, "IS-HIGH-LOW-BYTE-ORDER").map(|h| text(h) == "true");
+            self.check_inner_instance(&what, position.map(|p| p as u32), high_low)?;
+            let (inner, inner_name) = self.inner_pdu(&what, pdu_ref)?;
+            add(out, &inner_name, &inner.signal_instances, None)?;
+        }
+        Ok(())
+    }
+
+    /// A switched or static PDU of a multiplexed PDU, and its name.
+    fn inner_pdu(&self, what: &str, id: &str) -> Result<(&Pdu, String)> {
+        let pdu = self
+            .data
+            .elements
+            .pdus_map_by_id
+            .get(id)
+            .ok_or_else(|| bad(format!("{what} refers to unknown PDU {id}")))?;
+        let name = pdu.short_name.clone().unwrap_or_else(|| id.to_owned());
+        if pdu.multiplexer.is_some() {
+            return Err(bad(format!(
+                "{what}: PDU {name} is multiplexed itself (nested multiplexing is not supported)"
+            )));
+        }
+        Ok((pdu, name))
+    }
+
+    /// Switched and static PDU instances share the multiplexed PDU's bit
+    /// numbering: a position other than 0 or a high-low order has no
+    /// meaning there that this mapping could follow.
+    fn check_inner_instance(
+        &self,
+        what: &str,
+        position: Option<u32>,
+        high_low: Option<bool>,
+    ) -> Result<()> {
+        if position.unwrap_or(0) != 0 || high_low == Some(true) {
+            return Err(bad(format!(
+                "{what}: switched and static PDU instances must be at bit 0, low-high (their \
+                 signals use the multiplexed PDU's bit positions)"
+            )));
+        }
+        Ok(())
     }
 
     /// A signal instance of a PDU of `len` bytes, positioned in the PDU.

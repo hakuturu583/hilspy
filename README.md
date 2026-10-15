@@ -103,9 +103,14 @@ with hilspy.open("can://can0", "fibex:network.xml", channel="Chassis") as ecu:
   is the PDU's least significant bit in the frame, at any bit; a high-low
   instance holds the PDU big-endian, its `BIT-POSITION` the PDU's most
   significant bit as for a Motorola signal (so the PDU's last byte comes
-  first, and its Intel signals are Motorola in the frame and vice versa). A
-  signal that a PDU off a byte boundary splits (one crossing PDU bytes in
-  the other byte order) is rejected, as is one past the end of the frame.
+  first, and its Intel signals are Motorola in the frame and vice versa).
+  Off a byte boundary, a Motorola signal that crosses a byte of its PDU is
+  split in the frame and rejected, as is a signal past the end of the frame.
+* Multiplexed PDUs (`MULTIPLEXER`) work like DBC multiplexing: the `SWITCH`
+  is the multiplexor field, the signals of each switched PDU of the
+  `DYNAMIC-PART` are present for its `SWITCH-CODE`s, and the `STATIC-PART`'s
+  signals always. Switched and static PDUs use the multiplexed PDU's bit
+  positions (as AUTOSAR copies their segments, and `canmatrix` writes them).
 * Coded types: unsigned, two's complement (`2C`, `SIGNED`), sign-magnitude
   (`SM`: the top bit is the sign) and one's complement (`1C`) integers of up
   to 64 bits, and IEEE floats; a negative zero decodes to 0.
@@ -119,8 +124,10 @@ with hilspy.open("can://can0", "fibex:network.xml", channel="Chassis") as ecu:
   fails, naming it). A single linear function with exact texttable entries is
   a plain DBC factor, offset and value table.
 * `strict`, `scaling`, `decode_choices` and `e2e` work as for `dbc:`; frames
-  the channel lacks decode as nameless messages. Multiplexed PDUs and
-  `FORMULA` compu methods are rejected when the file is opened.
+  the channel lacks decode as nameless messages. `FORMULA` compu methods,
+  nested multiplexing, switched or static PDU instances off bit 0 or
+  high-low, and encodings other than those above are rejected when the file
+  is opened.
 
 ### SOME/IP services
 
