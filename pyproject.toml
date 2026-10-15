@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "hilspy"
-version = "0.3.0"
+version = "0.4.0"
 description = "HILS I/O for Python on a Rust core: pluggable transports (SocketCAN, UDP, TCP, in-process, files) and codecs (DBC, Septentrio SBF) behind one tiny API"
 readme = "README.md"
 license = "Apache-2.0"
