@@ -343,7 +343,9 @@ def open(url: str, codec: str = "raw", **options: Value) -> Channel:
     ``?filter=0x100:0x700``), ``udp://host:port`` (``?listen``, ``?bind=``),
     ``tcp://host:port`` (``?listen``), ``mem://name`` (in-process),
     ``file://path`` (``?write``). Codecs: ``raw``, ``dbc:FILE`` (options
-    ``strict``, ``scaling``, ``decode_choices``), ``sbf``. Keyword arguments
-    configure the codec.
+    ``strict``, ``scaling``, ``decode_choices``), ``sbf``, ``lidar:MODEL``
+    (Hesai/Velodyne data packets <-> ``scan`` point clouds; options
+    ``frame``, ``phase``, ``rpm``, ``return_mode``, ``pace``, ``profiles``). Keyword
+    arguments configure the codec.
     """
     return Channel(_open(url, codec, **options))

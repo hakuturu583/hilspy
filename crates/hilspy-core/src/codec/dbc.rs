@@ -47,7 +47,7 @@ fn to_db(name: &str, v: &Value) -> Result<db::Value> {
         Value::Int(i) => db::Value::Int(*i),
         Value::Float(f) => db::Value::Float(*f),
         Value::Str(s) => db::Value::Str(s.clone()),
-        Value::Null | Value::Map(_) => {
+        Value::Null | Value::Map(_) | Value::Array(_) => {
             return Err(Error::encode(format!(
                 "signal {name}: {v} is not a signal value"
             )))

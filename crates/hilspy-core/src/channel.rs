@@ -25,19 +25,44 @@ impl Inner {
         if self.closed.load(Ordering::Acquire) {
             return Err(Error::Closed);
         }
-        let packets = match (&message.name, &message.packet) {
-            (None, Some(p)) => vec![p.clone()],
+        let (packets, paced) = match (&message.name, &message.packet) {
+            (None, Some(p)) => (vec![p.clone()], false),
             (None, None) => {
                 return Err(Error::encode("a message needs a name or data"));
             }
-            (Some(_), _) => self.codec.lock().unwrap().encode(message)?,
+            (Some(_), _) => {
+                let mut codec = self.codec.lock().unwrap();
+                (codec.encode(message)?, codec.paced())
+            }
         };
+        let start = Instant::now();
+        let first = packets.first().and_then(|p| p.timestamp);
         for p in &packets {
+            if let (true, Some(t0), Some(t)) = (paced, first, p.timestamp) {
+                self.wait_until(start + Duration::from_secs_f64((t - t0).clamp(0.0, 3600.0)))?;
+            }
             self.transport.send(p)?;
         }
         Ok(())
     }
+
+    /// Sleep until `deadline`, returning early with `Closed` on close.
+    fn wait_until(&self, deadline: Instant) -> Result<()> {
+        loop {
+            if self.closed.load(Ordering::Acquire) {
+                return Err(Error::Closed);
+            }
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return Ok(());
+            }
+            std::thread::sleep(left.min(PACE_POLL));
+        }
+    }
 }
+
+/// How often a paced send checks for close.
+const PACE_POLL: Duration = Duration::from_millis(20);
 
 /// A transport and a codec composed. Cloning shares the channel.
 #[derive(Clone)]
@@ -399,6 +424,40 @@ mod tests {
             "dbc:{}/../../tests/data/vehicle.dbc",
             env!("CARGO_MANIFEST_DIR")
         )
+    }
+
+    #[test]
+    fn paced_codecs_spread_a_message_over_its_packet_times() {
+        use crate::value::{Array, Value};
+        let scan = Message::new(
+            "scan",
+            ["x", "y", "z"]
+                .iter()
+                .map(|k| ((*k).to_owned(), Value::Array(Array::F64(vec![10.0]))))
+                .collect(),
+        );
+        let paced = Channel::open("mem://t-ch-pace", "lidar:vlp16", Options::new()).unwrap();
+        let rx = Channel::open("mem://t-ch-pace", "raw", Options::new()).unwrap();
+        let start = Instant::now();
+        paced.send(&scan).unwrap();
+        // 75 packets of 24 firings, 55.296 us apart: the last leaves 74 x
+        // 1.327 ms after the first.
+        assert!(
+            start.elapsed() >= Duration::from_millis(95),
+            "{:?}",
+            start.elapsed()
+        );
+        let mut fast = Options::new();
+        fast.insert("pace", Value::Bool(false));
+        let burst = Channel::open("mem://t-ch-pace", "lidar:vlp16", fast).unwrap();
+        let start = Instant::now();
+        burst.send(&scan).unwrap();
+        assert!(start.elapsed() < Duration::from_millis(80));
+        let mut n = 0;
+        while rx.recv(Some(Duration::from_millis(50))).unwrap().is_some() {
+            n += 1;
+        }
+        assert_eq!(n, 150);
     }
 
     #[test]

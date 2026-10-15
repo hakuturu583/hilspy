@@ -37,6 +37,12 @@ HILSPY_TEST_VCAN=vcan0 uv run pytest tests/test_socketcan.py   # needs vcan0 (CI
   in strict mode over the package, tests and examples.
 - `socketcan` is Linux-only: keep it behind `cfg(target_os = "linux")` so the
   core builds elsewhere (`can://` then reports that it needs Linux).
+- LiDAR sensors are data, not code: a model is a profile in
+  `crates/hilspy-core/lidar/profiles/*.txtpb` (schema `lidar_profile.proto`).
+  After editing either, run `cargo run -p hilspy-core --example lidar_profiles`
+  and commit the regenerated `lidar/profiles.binpb` (`tests/lidar_profiles.rs`
+  checks it). Extend the schema and the generic engine (`src/lidar/`) only for
+  a layout no profile can express.
 - New behaviour gets a Rust unit test in the core and a Python test; DBC
   bit-layout changes must keep `tests/test_dbc.py::test_matches_cantools` green.
 - The Python package supports 3.10+ (abi3 wheel); write 3.10-compatible code.

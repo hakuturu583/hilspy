@@ -1,0 +1,562 @@
+# Velodyne LiDAR profiles (schema: ../lidar_profile.proto).
+#
+# Channel angles and firing offsets are derived from tier4/nebula
+# (https://github.com/tier4/nebula, Apache-2.0): its calibration files and
+# packet definitions. They are nominal values; a real sensor's own
+# calibration differs slightly.
+#
+# Regenerate the embedded binary after editing:
+#   cargo run -p hilspy-core --example lidar_profiles
+
+profiles {
+  name: "vlp16"
+  vendor: "Velodyne"
+  model: "VLP-16"
+  aliases: "puck"
+  layout {
+    packet_size: 1206
+    constants { offset: 1205 value: "\x22" }
+    blocks_offset: 0
+    block_count: 12
+    block_size: 100
+    block_flags: 0xEEFF
+    azimuth_offset: 2
+    azimuth_scale: 100
+    units_offset: 4
+    unit_size: 3
+    units_per_block: 32
+    blocks_per_firing: 1
+    firings_per_block: 2
+    distance_unit: 0.002
+    return_mode_offset: 1204
+    timestamp { kind: TOP_OF_HOUR micros_offset: 1200 }
+  }
+  channels { elevation: -15 }
+  channels { elevation: 1 firing_offset_ns: 2304 }
+  channels { elevation: -13 firing_offset_ns: 4608 }
+  channels { elevation: 3 firing_offset_ns: 6912 }
+  channels { elevation: -11 firing_offset_ns: 9216 }
+  channels { elevation: 5 firing_offset_ns: 11520 }
+  channels { elevation: -9 firing_offset_ns: 13824 }
+  channels { elevation: 7 firing_offset_ns: 16128 }
+  channels { elevation: -7 firing_offset_ns: 18432 }
+  channels { elevation: 9 firing_offset_ns: 20736 }
+  channels { elevation: -5 firing_offset_ns: 23040 }
+  channels { elevation: 11 firing_offset_ns: 25344 }
+  channels { elevation: -3 firing_offset_ns: 27648 }
+  channels { elevation: 13 firing_offset_ns: 29952 }
+  channels { elevation: -1 firing_offset_ns: 32256 }
+  channels { elevation: 15 firing_offset_ns: 34560 }
+  return_modes { code: 0x37 name: "strongest" returns: "strongest" }
+  return_modes { code: 0x38 name: "last" returns: "last" }
+  return_modes { code: 0x39 name: "last_strongest" returns: "last" returns: "strongest" }
+  timing { firing_period_ns: 55296 offset_ns: 0 }
+  min_range: 0.4
+  max_range: 100
+  rpm: 600
+  port: 2368
+}
+
+profiles {
+  name: "vlp16_hires"
+  vendor: "Velodyne"
+  model: "VLP-16 Hi-Res"
+  aliases: "puck_hires"
+  aliases: "puck_hi_res"
+  layout {
+    packet_size: 1206
+    constants { offset: 1205 value: "\x24" }
+    blocks_offset: 0
+    block_count: 12
+    block_size: 100
+    block_flags: 0xEEFF
+    azimuth_offset: 2
+    azimuth_scale: 100
+    units_offset: 4
+    unit_size: 3
+    units_per_block: 32
+    blocks_per_firing: 1
+    firings_per_block: 2
+    distance_unit: 0.002
+    return_mode_offset: 1204
+    timestamp { kind: TOP_OF_HOUR micros_offset: 1200 }
+  }
+  channels { elevation: -10 }
+  channels { elevation: 0.666667 firing_offset_ns: 2304 }
+  channels { elevation: -8.666667 firing_offset_ns: 4608 }
+  channels { elevation: 2 firing_offset_ns: 6912 }
+  channels { elevation: -7.333333 firing_offset_ns: 9216 }
+  channels { elevation: 3.333333 firing_offset_ns: 11520 }
+  channels { elevation: -6 firing_offset_ns: 13824 }
+  channels { elevation: 4.666667 firing_offset_ns: 16128 }
+  channels { elevation: -4.666667 firing_offset_ns: 18432 }
+  channels { elevation: 6 firing_offset_ns: 20736 }
+  channels { elevation: -3.333333 firing_offset_ns: 23040 }
+  channels { elevation: 7.333333 firing_offset_ns: 25344 }
+  channels { elevation: -2 firing_offset_ns: 27648 }
+  channels { elevation: 8.666667 firing_offset_ns: 29952 }
+  channels { elevation: -0.666667 firing_offset_ns: 32256 }
+  channels { elevation: 10 firing_offset_ns: 34560 }
+  return_modes { code: 0x37 name: "strongest" returns: "strongest" }
+  return_modes { code: 0x38 name: "last" returns: "last" }
+  return_modes { code: 0x39 name: "last_strongest" returns: "last" returns: "strongest" }
+  timing { firing_period_ns: 55296 offset_ns: 0 }
+  min_range: 0.4
+  max_range: 100
+  rpm: 600
+  port: 2368
+}
+
+profiles {
+  name: "vlp32c"
+  vendor: "Velodyne"
+  model: "VLP-32C"
+  aliases: "vlp32"
+  aliases: "ultra_puck"
+  layout {
+    packet_size: 1206
+    constants { offset: 1205 value: "\x28" }
+    blocks_offset: 0
+    block_count: 12
+    block_size: 100
+    block_flags: 0xEEFF
+    azimuth_offset: 2
+    azimuth_scale: 100
+    units_offset: 4
+    unit_size: 3
+    units_per_block: 32
+    blocks_per_firing: 1
+    firings_per_block: 1
+    distance_unit: 0.002
+    return_mode_offset: 1204
+    timestamp { kind: TOP_OF_HOUR micros_offset: 1200 }
+  }
+  channels { elevation: -25 azimuth_offset: 1.4 }
+  channels { elevation: -1 azimuth_offset: -4.2 }
+  channels { elevation: -1.667 azimuth_offset: 1.4 firing_offset_ns: 2304 }
+  channels { elevation: -15.639 azimuth_offset: -1.4 firing_offset_ns: 2304 }
+  channels { elevation: -11.31 azimuth_offset: 1.4 firing_offset_ns: 4608 }
+  channels { elevation: 0 azimuth_offset: -1.4 firing_offset_ns: 4608 }
+  channels { elevation: -0.667 azimuth_offset: 4.2 firing_offset_ns: 6912 }
+  channels { elevation: -8.843 azimuth_offset: -1.4 firing_offset_ns: 6912 }
+  channels { elevation: -7.254 azimuth_offset: 1.4 firing_offset_ns: 9216 }
+  channels { elevation: 0.333 azimuth_offset: -4.2 firing_offset_ns: 9216 }
+  channels { elevation: -0.333 azimuth_offset: 1.4 firing_offset_ns: 11520 }
+  channels { elevation: -6.148 azimuth_offset: -1.4 firing_offset_ns: 11520 }
+  channels { elevation: -5.333 azimuth_offset: 4.2 firing_offset_ns: 13824 }
+  channels { elevation: 1.333 azimuth_offset: -1.4 firing_offset_ns: 13824 }
+  channels { elevation: 0.667 azimuth_offset: 4.2 firing_offset_ns: 16128 }
+  channels { elevation: -4 azimuth_offset: -1.4 firing_offset_ns: 16128 }
+  channels { elevation: -4.667 azimuth_offset: 1.4 firing_offset_ns: 18432 }
+  channels { elevation: 1.667 azimuth_offset: -4.2 firing_offset_ns: 18432 }
+  channels { elevation: 1 azimuth_offset: 1.4 firing_offset_ns: 20736 }
+  channels { elevation: -3.667 azimuth_offset: -4.2 firing_offset_ns: 20736 }
+  channels { elevation: -3.333 azimuth_offset: 4.2 firing_offset_ns: 23040 }
+  channels { elevation: 3.333 azimuth_offset: -1.4 firing_offset_ns: 23040 }
+  channels { elevation: 2.333 azimuth_offset: 1.4 firing_offset_ns: 25344 }
+  channels { elevation: -2.667 azimuth_offset: -1.4 firing_offset_ns: 25344 }
+  channels { elevation: -3 azimuth_offset: 1.4 firing_offset_ns: 27648 }
+  channels { elevation: 7 azimuth_offset: -1.4 firing_offset_ns: 27648 }
+  channels { elevation: 4.667 azimuth_offset: 1.4 firing_offset_ns: 29952 }
+  channels { elevation: -2.333 azimuth_offset: -4.2 firing_offset_ns: 29952 }
+  channels { elevation: -2 azimuth_offset: 4.2 firing_offset_ns: 32256 }
+  channels { elevation: 15 azimuth_offset: -1.4 firing_offset_ns: 32256 }
+  channels { elevation: 10.333 azimuth_offset: 1.4 firing_offset_ns: 34560 }
+  channels { elevation: -1.333 azimuth_offset: -1.4 firing_offset_ns: 34560 }
+  return_modes { code: 0x37 name: "strongest" returns: "strongest" }
+  return_modes { code: 0x38 name: "last" returns: "last" }
+  return_modes { code: 0x39 name: "last_strongest" returns: "last" returns: "strongest" }
+  timing { firing_period_ns: 55296 offset_ns: 0 }
+  min_range: 0.4
+  max_range: 200
+  rpm: 600
+  port: 2368
+}
+
+profiles {
+  name: "vlp32mr"
+  vendor: "Velodyne"
+  model: "VLP-32MR"
+  layout {
+    packet_size: 1206
+    constants { offset: 1205 value: "\x28" }
+    blocks_offset: 0
+    block_count: 12
+    block_size: 100
+    block_flags: 0xEEFF
+    azimuth_offset: 2
+    azimuth_scale: 100
+    units_offset: 4
+    unit_size: 3
+    units_per_block: 32
+    blocks_per_firing: 1
+    firings_per_block: 1
+    distance_unit: 0.002
+    return_mode_offset: 1204
+    timestamp { kind: TOP_OF_HOUR micros_offset: 1200 }
+  }
+  channels { elevation: -25 azimuth_offset: 1.4 }
+  channels { elevation: -1 azimuth_offset: -4.2 }
+  channels { elevation: -1.667 azimuth_offset: 1.4 firing_offset_ns: 2304 }
+  channels { elevation: -15.639 azimuth_offset: -1.4 firing_offset_ns: 2304 }
+  channels { elevation: -11.31 azimuth_offset: 1.4 firing_offset_ns: 4608 }
+  channels { elevation: 0 azimuth_offset: -1.4 firing_offset_ns: 4608 }
+  channels { elevation: -0.667 azimuth_offset: 4.2 firing_offset_ns: 6912 }
+  channels { elevation: -8.843 azimuth_offset: -1.4 firing_offset_ns: 6912 }
+  channels { elevation: -7.254 azimuth_offset: 1.4 firing_offset_ns: 9216 }
+  channels { elevation: 0.333 azimuth_offset: -4.2 firing_offset_ns: 9216 }
+  channels { elevation: -0.333 azimuth_offset: 1.4 firing_offset_ns: 11520 }
+  channels { elevation: -6.148 azimuth_offset: -1.4 firing_offset_ns: 11520 }
+  channels { elevation: -5.333 azimuth_offset: 4.2 firing_offset_ns: 13824 }
+  channels { elevation: 1.333 azimuth_offset: -1.4 firing_offset_ns: 13824 }
+  channels { elevation: 0.667 azimuth_offset: 4.2 firing_offset_ns: 16128 }
+  channels { elevation: -4 azimuth_offset: -1.4 firing_offset_ns: 16128 }
+  channels { elevation: -4.667 azimuth_offset: 1.4 firing_offset_ns: 18432 }
+  channels { elevation: 1.667 azimuth_offset: -4.2 firing_offset_ns: 18432 }
+  channels { elevation: 1 azimuth_offset: 1.4 firing_offset_ns: 20736 }
+  channels { elevation: -3.667 azimuth_offset: -4.2 firing_offset_ns: 20736 }
+  channels { elevation: -3.333 azimuth_offset: 4.2 firing_offset_ns: 23040 }
+  channels { elevation: 3.333 azimuth_offset: -1.4 firing_offset_ns: 23040 }
+  channels { elevation: 2.333 azimuth_offset: 1.4 firing_offset_ns: 25344 }
+  channels { elevation: -2.667 azimuth_offset: -1.4 firing_offset_ns: 25344 }
+  channels { elevation: -3 azimuth_offset: 1.4 firing_offset_ns: 27648 }
+  channels { elevation: 7 azimuth_offset: -1.4 firing_offset_ns: 27648 }
+  channels { elevation: 4.667 azimuth_offset: 1.4 firing_offset_ns: 29952 }
+  channels { elevation: -2.333 azimuth_offset: -4.2 firing_offset_ns: 29952 }
+  channels { elevation: -2 azimuth_offset: 4.2 firing_offset_ns: 32256 }
+  channels { elevation: 15 azimuth_offset: -1.4 firing_offset_ns: 32256 }
+  channels { elevation: 10.333 azimuth_offset: 1.4 firing_offset_ns: 34560 }
+  channels { elevation: -1.333 azimuth_offset: -1.4 firing_offset_ns: 34560 }
+  return_modes { code: 0x37 name: "strongest" returns: "strongest" }
+  return_modes { code: 0x38 name: "last" returns: "last" }
+  return_modes { code: 0x39 name: "last_strongest" returns: "last" returns: "strongest" }
+  timing { firing_period_ns: 55296 offset_ns: 0 }
+  min_range: 0.4
+  max_range: 200
+  rpm: 600
+  port: 2368
+}
+
+profiles {
+  name: "hdl32e"
+  vendor: "Velodyne"
+  model: "HDL-32E"
+  aliases: "hdl32"
+  layout {
+    packet_size: 1206
+    constants { offset: 1205 value: "\x21" }
+    blocks_offset: 0
+    block_count: 12
+    block_size: 100
+    block_flags: 0xEEFF
+    azimuth_offset: 2
+    azimuth_scale: 100
+    units_offset: 4
+    unit_size: 3
+    units_per_block: 32
+    blocks_per_firing: 1
+    firings_per_block: 1
+    distance_unit: 0.002
+    return_mode_offset: 1204
+    timestamp { kind: TOP_OF_HOUR micros_offset: 1200 }
+  }
+  channels { elevation: -30.67 }
+  channels { elevation: -9.33 firing_offset_ns: 1152 }
+  channels { elevation: -29.33 firing_offset_ns: 2304 }
+  channels { elevation: -8 firing_offset_ns: 3456 }
+  channels { elevation: -28 firing_offset_ns: 4608 }
+  channels { elevation: -6.67 firing_offset_ns: 5760 }
+  channels { elevation: -26.67 firing_offset_ns: 6912 }
+  channels { elevation: -5.33 firing_offset_ns: 8064 }
+  channels { elevation: -25.33 firing_offset_ns: 9216 }
+  channels { elevation: -4 firing_offset_ns: 10368 }
+  channels { elevation: -24 firing_offset_ns: 11520 }
+  channels { elevation: -2.67 firing_offset_ns: 12672 }
+  channels { elevation: -22.67 firing_offset_ns: 13824 }
+  channels { elevation: -1.33 firing_offset_ns: 14976 }
+  channels { elevation: -21.33 firing_offset_ns: 16128 }
+  channels { elevation: 0 firing_offset_ns: 17280 }
+  channels { elevation: -20 firing_offset_ns: 18432 }
+  channels { elevation: 1.33 firing_offset_ns: 19584 }
+  channels { elevation: -18.67 firing_offset_ns: 20736 }
+  channels { elevation: 2.67 firing_offset_ns: 21888 }
+  channels { elevation: -17.33 firing_offset_ns: 23040 }
+  channels { elevation: 4 firing_offset_ns: 24192 }
+  channels { elevation: -16 firing_offset_ns: 25344 }
+  channels { elevation: 5.33 firing_offset_ns: 26496 }
+  channels { elevation: -14.67 firing_offset_ns: 27648 }
+  channels { elevation: 6.67 firing_offset_ns: 28800 }
+  channels { elevation: -13.33 firing_offset_ns: 29952 }
+  channels { elevation: 8 firing_offset_ns: 31104 }
+  channels { elevation: -12 firing_offset_ns: 32256 }
+  channels { elevation: 9.33 firing_offset_ns: 33408 }
+  channels { elevation: -10.67 firing_offset_ns: 34560 }
+  channels { elevation: 10.67 firing_offset_ns: 35712 }
+  return_modes { code: 0x37 name: "strongest" returns: "strongest" }
+  return_modes { code: 0x38 name: "last" returns: "last" }
+  return_modes { code: 0x39 name: "last_strongest" returns: "last" returns: "strongest" }
+  timing { firing_period_ns: 46080 offset_ns: 0 }
+  min_range: 0.4
+  max_range: 100
+  rpm: 600
+  port: 2368
+}
+
+profiles {
+  name: "hdl64e"
+  vendor: "Velodyne"
+  model: "HDL-64E"
+  aliases: "hdl64"
+  aliases: "hdl64e_s3"
+  layout {
+    packet_size: 1206
+    blocks_offset: 0
+    block_count: 12
+    block_size: 100
+    block_flags: 0xEEFF
+    block_flags: 0xDDFF
+    azimuth_offset: 2
+    azimuth_scale: 100
+    units_offset: 4
+    unit_size: 3
+    units_per_block: 32
+    blocks_per_firing: 2
+    firings_per_block: 1
+    distance_unit: 0.002
+    timestamp { kind: TOP_OF_HOUR micros_offset: 1200 }
+  }
+  channels { elevation: -7.229687 azimuth_offset: 4.382123 }
+  channels { elevation: -6.848992 azimuth_offset: 2.252911 }
+  channels { elevation: 0.204041 azimuth_offset: -3.440812 }
+  channels { elevation: 0.590521 azimuth_offset: -5.683449 }
+  channels { elevation: -6.56018 azimuth_offset: 0.054634 }
+  channels { elevation: -6.190014 azimuth_offset: -2.191212 }
+  channels { elevation: -8.56259 azimuth_offset: 0.876468 }
+  channels { elevation: -8.218709 azimuth_offset: -1.389755 }
+  channels { elevation: -5.88887 azimuth_offset: -4.213785 }
+  channels { elevation: -5.482971 azimuth_offset: -6.484655 }
+  channels { elevation: -7.943173 azimuth_offset: -3.411522 }
+  channels { elevation: -7.552199 azimuth_offset: -5.675773 }
+  channels { elevation: -3.119121 azimuth_offset: 4.34004 }
+  channels { elevation: -2.792054 azimuth_offset: 2.12268 }
+  channels { elevation: -5.134616 azimuth_offset: 5.133447 }
+  channels { elevation: -4.80914 azimuth_offset: 2.906595 }
+  channels { elevation: -2.488185 azimuth_offset: 0.106818 }
+  channels { elevation: -2.090609 azimuth_offset: -2.147362 }
+  channels { elevation: -4.529912 azimuth_offset: 0.870608 }
+  channels { elevation: -4.157275 azimuth_offset: -1.370502 }
+  channels { elevation: -1.809844 azimuth_offset: -4.16218 }
+  channels { elevation: -1.458767 azimuth_offset: -6.384621 }
+  channels { elevation: -3.819267 azimuth_offset: -3.404833 }
+  channels { elevation: -3.469324 azimuth_offset: -5.613292 }
+  channels { elevation: 0.894985 azimuth_offset: 4.388215 }
+  channels { elevation: 1.293051 azimuth_offset: 2.172076 }
+  channels { elevation: -1.142703 azimuth_offset: 5.183725 }
+  channels { elevation: -0.75631 azimuth_offset: 2.939751 }
+  channels { elevation: 1.562262 azimuth_offset: 0.109682 }
+  channels { elevation: 1.960097 azimuth_offset: -2.109289 }
+  channels { elevation: -0.451829 azimuth_offset: 0.890495 }
+  channels { elevation: -0.088762 azimuth_offset: -1.334099 }
+  channels { elevation: -22.35751 azimuth_offset: 7.326034 }
+  channels { elevation: -21.975807 azimuth_offset: 3.811807 }
+  channels { elevation: -11.295224 azimuth_offset: -5.073135 }
+  channels { elevation: -10.753604 azimuth_offset: -8.335365 }
+  channels { elevation: -21.490711 azimuth_offset: 0.290581 }
+  channels { elevation: -21.06358 azimuth_offset: -3.10978 }
+  channels { elevation: -24.555073 azimuth_offset: 1.612524 }
+  channels { elevation: -24.146795 azimuth_offset: -1.817578 }
+  channels { elevation: -20.428553 azimuth_offset: -6.538422 }
+  channels { elevation: -19.891869 azimuth_offset: -9.943674 }
+  channels { elevation: -23.54915 azimuth_offset: -5.480202 }
+  channels { elevation: -22.965885 azimuth_offset: -8.902783 }
+  channels { elevation: -16.273811 azimuth_offset: 7.112472 }
+  channels { elevation: -15.906187 azimuth_offset: 3.674635 }
+  channels { elevation: -19.247192 azimuth_offset: 8.521374 }
+  channels { elevation: -18.922935 azimuth_offset: 4.988905 }
+  channels { elevation: -15.384897 azimuth_offset: 0.389606 }
+  channels { elevation: -14.926613 azimuth_offset: -3.003908 }
+  channels { elevation: -18.428911 azimuth_offset: 1.626267 }
+  channels { elevation: -17.963835 azimuth_offset: -1.824485 }
+  channels { elevation: -14.290529 azimuth_offset: -6.27691 }
+  channels { elevation: -13.805562 azimuth_offset: -9.669646 }
+  channels { elevation: -17.368364 azimuth_offset: -5.177982 }
+  channels { elevation: -16.801205 azimuth_offset: -8.520762 }
+  channels { elevation: -10.175996 azimuth_offset: 6.933286 }
+  channels { elevation: -9.744251 azimuth_offset: 3.685245 }
+  channels { elevation: -13.163202 azimuth_offset: 8.299963 }
+  channels { elevation: -12.829609 azimuth_offset: 4.884353 }
+  channels { elevation: -9.299981 azimuth_offset: 0.341897 }
+  channels { elevation: -8.774519 azimuth_offset: -2.899202 }
+  channels { elevation: -12.294024 azimuth_offset: 1.572019 }
+  channels { elevation: -11.913321 azimuth_offset: -1.664326 }
+  return_modes { code: 0x37 name: "strongest" returns: "strongest" }
+  timing { firing_period_ns: 48000 offset_ns: 0 }
+  min_range: 0.9
+  max_range: 120
+  rpm: 600
+  port: 2368
+}
+
+profiles {
+  name: "vls128"
+  vendor: "Velodyne"
+  model: "VLS-128"
+  aliases: "alpha_prime"
+  aliases: "vls128_alpha_prime"
+  layout {
+    packet_size: 1206
+    constants { offset: 1205 value: "\xa1" }
+    blocks_offset: 0
+    block_count: 12
+    block_size: 100
+    block_flags: 0xEEFF
+    block_flags: 0xDDFF
+    block_flags: 0xCCFF
+    block_flags: 0xBBFF
+    azimuth_offset: 2
+    azimuth_scale: 100
+    units_offset: 4
+    unit_size: 3
+    units_per_block: 32
+    blocks_per_firing: 4
+    firings_per_block: 1
+    distance_unit: 0.004
+    return_mode_offset: 1204
+    timestamp { kind: TOP_OF_HOUR micros_offset: 1200 }
+  }
+  channels { elevation: -11.742 azimuth_offset: 6.354 }
+  channels { elevation: -1.99 azimuth_offset: 4.548 }
+  channels { elevation: 3.4 azimuth_offset: 2.732 }
+  channels { elevation: -5.29 azimuth_offset: 0.911 }
+  channels { elevation: -0.78 azimuth_offset: -0.911 }
+  channels { elevation: 4.61 azimuth_offset: -2.732 }
+  channels { elevation: -4.08 azimuth_offset: -4.548 }
+  channels { elevation: 1.31 azimuth_offset: -6.354 }
+  channels { elevation: -6.5 azimuth_offset: 6.354 firing_offset_ns: 2665 }
+  channels { elevation: -1.11 azimuth_offset: 4.548 firing_offset_ns: 2665 }
+  channels { elevation: 4.28 azimuth_offset: 2.732 firing_offset_ns: 2665 }
+  channels { elevation: -4.41 azimuth_offset: 0.911 firing_offset_ns: 2665 }
+  channels { elevation: 0.1 azimuth_offset: -0.911 firing_offset_ns: 2665 }
+  channels { elevation: 6.48 azimuth_offset: -2.732 firing_offset_ns: 2665 }
+  channels { elevation: -3.2 azimuth_offset: -4.548 firing_offset_ns: 2665 }
+  channels { elevation: 2.19 azimuth_offset: -6.354 firing_offset_ns: 2665 }
+  channels { elevation: -3.86 azimuth_offset: 6.354 firing_offset_ns: 5330 }
+  channels { elevation: 1.53 azimuth_offset: 4.548 firing_offset_ns: 5330 }
+  channels { elevation: -9.244 azimuth_offset: 2.732 firing_offset_ns: 5330 }
+  channels { elevation: -1.77 azimuth_offset: 0.911 firing_offset_ns: 5330 }
+  channels { elevation: 2.74 azimuth_offset: -0.911 firing_offset_ns: 5330 }
+  channels { elevation: -5.95 azimuth_offset: -2.732 firing_offset_ns: 5330 }
+  channels { elevation: -0.56 azimuth_offset: -4.548 firing_offset_ns: 5330 }
+  channels { elevation: 4.83 azimuth_offset: -6.354 firing_offset_ns: 5330 }
+  channels { elevation: -2.98 azimuth_offset: 6.354 firing_offset_ns: 7995 }
+  channels { elevation: 2.41 azimuth_offset: 4.548 firing_offset_ns: 7995 }
+  channels { elevation: -6.28 azimuth_offset: 2.732 firing_offset_ns: 7995 }
+  channels { elevation: -0.89 azimuth_offset: 0.911 firing_offset_ns: 7995 }
+  channels { elevation: 3.62 azimuth_offset: -0.911 firing_offset_ns: 7995 }
+  channels { elevation: -5.07 azimuth_offset: -2.732 firing_offset_ns: 7995 }
+  channels { elevation: 0.32 azimuth_offset: -4.548 firing_offset_ns: 7995 }
+  channels { elevation: 7.58 azimuth_offset: -6.354 firing_offset_ns: 7995 }
+  channels { elevation: -0.34 azimuth_offset: 6.354 firing_offset_ns: 10660 }
+  channels { elevation: 5.18 azimuth_offset: 4.548 firing_offset_ns: 10660 }
+  channels { elevation: -3.64 azimuth_offset: 2.732 firing_offset_ns: 10660 }
+  channels { elevation: 1.75 azimuth_offset: 0.911 firing_offset_ns: 10660 }
+  channels { elevation: -25 azimuth_offset: -0.911 firing_offset_ns: 10660 }
+  channels { elevation: -2.43 azimuth_offset: -2.732 firing_offset_ns: 10660 }
+  channels { elevation: 2.96 azimuth_offset: -4.548 firing_offset_ns: 10660 }
+  channels { elevation: -5.73 azimuth_offset: -6.354 firing_offset_ns: 10660 }
+  channels { elevation: 0.54 azimuth_offset: 6.354 firing_offset_ns: 13325 }
+  channels { elevation: 9.7 azimuth_offset: 4.548 firing_offset_ns: 13325 }
+  channels { elevation: -2.76 azimuth_offset: 2.732 firing_offset_ns: 13325 }
+  channels { elevation: 2.63 azimuth_offset: 0.911 firing_offset_ns: 13325 }
+  channels { elevation: -7.65 azimuth_offset: -0.911 firing_offset_ns: 13325 }
+  channels { elevation: -1.55 azimuth_offset: -2.732 firing_offset_ns: 13325 }
+  channels { elevation: 3.84 azimuth_offset: -4.548 firing_offset_ns: 13325 }
+  channels { elevation: -4.85 azimuth_offset: -6.354 firing_offset_ns: 13325 }
+  channels { elevation: 3.18 azimuth_offset: 6.354 firing_offset_ns: 15990 }
+  channels { elevation: -5.51 azimuth_offset: 4.548 firing_offset_ns: 15990 }
+  channels { elevation: -0.12 azimuth_offset: 2.732 firing_offset_ns: 15990 }
+  channels { elevation: 5.73 azimuth_offset: 0.911 firing_offset_ns: 15990 }
+  channels { elevation: -4.3 azimuth_offset: -0.911 firing_offset_ns: 15990 }
+  channels { elevation: 1.09 azimuth_offset: -2.732 firing_offset_ns: 15990 }
+  channels { elevation: -16.042 azimuth_offset: -4.548 firing_offset_ns: 15990 }
+  channels { elevation: -2.21 azimuth_offset: -6.354 firing_offset_ns: 15990 }
+  channels { elevation: 4.06 azimuth_offset: 6.354 firing_offset_ns: 18655 }
+  channels { elevation: -4.63 azimuth_offset: 4.548 firing_offset_ns: 18655 }
+  channels { elevation: 0.76 azimuth_offset: 2.732 firing_offset_ns: 18655 }
+  channels { elevation: 15 azimuth_offset: 0.911 firing_offset_ns: 18655 }
+  channels { elevation: -3.42 azimuth_offset: -0.911 firing_offset_ns: 18655 }
+  channels { elevation: 1.97 azimuth_offset: -2.732 firing_offset_ns: 18655 }
+  channels { elevation: -6.85 azimuth_offset: -4.548 firing_offset_ns: 18655 }
+  channels { elevation: -1.33 azimuth_offset: -6.354 firing_offset_ns: 18655 }
+  channels { elevation: -5.62 azimuth_offset: 6.354 }
+  channels { elevation: -0.23 azimuth_offset: 4.548 }
+  channels { elevation: 5.43 azimuth_offset: 2.732 }
+  channels { elevation: -3.53 azimuth_offset: 0.911 }
+  channels { elevation: 0.98 azimuth_offset: -0.911 }
+  channels { elevation: -19.582 azimuth_offset: -2.732 }
+  channels { elevation: -2.32 azimuth_offset: -4.548 }
+  channels { elevation: 3.07 azimuth_offset: -6.354 }
+  channels { elevation: -4.74 azimuth_offset: 6.354 firing_offset_ns: 2665 }
+  channels { elevation: 0.65 azimuth_offset: 4.548 firing_offset_ns: 2665 }
+  channels { elevation: 11.75 azimuth_offset: 2.732 firing_offset_ns: 2665 }
+  channels { elevation: -2.65 azimuth_offset: 0.911 firing_offset_ns: 2665 }
+  channels { elevation: 1.86 azimuth_offset: -0.911 firing_offset_ns: 2665 }
+  channels { elevation: -7.15 azimuth_offset: -2.732 firing_offset_ns: 2665 }
+  channels { elevation: -1.44 azimuth_offset: -4.548 firing_offset_ns: 2665 }
+  channels { elevation: 3.95 azimuth_offset: -6.354 firing_offset_ns: 2665 }
+  channels { elevation: -2.1 azimuth_offset: 6.354 firing_offset_ns: 5330 }
+  channels { elevation: 3.29 azimuth_offset: 4.548 firing_offset_ns: 5330 }
+  channels { elevation: -5.4 azimuth_offset: 2.732 firing_offset_ns: 5330 }
+  channels { elevation: -0.01 azimuth_offset: 0.911 firing_offset_ns: 5330 }
+  channels { elevation: 4.5 azimuth_offset: -0.911 firing_offset_ns: 5330 }
+  channels { elevation: -4.19 azimuth_offset: -2.732 firing_offset_ns: 5330 }
+  channels { elevation: 1.2 azimuth_offset: -4.548 firing_offset_ns: 5330 }
+  channels { elevation: -13.565 azimuth_offset: -6.354 firing_offset_ns: 5330 }
+  channels { elevation: -1.22 azimuth_offset: 6.354 firing_offset_ns: 7995 }
+  channels { elevation: 4.17 azimuth_offset: 4.548 firing_offset_ns: 7995 }
+  channels { elevation: -4.52 azimuth_offset: 2.732 firing_offset_ns: 7995 }
+  channels { elevation: 0.87 azimuth_offset: 0.911 firing_offset_ns: 7995 }
+  channels { elevation: 6.08 azimuth_offset: -0.911 firing_offset_ns: 7995 }
+  channels { elevation: -3.31 azimuth_offset: -2.732 firing_offset_ns: 7995 }
+  channels { elevation: 2.08 azimuth_offset: -4.548 firing_offset_ns: 7995 }
+  channels { elevation: -6.65 azimuth_offset: -6.354 firing_offset_ns: 7995 }
+  channels { elevation: 1.42 azimuth_offset: 6.354 firing_offset_ns: 10660 }
+  channels { elevation: -10.346 azimuth_offset: 4.548 firing_offset_ns: 10660 }
+  channels { elevation: -1.88 azimuth_offset: 2.732 firing_offset_ns: 10660 }
+  channels { elevation: 3.51 azimuth_offset: 0.911 firing_offset_ns: 10660 }
+  channels { elevation: -6.06 azimuth_offset: -0.911 firing_offset_ns: 10660 }
+  channels { elevation: -0.67 azimuth_offset: -2.732 firing_offset_ns: 10660 }
+  channels { elevation: 4.72 azimuth_offset: -4.548 firing_offset_ns: 10660 }
+  channels { elevation: -3.97 azimuth_offset: -6.354 firing_offset_ns: 10660 }
+  channels { elevation: 2.3 azimuth_offset: 6.354 firing_offset_ns: 13325 }
+  channels { elevation: -6.39 azimuth_offset: 4.548 firing_offset_ns: 13325 }
+  channels { elevation: -1 azimuth_offset: 2.732 firing_offset_ns: 13325 }
+  channels { elevation: 4.39 azimuth_offset: 0.911 firing_offset_ns: 13325 }
+  channels { elevation: -5.18 azimuth_offset: -0.911 firing_offset_ns: 13325 }
+  channels { elevation: 0.21 azimuth_offset: -2.732 firing_offset_ns: 13325 }
+  channels { elevation: 6.98 azimuth_offset: -4.548 firing_offset_ns: 13325 }
+  channels { elevation: -3.09 azimuth_offset: -6.354 firing_offset_ns: 13325 }
+  channels { elevation: 4.98 azimuth_offset: 6.354 firing_offset_ns: 15990 }
+  channels { elevation: -3.75 azimuth_offset: 4.548 firing_offset_ns: 15990 }
+  channels { elevation: 1.64 azimuth_offset: 2.732 firing_offset_ns: 15990 }
+  channels { elevation: -8.352 azimuth_offset: 0.911 firing_offset_ns: 15990 }
+  channels { elevation: -2.54 azimuth_offset: -0.911 firing_offset_ns: 15990 }
+  channels { elevation: 2.85 azimuth_offset: -2.732 firing_offset_ns: 15990 }
+  channels { elevation: -5.84 azimuth_offset: -4.548 firing_offset_ns: 15990 }
+  channels { elevation: -0.45 azimuth_offset: -6.354 firing_offset_ns: 15990 }
+  channels { elevation: 8.43 azimuth_offset: 6.354 firing_offset_ns: 18655 }
+  channels { elevation: -2.87 azimuth_offset: 4.548 firing_offset_ns: 18655 }
+  channels { elevation: 2.52 azimuth_offset: 2.732 firing_offset_ns: 18655 }
+  channels { elevation: -6.17 azimuth_offset: 0.911 firing_offset_ns: 18655 }
+  channels { elevation: -1.66 azimuth_offset: -0.911 firing_offset_ns: 18655 }
+  channels { elevation: 3.73 azimuth_offset: -2.732 firing_offset_ns: 18655 }
+  channels { elevation: -4.96 azimuth_offset: -4.548 firing_offset_ns: 18655 }
+  channels { elevation: 0.43 azimuth_offset: -6.354 firing_offset_ns: 18655 }
+  return_modes { code: 0x37 name: "strongest" returns: "strongest" }
+  return_modes { code: 0x38 name: "last" returns: "last" }
+  timing { firing_period_ns: 53300 offset_ns: 0 }
+  min_range: 0.4
+  max_range: 245
+  rpm: 600
+  port: 2368
+}

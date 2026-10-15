@@ -16,6 +16,67 @@ pub enum Value {
     Str(String),
     /// A group of named fields (an optional SBF sub-block, ...).
     Map(Vec<(String, Value)>),
+    /// A homogeneous numeric array (a point cloud column, ...).
+    Array(Array),
+}
+
+/// A typed numeric array; Python sees an `array.array`.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Array {
+    U8(Vec<u8>),
+    U16(Vec<u16>),
+    U32(Vec<u32>),
+    I32(Vec<i32>),
+    I64(Vec<i64>),
+    F32(Vec<f32>),
+    F64(Vec<f64>),
+}
+
+impl Array {
+    pub fn len(&self) -> usize {
+        match self {
+            Array::U8(v) => v.len(),
+            Array::U16(v) => v.len(),
+            Array::U32(v) => v.len(),
+            Array::I32(v) => v.len(),
+            Array::I64(v) => v.len(),
+            Array::F32(v) => v.len(),
+            Array::F64(v) => v.len(),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// The elements as `f64` (exact except for `I64` beyond 2^53).
+    pub fn to_f64(&self) -> Vec<f64> {
+        fn conv<T: Copy>(v: &[T], f: impl Fn(T) -> f64) -> Vec<f64> {
+            v.iter().map(|x| f(*x)).collect()
+        }
+        match self {
+            Array::U8(v) => conv(v, f64::from),
+            Array::U16(v) => conv(v, f64::from),
+            Array::U32(v) => conv(v, f64::from),
+            Array::I32(v) => conv(v, f64::from),
+            Array::I64(v) => conv(v, |x| x as f64),
+            Array::F32(v) => conv(v, f64::from),
+            Array::F64(v) => v.clone(),
+        }
+    }
+
+    /// The `array` module type code of the element type.
+    pub fn typecode(&self) -> char {
+        match self {
+            Array::U8(_) => 'B',
+            Array::U16(_) => 'H',
+            Array::U32(_) => 'I',
+            Array::I32(_) => 'i',
+            Array::I64(_) => 'q',
+            Array::F32(_) => 'f',
+            Array::F64(_) => 'd',
+        }
+    }
 }
 
 impl Value {
@@ -25,6 +86,14 @@ impl Value {
             Value::Float(f) => Some(*f),
             Value::Bool(b) => Some(f64::from(u8::from(*b))),
             _ => None,
+        }
+    }
+
+    /// The numbers of an array, or of a single number.
+    pub fn to_f64_vec(&self) -> Option<Vec<f64>> {
+        match self {
+            Value::Array(a) => Some(a.to_f64()),
+            v => v.as_f64().map(|x| vec![x]),
         }
     }
 
@@ -56,6 +125,7 @@ impl fmt::Display for Value {
                 }
                 write!(f, "}}")
             }
+            Value::Array(a) => write!(f, "array({:?}, <{} items>)", a.typecode(), a.len()),
         }
     }
 }
@@ -112,6 +182,21 @@ impl Options {
             Some(Value::Str(s)) => Ok(Some(s)),
             Some(Value::Int(i)) => Ok(Some(i.to_string())),
             Some(v) => Err(Error::Config(format!("option {key}: {v} is not a string"))),
+        }
+    }
+
+    pub fn take_f64(&mut self, key: &str) -> Result<Option<f64>> {
+        match self.take(key) {
+            None => Ok(None),
+            Some(Value::Str(s)) => s
+                .trim()
+                .parse()
+                .map(Some)
+                .map_err(|_| Error::Config(format!("option {key}: {s:?} is not a number"))),
+            Some(v) => v
+                .as_f64()
+                .map(Some)
+                .ok_or_else(|| Error::Config(format!("option {key}: {v} is not a number"))),
         }
     }
 

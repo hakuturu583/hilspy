@@ -29,6 +29,7 @@ with hilspy.open("can://vcan0", "dbc:vehicle.dbc") as ecu:
 | `raw` (default) | none: messages carry `data` (and `id` for CAN) |
 | `dbc:FILE` | CAN frames <-> DBC messages, via [`can-dbc`](https://crates.io/crates/can-dbc) (options `strict`, `scaling`, `decode_choices`) |
 | `sbf` | Septentrio Binary Format stream <-> blocks, via [`libsbf`](https://crates.io/crates/libsbf); encodes `PVTGeodetic` and `AttEuler` |
+| `lidar:MODEL` | LiDAR UDP data packets <-> point clouds: Hesai and Velodyne line-ups, described by [profiles](#lidar-hesai-velodyne) |
 
 ## Install
 
@@ -107,6 +108,57 @@ with hilspy.open("tcp://0.0.0.0:28784?listen", "sbf") as receiver:
     receiver.send("AttEuler", {"heading": 90.0, "pitch": 0.0, "roll": 0.0})
     # tow/wnc default to the current GPS time
 ```
+
+### LiDAR (Hesai, Velodyne)
+
+`lidar:MODEL` decodes a sensor's UDP data packets into point clouds, and
+encodes point clouds into the packets a sensor would send (to stand in for
+one in the loop). Sensors are **profiles**, not code:
+
+| Vendor | Models (`lidar:<name>`; aliases in brackets) |
+| --- | --- |
+| Hesai | `pandar_40p`, `pandar_64`, `pandar_qt64`, `pandar_qt128`, `pandar_xt16`, `pandar_xt32`, `pandar_xt32m`, `pandar_128e3x` (Pandar128), `pandar_128e4x` (OT128), `pandar_at128` |
+| Velodyne | `vlp16` (Puck), `vlp16_hires`, `vlp32c`, `vlp32mr`, `hdl32e`, `hdl64e`, `vls128` (Alpha Prime) |
+
+Names ignore case, `-` and `_` (`lidar:VLP-16`, `lidar:XT32`).
+
+```python
+# Driver side: one message per revolution.
+with hilspy.open("udp://0.0.0.0:2368?listen", "lidar:pandar_xt32") as lidar:
+    for scan in lidar:
+        xyz = np.column_stack([np.frombuffer(scan[k], np.float32) for k in "xyz"])
+
+# Sensor side: send one revolution of a simulated point cloud.
+with hilspy.open("udp://192.168.1.100:2368", "lidar:vlp16") as sensor:
+    sensor.send("scan", {"x": xs, "y": ys, "z": zs, "intensity": 100})
+```
+
+A `scan` has arrays (`array.array`, readable by numpy without copying) `x`,
+`y`, `z` (metres; x forward, y left, z up), `intensity`, `channel`,
+`azimuth` (degrees, clockwise from forward), `distance`, `return` and `time`
+(seconds after `timestamp`), plus `timestamp`, `model`, `return_mode`, `rpm`
+and `packets`. Sending takes `x`/`y`/`z` (each point goes to the channel of
+the nearest elevation) or `distance`/`azimuth`/`channel`, as lists, tuples,
+`array.array` or numpy arrays; a received scan can be sent back as is.
+Sending one revolution spreads its packets over the revolution's duration
+(100 ms at 600 rpm), as the sensor does, so a driver's socket buffer is not
+flooded; `send` returns when the last packet is out (`pace=False` sends
+them at once). Codec options: `frame="packet"` (a message per packet),
+`phase` (where scans start, degrees), `rpm`, `return_mode` and `pace`
+(encoding), `profiles=FILE`.
+
+Profiles are protobuf messages (schema:
+[`lidar_profile.proto`](crates/hilspy-core/lidar/lidar_profile.proto)):
+packet layout, per-channel elevation / azimuth offset / firing time, return
+modes, timing and range. The defaults are written as text in
+[`lidar/profiles/`](crates/hilspy-core/lidar/profiles) and committed compiled
+as `lidar/profiles.binpb`, which hilspy embeds. To describe another sensor,
+write a `ProfileSet` in text format, compile it with any protobuf tool
+(`protoc --encode=hilspy.lidar.ProfileSet lidar_profile.proto < my_lidars.txtpb > my_lidars.binpb`)
+and pass it with `profiles="my_lidars.binpb"`; it is searched before the
+defaults. Channel angles are
+nominal values from [tier4/nebula](https://github.com/tier4/nebula)'s
+calibration files; per-unit calibration is not applied.
 
 ### Plugins
 

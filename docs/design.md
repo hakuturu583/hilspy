@@ -99,6 +99,30 @@ deadlocking. A Python exception raised in a plugin travels through the core as
   `libsbf::parse_datagram` and `sbf/fields.rs` maps common navigation blocks to
   fields. Encoders follow the SBF reference layouts (PVTGeodetic rev 2,
   AttEuler rev 1).
+* `lidar:MODEL`: data-driven. A sensor is a **profile**
+  (`crates/hilspy-core/lidar/lidar_profile.proto`): the packet layout
+  (size, constant/verified bytes, blocks of `azimuth + units`, unit layout,
+  banks per firing, firings per block, distance unit, offsets of the return
+  mode, motor speed, timestamp and sequence), per-channel elevation /
+  azimuth offset / firing offset, return modes, firing timing and range.
+  Profiles are authored as protobuf text (`lidar/profiles/*.txtpb`, channel
+  angles from tier4/nebula), compiled to the committed binary
+  `lidar/profiles.binpb` (`cargo run -p hilspy-core --example
+  lidar_profiles`; `tests/lidar_profiles.rs` fails when it is stale) and
+  embedded with `include_bytes!`. `build.rs` generates the prost types with
+  protox, so no `protoc` is needed. One generic engine (`src/lidar/`) reads
+  every layout: Hesai Pandar40P/64/QT64/QT128/XT16/XT32/XT32M/128E3X/128E4X/
+  AT128 and Velodyne VLP-16 (+Hi-Res)/VLP-32C/VLP-32MR/HDL-32E/HDL-64E/
+  VLS-128. A new sensor is a new profile (`profiles=FILE` adds a
+  `ProfileSet` at run time), not new code.
+  Decoding yields per-point columns (`Value::Array`, `array.array` in
+  Python) and cuts scans where the azimuth passes `phase` (or one message per
+  packet). Encoding grids a point cloud into the firing columns of one
+  revolution (nearest point per channel and column, whole packets per
+  revolution) for simulating a sensor in the loop; `Codec::paced` makes the
+  channel send them spaced by their timestamps, as the sensor streams them. Angles are nominal:
+  per-unit calibration (distance corrections, AT128 mirror tables) is not
+  modelled.
 
 ## Toward the scenario library
 
@@ -108,3 +132,5 @@ step turns ground truth (CARLA ego pose and velocity) into device traffic
 messages via `every()`), and decodes the device under test's output back into
 observations. Next: serial transport, E2E counters/CRCs in cyclic messages,
 candump/BLF logs, more formats (NMEA, UBX, RTCM) behind the same traits.
+A simulated LiDAR is `udp://driver:2368` + `lidar:MODEL`, sending the
+raycast point cloud of each revolution.

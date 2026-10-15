@@ -1,6 +1,6 @@
 [package]
 name = "hilspy-core"
-description = "Rust core of hilspy: CAN buses (SocketCAN / virtual), DBC codec and Septentrio Binary Format (SBF) parser for HILS"
+description = "Rust core of hilspy: CAN buses (SocketCAN / virtual), DBC, Septentrio Binary Format (SBF) and LiDAR (Hesai, Velodyne) codecs for HILS"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,8 +10,17 @@ repository.workspace = true
 [dependencies]
 can-dbc.workspace = true
 libsbf.workspace = true
+prost.workspace = true
 thiserror.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
 socketcan.workspace = true
 libc = "0.2"
+
+[build-dependencies]
+prost-build.workspace = true
+protox.workspace = true
+
+[dev-dependencies]
+prost-reflect.workspace = true
+protox.workspace = true

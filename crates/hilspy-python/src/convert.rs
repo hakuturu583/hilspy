@@ -1,9 +1,9 @@
 //! `Message` and conversions between Python objects and core values.
 
-use hilspy_core::{CanHeader, Message as CoreMessage, Options, Packet, Value};
+use hilspy_core::{Array, CanHeader, Message as CoreMessage, Options, Packet, Value};
 use pyo3::exceptions::{PyKeyError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::{PyBool, PyBytes, PyDict, PyFloat, PyInt, PyString};
+use pyo3::types::{PyBool, PyBytes, PyDict, PyFloat, PyInt, PyList, PyString, PyTuple};
 
 const SFF_MASK: u32 = 0x7FF;
 
@@ -20,15 +20,115 @@ pub(crate) fn value_from_py(obj: &Bound<'_, PyAny>) -> PyResult<Value> {
         Ok(Value::Str(obj.extract()?))
     } else if obj.hasattr("items")? {
         Ok(Value::Map(fields_from_py(obj)?))
+    } else if obj.is_instance_of::<PyList>() || obj.is_instance_of::<PyTuple>() {
+        sequence_from_py(obj)
+    } else if let Some(a) = array_from_py(obj)? {
+        Ok(Value::Array(a))
     } else if let Ok(f) = obj.call_method0("__float__") {
         // numpy scalars and other numbers.
         Ok(Value::Float(f.extract()?))
     } else {
         Err(PyTypeError::new_err(format!(
-            "a field value must be None, bool, int, float, str or a mapping, not {}",
+            "a field value must be None, bool, int, float, str, a mapping or a sequence \
+             of numbers (list, array.array, numpy array), not {}",
             obj.get_type().name()?
         )))
     }
+}
+
+/// A list or tuple of numbers: an int64 array if all are ints, else float64.
+fn sequence_from_py(obj: &Bound<'_, PyAny>) -> PyResult<Value> {
+    let items: Vec<Bound<'_, PyAny>> = obj.try_iter()?.collect::<PyResult<_>>()?;
+    if items
+        .iter()
+        .all(|i| i.is_instance_of::<PyInt>() && !i.is_instance_of::<PyBool>())
+    {
+        let v = items.iter().map(|i| i.extract()).collect::<PyResult<_>>()?;
+        return Ok(Value::Array(Array::I64(v)));
+    }
+    let v = items
+        .iter()
+        .map(|i| {
+            i.extract::<f64>()
+                .map_err(|_| PyTypeError::new_err("a sequence field must hold only numbers"))
+        })
+        .collect::<PyResult<_>>()?;
+    Ok(Value::Array(Array::F64(v)))
+}
+
+fn chunks<const N: usize, T>(b: &[u8], f: impl Fn([u8; N]) -> T) -> Vec<T> {
+    b.chunks_exact(N)
+        .map(|c| f(c.try_into().expect("exact chunk")))
+        .collect()
+}
+
+/// An `array.array` or a numpy array (anything with `typecode` or a native
+/// `dtype`, `itemsize` and `tobytes()`), as a typed array.
+fn array_from_py(obj: &Bound<'_, PyAny>) -> PyResult<Option<Array>> {
+    let (code, size) = if obj.hasattr("typecode")? && obj.hasattr("tobytes")? {
+        (
+            obj.getattr("typecode")?.extract::<String>()?,
+            obj.getattr("itemsize")?.extract::<usize>()?,
+        )
+    } else if obj.hasattr("dtype")? && obj.hasattr("tobytes")? {
+        if obj.getattr("ndim")?.extract::<usize>()? == 0 {
+            return Ok(None); // a numpy scalar
+        }
+        let dtype = obj.getattr("dtype")?;
+        if !dtype.getattr("isnative")?.extract::<bool>()? {
+            return Err(PyValueError::new_err(
+                "arrays must be in native byte order (use arr.astype(arr.dtype.newbyteorder('=')))",
+            ));
+        }
+        (
+            dtype.getattr("char")?.extract::<String>()?,
+            dtype.getattr("itemsize")?.extract::<usize>()?,
+        )
+    } else {
+        return Ok(None);
+    };
+    let bytes = obj.call_method0("tobytes")?;
+    let b = bytes.cast::<PyBytes>()?.as_bytes();
+    let signed = "bhilq".contains(code.as_str());
+    let unsigned = "?BHILQ".contains(code.as_str());
+    Ok(Some(match (code.as_str(), size) {
+        ("f", 4) => Array::F32(chunks(b, f32::from_ne_bytes)),
+        ("d", 8) => Array::F64(chunks(b, f64::from_ne_bytes)),
+        (_, 1) if unsigned => Array::U8(b.to_vec()),
+        (_, 1) if signed => Array::I32(b.iter().map(|x| i32::from(*x as i8)).collect()),
+        (_, 2) if unsigned => Array::U16(chunks(b, u16::from_ne_bytes)),
+        (_, 2) if signed => Array::I32(chunks(b, |x| i32::from(i16::from_ne_bytes(x)))),
+        (_, 4) if unsigned => Array::U32(chunks(b, u32::from_ne_bytes)),
+        (_, 4) if signed => Array::I32(chunks(b, i32::from_ne_bytes)),
+        (_, 8) if signed => Array::I64(chunks(b, i64::from_ne_bytes)),
+        (_, 8) if unsigned => Array::F64(chunks(b, |x| u64::from_ne_bytes(x) as f64)),
+        _ => {
+            return Err(PyTypeError::new_err(format!(
+                "unsupported array element type {code:?} ({size} bytes)"
+            )))
+        }
+    }))
+}
+
+fn array_to_py<'py>(py: Python<'py>, a: &Array) -> PyResult<Bound<'py, PyAny>> {
+    fn ne<T: Copy, const N: usize>(v: &[T], f: impl Fn(T) -> [u8; N]) -> Vec<u8> {
+        v.iter().flat_map(|x| f(*x)).collect()
+    }
+    let bytes = match a {
+        Array::U8(v) => v.clone(),
+        Array::U16(v) => ne(v, u16::to_ne_bytes),
+        Array::U32(v) => ne(v, u32::to_ne_bytes),
+        Array::I32(v) => ne(v, i32::to_ne_bytes),
+        Array::I64(v) => ne(v, i64::to_ne_bytes),
+        Array::F32(v) => ne(v, f32::to_ne_bytes),
+        Array::F64(v) => ne(v, f64::to_ne_bytes),
+    };
+    let out = py
+        .import("array")?
+        .getattr("array")?
+        .call1((a.typecode().to_string(),))?;
+    out.call_method1("frombytes", (PyBytes::new(py, &bytes),))?;
+    Ok(out)
 }
 
 pub(crate) fn fields_from_py(obj: &Bound<'_, PyAny>) -> PyResult<Vec<(String, Value)>> {
@@ -52,6 +152,7 @@ pub(crate) fn value_to_py<'py>(py: Python<'py>, v: &Value) -> PyResult<Bound<'py
         Value::Float(x) => x.into_pyobject(py)?.into_any(),
         Value::Str(s) => s.into_pyobject(py)?.into_any(),
         Value::Map(m) => fields_to_py(py, m)?.into_any(),
+        Value::Array(a) => array_to_py(py, a)?,
     })
 }
 

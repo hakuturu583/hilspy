@@ -1,0 +1,7 @@
+hilspy
+Copyright the hilspy authors. Licensed under the Apache License, Version 2.0.
+
+The LiDAR profiles in crates/hilspy-core/lidar/profiles/ contain channel
+angles, firing time offsets and packet layouts derived from tier4/nebula
+(https://github.com/tier4/nebula), licensed under the Apache License,
+Version 2.0, Copyright TIER IV, Inc.
