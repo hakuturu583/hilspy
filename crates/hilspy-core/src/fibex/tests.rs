@@ -202,6 +202,14 @@ fn unsupported_content_is_reported() {
             "byte offset",
         ),
         (
+            "pdu-order",
+            text.replace(
+                "<fx:PDU-REF ID-REF=\"P_Speed\"/>\n            <fx:BIT-POSITION>0</fx:BIT-POSITION>\n            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>",
+                "<fx:PDU-REF ID-REF=\"P_Speed\"/>\n            <fx:BIT-POSITION>0</fx:BIT-POSITION>\n            <fx:IS-HIGH-LOW-BYTE-ORDER>true</fx:IS-HIGH-LOW-BYTE-ORDER>",
+            ),
+            "high-low byte order PDU instances",
+        ),
+        (
             "identifier",
             text.replace(">419369524<", ">0x40000000<"),
             "not a CAN identifier",

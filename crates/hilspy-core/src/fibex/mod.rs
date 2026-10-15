@@ -230,6 +230,15 @@ impl Network<'_, '_, '_> {
                     "PDU {pdu_name}: multiplexed PDUs are not supported"
                 )));
             }
+            // A high-low PDU instance would place the PDU's bytes in another
+            // order than its signals' positions describe; reject it rather
+            // than map signals to the wrong bytes.
+            if instance.is_high_low_byte_order == Some(true) {
+                return Err(bad(format!(
+                    "PDU {pdu_name} in frame {name}: high-low byte order PDU instances are \
+                     not supported"
+                )));
+            }
             let offset = instance.bit_position.unwrap_or(0);
             let len = pdu.byte_length as usize;
             if offset % 8 != 0 || (offset / 8) as usize + len > size {

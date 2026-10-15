@@ -103,9 +103,9 @@ with hilspy.open("can://can0", "fibex:network.xml", channel="Chassis") as ecu:
   plus texttable entries) give physical values, `TEXTTABLE` names work like
   DBC value tables, and physical constraints are the range `strict` checks.
 * `strict`, `scaling`, `decode_choices` and `e2e` work as for `dbc:`; frames
-  the channel lacks decode as nameless messages. Multiplexed PDUs, texttable
-  ranges and piecewise or non-linear scaling are rejected when the file is
-  opened.
+  the channel lacks decode as nameless messages. Multiplexed PDUs, high-low
+  byte order PDU instances, texttable ranges and piecewise or non-linear
+  scaling are rejected when the file is opened.
 
 ### AUTOSAR E2E (alive counter + CRC)
 
