@@ -68,6 +68,9 @@ enum Writer {
 enum Mode {
     Read {
         reader: Reader,
+        /// A frame read but not yet due (real-time replay), kept across a
+        /// receive that timed out before it.
+        pending: Option<Packet>,
         /// Wall time of the first frame and its recorded time, to replay in
         /// real time.
         realtime: Option<Option<(Instant, f64)>>,
@@ -171,6 +174,7 @@ impl CanLog {
                         Reader::Asc(Box::new(AscReader::open(path).map_err(blf_err(path))?))
                     }
                 },
+                pending: None,
                 realtime: realtime.then_some(None),
             }
         };
@@ -225,6 +229,14 @@ impl Reader {
 
 impl Writer {
     fn write(&mut self, packet: &Packet, channel: u16) -> Result<()> {
+        // The checks every CAN transport makes (identifier range, payload
+        // length; FD when the payload needs it), so the log stays consistent.
+        let header = crate::transport::can_frame::check(packet, true)?;
+        let normalized = Packet {
+            can: Some(header),
+            ..packet.clone()
+        };
+        let packet = &normalized;
         match self {
             #[cfg(target_os = "linux")]
             Writer::Candump(w, device) => {
@@ -282,7 +294,12 @@ impl Transport for CanLog {
     fn recv(&self, timeout: Option<Duration>) -> Result<Option<Packet>> {
         let deadline = timeout.map(|t| Instant::now() + t);
         let mut mode = self.mode.lock().unwrap();
-        let Mode::Read { reader, realtime } = &mut *mode else {
+        let Mode::Read {
+            reader,
+            pending,
+            realtime,
+        } = &mut *mode
+        else {
             drop(mode);
             // A recording receives nothing: wait out the timeout.
             return self.idle(deadline);
@@ -290,8 +307,12 @@ impl Transport for CanLog {
         if self.closed.load(Ordering::Acquire) {
             return Err(Error::Closed);
         }
-        let Some(packet) = reader.next()? else {
-            return Err(Error::Closed);
+        let packet = match pending.take() {
+            Some(p) => p,
+            None => match reader.next()? {
+                Some(p) => p,
+                None => return Err(Error::Closed),
+            },
         };
         if let (Some(origin), Some(t)) = (realtime.as_mut(), packet.timestamp) {
             let (start, t0) = *origin.get_or_insert((Instant::now(), t));
@@ -304,7 +325,14 @@ impl Transport for CanLog {
                 if now >= due {
                     break;
                 }
-                std::thread::sleep((due - now).min(CLOSE_POLL));
+                // Not due before the caller's deadline: keep it for the
+                // next receive.
+                if deadline.is_some_and(|d| now >= d) {
+                    *pending = Some(packet);
+                    return Ok(None);
+                }
+                let wake = deadline.map_or(due, |d| d.min(due));
+                std::thread::sleep((wake - now).min(CLOSE_POLL));
             }
         }
         Ok(Some(packet))
@@ -416,6 +444,54 @@ mod tests {
     #[test]
     fn candump_round_trip() {
         round_trip("drive.log", "&format=candump&interface=vcan1");
+    }
+
+    #[test]
+    fn realtime_replay_honours_receive_timeouts() {
+        let dir = std::env::temp_dir().join(format!("hilspy-log-{}-gap", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("gap.asc");
+        let w = open(&format!("file://{}?write", path.display())).unwrap();
+        let mut f = frames();
+        f[1].timestamp = Some(f[0].timestamp.unwrap() + 0.3);
+        w.send(&f[0]).unwrap();
+        w.send(&f[1]).unwrap();
+        w.close();
+        let r = open(&format!("file://{}?realtime", path.display())).unwrap();
+        assert!(r.recv(Some(Duration::from_millis(50))).unwrap().is_some());
+        // The next frame is 300 ms away: a 50 ms receive gives up on time
+        // and the frame is not lost.
+        let start = Instant::now();
+        assert!(r.recv(Some(Duration::from_millis(50))).unwrap().is_none());
+        assert!(start.elapsed() < Duration::from_millis(150));
+        let p = r.recv(Some(Duration::from_secs(2))).unwrap().unwrap();
+        assert_eq!(p.can.unwrap().id, f[1].can.unwrap().id);
+        assert!(start.elapsed() >= Duration::from_millis(250));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn writes_normalized_frames() {
+        let dir = std::env::temp_dir().join(format!("hilspy-log-{}-norm", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("n.blf");
+        let w = open(&format!("file://{}?write", path.display())).unwrap();
+        let mut long = Packet::can(0x100, vec![1; 12]);
+        long.can.as_mut().unwrap().fd = false;
+        w.send(&long).unwrap();
+        assert!(
+            w.send(&Packet::can(0x800, vec![1])).is_ok(),
+            "0x800 is extended"
+        );
+        let mut bad = Packet::can(0x100, vec![1]);
+        bad.can.as_mut().unwrap().id = 0x800;
+        assert!(w.send(&bad).is_err(), "11-bit id out of range");
+        w.close();
+        let r = open(&format!("file://{}", path.display())).unwrap();
+        let p = r.recv(None).unwrap().unwrap();
+        assert!(p.can.unwrap().fd, "a 12-byte payload is an FD frame");
+        assert_eq!(p.data, vec![1; 12]);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
