@@ -19,6 +19,7 @@ nmea = { version = "0.8", default-features = false, features = ["std", "all-sent
 ublox = { version = "0.10", default-features = false, features = ["std", "alloc", "serde", "ubx_proto23"] }
 rtcm-rs = { version = "0.11", default-features = false, features = ["std", "all_msgs", "serde"] }
 serde_json = "1"
+autosar-e2e = "1"
 rand = "0.8"
 serialport = { version = "4.10", default-features = false }
 pyo3 = "0.29"

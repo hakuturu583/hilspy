@@ -115,6 +115,12 @@ deadlocking. A Python exception raised in a plugin travels through the core as
   Bit layout: Intel signals occupy `start..start+size`; Motorola signals are
   `size` bits from the start bit's position in most-significant-first order.
   The tests cross-check payloads against `cantools`.
+* `dbc` + `e2e`: `codec/e2e.rs` maps a per-message configuration (a
+  mapping option) onto an `autosar-e2e` profile; a sender instance protects
+  the packed payload (counter and CRC), a receiver instance checks it and
+  the result becomes the `e2e` field. `every()` sends its first message
+  itself instead of dry-run encoding it, so stateful codecs (E2E counters,
+  sequence numbers) never lose a value.
 * `sbf`: own framing (`$@`, length a multiple of 4, CRC-16/XMODEM, resync one
   byte after a bad CRC) so every block keeps its raw bytes; bodies go to
   `libsbf::parse_datagram` and `sbf/fields.rs` maps common navigation blocks to
@@ -159,7 +165,6 @@ A scenario-side "HIL bridge" opens one channel per device: each simulation
 step turns ground truth (CARLA ego pose and velocity) into device traffic
 (`tcp://...?listen` + `sbf` for a GNSS receiver, `can://` + `dbc:` cyclic
 messages via `every()`), and decodes the device under test's output back into
-observations. Next: serial transport, E2E counters/CRCs in cyclic messages,
-candump/BLF logs behind the same traits.
+observations. Next: candump/BLF logs behind the same traits.
 A simulated LiDAR is `udp://driver:2368` + `lidar:MODEL`, sending the
 raycast point cloud of each revolution.

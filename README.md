@@ -28,7 +28,7 @@ with hilspy.open("can://vcan0", "dbc:vehicle.dbc") as ecu:
 | Codec | |
 | --- | --- |
 | `raw` (default) | none: messages carry `data` (and `id` for CAN) |
-| `dbc:FILE` | CAN frames <-> DBC messages, via [`can-dbc`](https://crates.io/crates/can-dbc) (options `strict`, `scaling`, `decode_choices`) |
+| `dbc:FILE` | CAN frames <-> DBC messages, via [`can-dbc`](https://crates.io/crates/can-dbc) (options `strict`, `scaling`, `decode_choices`, `e2e`) |
 | `sbf` | Septentrio Binary Format stream <-> blocks, via [`libsbf`](https://crates.io/crates/libsbf); encodes `PVTGeodetic` and `AttEuler` |
 | `nmea` | NMEA 0183 sentences <-> messages via [`nmea`](https://crates.io/crates/nmea) (`GGA`, `RMC`, `GSV`, ...); encodes `GGA`, `RMC`, `VTG`, `HDT`, `ZDA` |
 | `ubx` | u-blox UBX frames <-> messages via [`ublox`](https://crates.io/crates/ublox) (`NAV-PVT`, `NAV-ATT`, `MON-VER`, ...); encodes `NAV-PVT` |
@@ -74,6 +74,31 @@ The whole public API:
 | `hilspy.Clock(start=0.0)` | simulated time: `advance(dt)`, `advance_to(t)`, `now`, `next_due` |
 | `hilspy.register_transport(scheme, factory)` / `register_codec(name, factory)` | plugins |
 | `hilspy.Error` | bad URL/codec/option, encode/decode failure, closed channel |
+
+### AUTOSAR E2E (alive counter + CRC)
+
+The `dbc` codec protects chosen messages with an AUTOSAR E2E profile
+([`autosar-e2e`](https://crates.io/crates/autosar-e2e): profiles 4, 5, 6, 7,
+8, 11, 22). Sending fills the counter (counting per message) and CRC;
+receiving checks them and adds an `e2e` field (`Ok`, `CrcError`,
+`Repeated`, `WrongSequence`, ...):
+
+```python
+e2e = {
+    "BrakeCmd": {"profile": 11, "data_id": 0x123, "signals": ["Crc", "Counter", "DataIdNibble"]},
+    "SafetyStatus": {"profile": 5, "data_id": 0x4242, "offset": 0, "signals": ["Crc", "Counter"]},
+}
+with hilspy.open("can://can0", "dbc:chassis.dbc", e2e=e2e) as ecu:
+    ecu.every(0.01, "BrakeCmd", {"Pressure": 12.5, "Request": 1})  # counter and CRC each cycle
+    for msg in ecu:
+        if "e2e" in msg and msg["e2e"] != "Ok":
+            print("E2E", msg.name, msg["e2e"])
+```
+
+`signals` names the signals the protection writes, so they may be left out
+even with `strict`. Offsets are AUTOSAR's (bits); profile 11 takes `mode`
+(`nibble`/`both`), `crc_offset`, `counter_offset`, `nibble_offset`; 22
+`data_id_list` (16 values); all take `max_delta_counter`.
 
 ### Synchronous simulation (virtual clock)
 

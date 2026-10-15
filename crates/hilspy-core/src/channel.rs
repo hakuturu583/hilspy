@@ -378,25 +378,26 @@ impl Periodic {
         if period.is_zero() {
             return Err(Error::Config("the period must be positive".into()));
         }
-        // Fail now, not on the first tick, on a message that cannot encode.
-        if message.name.is_some() {
-            inner.codec.lock().unwrap().encode(&message)?;
-        }
+        // The first send happens here, so a message that cannot be sent
+        // fails the call (rather than a dry-run encode, which would cost a
+        // stateful codec a value: an E2E counter, a sequence number).
+        let start = Instant::now();
+        let now = inner.clock.as_ref().map(Clock::now_ns);
+        inner.send(&message)?;
         let shared = Arc::new(Shared {
             state: Mutex::new(State {
                 message,
                 period,
                 stopped: false,
-                sent: 0,
+                sent: 1,
                 last_error: None,
             }),
             wake: Condvar::new(),
         });
-        if let Some(clock) = inner.clock.clone() {
-            let now = clock.now_ns();
+        if let (Some(clock), Some(now)) = (inner.clock.clone(), now) {
             let end = duration
                 .map(|d| now.saturating_add(i64::try_from(d.as_nanos()).unwrap_or(i64::MAX)));
-            tick(&clock, inner, Arc::clone(&shared), end, now);
+            schedule_next(&clock, inner, Arc::clone(&shared), end, now);
             return Ok(Self {
                 shared,
                 on_clock: true,
@@ -406,7 +407,7 @@ impl Periodic {
         let worker = Arc::clone(&shared);
         let thread = std::thread::Builder::new()
             .name("hilspy-periodic".into())
-            .spawn(move || run(inner, worker, duration))?;
+            .spawn(move || run(inner, worker, start, duration))?;
         Ok(Self {
             shared,
             on_clock: false,
@@ -490,9 +491,15 @@ fn tick(clock: &Clock, inner: Arc<Inner>, shared: Arc<Shared>, end: Option<i64>,
         Ok(()) => state.sent += 1,
         Err(e) => state.last_error = Some(e.to_string()),
     }
+    drop(state);
+    schedule_next(clock, inner, shared, end, at);
+}
+
+/// Schedule the tick after the one due at `at`, unless it falls at or after
+/// the end: then stop now, not when the clock reaches it.
+fn schedule_next(clock: &Clock, inner: Arc<Inner>, shared: Arc<Shared>, end: Option<i64>, at: i64) {
+    let mut state = shared.state.lock().unwrap();
     let next = at.saturating_add(i64::try_from(state.period.as_nanos()).unwrap_or(i64::MAX));
-    // A send due at or after the end is never made: stop now, not when the
-    // clock reaches it.
     if end.is_some_and(|e| next >= e) {
         state.stopped = true;
         return;
@@ -504,11 +511,11 @@ fn tick(clock: &Clock, inner: Arc<Inner>, shared: Arc<Shared>, end: Option<i64>,
     );
 }
 
-fn run(inner: Arc<Inner>, shared: Arc<Shared>, duration: Option<Duration>) {
-    let start = Instant::now();
+/// The sender thread; the first send (at `start`) is already made.
+fn run(inner: Arc<Inner>, shared: Arc<Shared>, start: Instant, duration: Option<Duration>) {
     let end = duration.map(|d| start + d);
-    let mut next = start;
     let mut state = shared.state.lock().unwrap();
+    let mut next = start + state.period;
     loop {
         if state.stopped || inner.closed.load(Ordering::Acquire) {
             break;

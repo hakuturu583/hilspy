@@ -3,7 +3,7 @@
 //! | Spec | Codec |
 //! | --- | --- |
 //! | `raw` | none: every packet is a nameless message carrying its data |
-//! | `dbc:FILE` | CAN frames <-> DBC messages (options `strict`, `scaling`, `decode_choices`) |
+//! | `dbc:FILE` | CAN frames <-> DBC messages (options `strict`, `scaling`, `decode_choices`, `e2e`) |
 //! | `sbf` | a Septentrio Binary Format byte stream <-> SBF blocks |
 //! | `nmea` | NMEA 0183 sentences <-> messages (`GGA`, `RMC`, ...) |
 //! | `ubx` | u-blox UBX frames <-> messages (`NAV-PVT`, ...) |
@@ -13,6 +13,7 @@
 //! Other codecs are added with [`register`].
 
 mod dbc;
+mod e2e;
 mod lidar;
 mod nmea;
 mod raw;
