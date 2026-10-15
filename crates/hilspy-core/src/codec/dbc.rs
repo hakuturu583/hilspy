@@ -15,7 +15,7 @@ use crate::error::{Error, Result};
 use crate::message::{CanHeader, Message, Packet};
 use crate::transport::can_frame::fd_padded_len;
 use crate::url::CodecSpec;
-use crate::value::Value;
+use crate::value::{Options, Value};
 
 pub(crate) struct Dbc {
     db: Database,
@@ -25,18 +25,46 @@ pub(crate) struct Dbc {
     e2e: HashMap<String, Protection>,
 }
 
+/// The signal options `dbc:` and `fibex:` share.
+pub(crate) struct SignalOptions {
+    strict: bool,
+    scaling: bool,
+    decode_choices: bool,
+    e2e: Option<Value>,
+}
+
+impl SignalOptions {
+    /// Consume `strict`, `scaling`, `decode_choices` and `e2e`.
+    pub(crate) fn take(o: &mut Options) -> Result<Self> {
+        Ok(Self {
+            strict: o.take_bool("strict", true)?,
+            scaling: o.take_bool("scaling", true)?,
+            decode_choices: o.take_bool("decode_choices", true)?,
+            e2e: o.take("e2e"),
+        })
+    }
+}
+
 impl Dbc {
     pub(crate) fn open(spec: CodecSpec) -> Result<Self> {
         let path = spec.argument.ok_or_else(|| {
             Error::Config("the dbc codec needs a file: \"dbc:path/to/file.dbc\"".into())
         })?;
         let mut o = spec.options;
-        let strict = o.take_bool("strict", true)?;
-        let scaling = o.take_bool("scaling", true)?;
-        let decode_choices = o.take_bool("decode_choices", true)?;
-        let e2e = o.take("e2e");
+        let options = SignalOptions::take(&mut o)?;
         o.finish("the dbc codec")?;
-        let db = Database::from_file(path)?;
+        Self::new(Database::from_file(path)?, options)
+    }
+
+    /// The codec over an already-built database (a DBC file, or the frames
+    /// of a FIBEX channel).
+    pub(crate) fn new(db: Database, options: SignalOptions) -> Result<Self> {
+        let SignalOptions {
+            strict,
+            scaling,
+            decode_choices,
+            e2e,
+        } = options;
         let e2e = match e2e {
             None | Some(Value::Null) => HashMap::new(),
             Some(Value::Map(entries)) => entries
@@ -157,7 +185,6 @@ impl Codec for Dbc {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::value::Options;
 
     fn e2e_codec() -> Dbc {
         let path = format!("{}/../../tests/data/e2e.dbc", env!("CARGO_MANIFEST_DIR"));
