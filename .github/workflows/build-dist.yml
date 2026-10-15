@@ -24,8 +24,9 @@ jobs:
           - { name: linux-x86_64, os: ubuntu-latest, target: x86_64, test: true }
           # Cross-built in the manylinux container; not runnable on the host.
           - { name: linux-aarch64, os: ubuntu-latest, target: aarch64, test: false }
-          - { name: macos-arm64, os: macos-14, target: aarch64, test: true }
-          - { name: macos-x86_64, os: macos-14, target: x86_64, test: false }
+          # Not macos-14: it is retired on 2026-11-02.
+          - { name: macos-arm64, os: macos-15, target: aarch64, test: true }
+          - { name: macos-x86_64, os: macos-15-intel, target: x86_64, test: true }
           - { name: windows-x64, os: windows-latest, target: x64, test: true }
     steps:
       - uses: actions/checkout@v4

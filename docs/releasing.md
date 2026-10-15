@@ -32,8 +32,12 @@ the `Labels` workflow; checked by `PR Check`):
 
 ## What a labelled merge does (`.github/workflows/release.yml`)
 
-1. **bump**: reads the merged PR's label, runs `tools/bump_version.py <part>`,
-   commits `chore: bump version to X` to the default branch and tags `vX`.
+1. **bump**: collects the labels of every PR merged since the last `v*` tag
+   and takes the highest (`major` > `minor` > `patch`), runs
+   `tools/bump_version.py <part>`, commits `chore: bump version to X` to the
+   default branch and tags `vX`. Release runs are serialized and GitHub
+   cancels all but the newest pending one, so several quick merges become one
+   release; none of them is skipped.
 2. **dist** (`build-dist.yml`, also run by CI on every PR): abi3 wheels for
    Linux x86_64/aarch64 (manylinux), macOS arm64/x86_64 and Windows x64, and
    the sdist; each runnable wheel and the sdist are `pip install`ed and the
