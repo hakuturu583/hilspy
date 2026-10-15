@@ -14,11 +14,12 @@ import argparse
 import time
 
 import numpy as np
+import numpy.typing as npt
 
 import hilspy
 
 
-def scene(t: float) -> dict[str, np.ndarray]:
+def scene(t: float) -> dict[str, npt.NDArray[np.float64]]:
     """A ground plane 1.8 m below and a 20 m-radius wall, with a car circling."""
     az = np.radians(np.arange(0.0, 360.0, 0.2))
     rng = np.repeat([4.0, 6.0, 9.0, 14.0], az.size)
