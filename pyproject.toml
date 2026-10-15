@@ -5,13 +5,13 @@ build-backend = "maturin"
 [project]
 name = "hilspy"
 version = "0.2.0"
-description = "HILS I/O for Python on a Rust core: CAN/CAN FD over SocketCAN (vcan) or an in-process virtual bus, DBC encoding, and Septentrio Binary Format (SBF) parsing"
+description = "HILS I/O for Python on a Rust core: pluggable transports (SocketCAN, UDP, TCP, in-process, files) and codecs (DBC, Septentrio SBF) behind one tiny API"
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 requires-python = ">=3.10"
 authors = [{ name = "Masaya Kataoka", email = "ms.kataoka@gmail.com" }]
-keywords = ["hils", "can", "socketcan", "vcan", "dbc", "sbf", "septentrio", "gnss"]
+keywords = ["hils", "can", "socketcan", "vcan", "ethernet", "udp", "tcp", "dbc", "sbf", "septentrio", "gnss"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",

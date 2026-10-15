@@ -1,19 +1,30 @@
-//! Rust core of `hilspy`, a hardware-in-the-loop simulation (HILS) I/O library.
+//! Rust core of `hilspy`, a hardware-in-the-loop simulation (HILS) I/O
+//! library.
 //!
-//! * [`can`]: CAN / CAN FD frames, buses (Linux SocketCAN incl. `vcan`, and an
-//!   in-process virtual bus) and periodic transmission.
-//! * [`dbc`]: a DBC database (parsed with the `can-dbc` crate) that encodes
-//!   and decodes signals.
-//! * [`sbf`]: a streaming Septentrio Binary Format (SBF) decoder (block
-//!   bodies parsed with the `libsbf` crate) and encoders for the blocks a
-//!   simulated GNSS receiver emits.
+//! A [`Channel`] composes a [`Transport`] (how packets travel: `can://`,
+//! `udp://`, `tcp://`, `mem://`) with a [`Codec`] (what they mean: `raw`,
+//! `dbc:FILE`, `sbf`). Both are pluggable: [`transport::register`] and
+//! [`codec::register`] add schemes and codecs, and the Python bindings use
+//! them to accept transports and codecs written in Python.
 //!
 //! The crate has no Python dependency; `hilspy-python` is a thin PyO3 layer
 //! over it.
 
-pub mod can;
+pub mod channel;
+pub mod codec;
 pub mod dbc;
 pub mod error;
+pub mod message;
+mod queue;
 pub mod sbf;
+pub mod transport;
+pub mod url;
+pub mod value;
 
+pub use channel::{Channel, Periodic};
+pub use codec::Codec;
 pub use error::{Error, Result};
+pub use message::{CanHeader, Message, Packet};
+pub use transport::Transport;
+pub use url::{CodecSpec, Endpoint};
+pub use value::{Options, Value};

@@ -11,7 +11,6 @@ use can_dbc::{
     NumericValue, SignalExtendedValueType, ValueType,
 };
 
-use crate::can::Frame;
 use crate::error::{Error, Result};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -483,24 +482,6 @@ impl Message {
         }
         Some(in_ranges(&mux.ranges, raw_bits[mux.multiplexor]?))
     }
-
-    /// Encode into a frame with this message's identifier (CAN FD with bit
-    /// rate switch for FD messages, padded to a valid FD length).
-    pub fn encode_frame(
-        &self,
-        values: &[(String, Value)],
-        options: &EncodeOptions,
-    ) -> Result<Frame> {
-        let mut data = self.encode(values, options)?;
-        if self.fd {
-            let len = Frame::fd_padded_len(data.len())
-                .ok_or_else(|| Error::encode(format!("{} bytes exceeds CAN FD", data.len())))?;
-            data.resize(len, 0);
-            Frame::new_fd(self.id, &data, self.extended, true)
-        } else {
-            Frame::new(self.id, &data, self.extended)
-        }
-    }
 }
 
 fn in_ranges(ranges: &[(u64, u64)], v: u64) -> bool {
@@ -555,7 +536,7 @@ impl Database {
                 MessageId::Extended(id) => (id, true),
             };
             let size = usize::try_from(m.size).unwrap_or(usize::MAX);
-            if size > crate::can::CAN_FD_MAX_DLEN {
+            if size > 64 {
                 return Err(Error::DbcParse(format!(
                     "message {} is {size} bytes (at most 64)",
                     m.name
@@ -584,7 +565,7 @@ impl Database {
                     .resolved_message_attribute(m.id, "GenMsgCycleTime")
                     .and_then(attr_u64)
                     .filter(|&t| t > 0),
-                fd: fd_by_attr || size > crate::can::CAN_MAX_DLEN,
+                fd: fd_by_attr || size > 8,
                 signals,
             });
         }
@@ -640,16 +621,6 @@ impl Database {
                     if extended { "extended" } else { "standard" }
                 ))
             })
-    }
-
-    /// Decode a received frame with the message of its identifier.
-    pub fn decode_frame(
-        &self,
-        frame: &Frame,
-        options: &DecodeOptions,
-    ) -> Result<(&Message, Vec<(String, Value)>)> {
-        let message = self.message_by_id(frame.id, frame.extended)?;
-        Ok((message, message.decode(&frame.data, options)?))
     }
 }
 

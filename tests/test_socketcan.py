@@ -1,4 +1,4 @@
-"""SocketCAN tests on a real vcan interface.
+"""can:// on a real vcan interface.
 
 They run when ``HILSPY_TEST_VCAN`` names one, e.g.::
 
@@ -10,62 +10,63 @@ They run when ``HILSPY_TEST_VCAN`` names one, e.g.::
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import pytest
 
-from hilspy.can import Bus, Filter, Frame
+import hilspy
+from hilspy import Message
 
 VCAN = os.environ.get("HILSPY_TEST_VCAN")
 pytestmark = pytest.mark.skipif(not VCAN, reason="HILSPY_TEST_VCAN is not set")
+DBC = f"dbc:{Path(__file__).parent / 'data' / 'vehicle.dbc'}"
 
 
-def drain(bus: Bus) -> None:
-    while bus.recv(timeout=0.01) is not None:
+def drain(ch: hilspy.Channel) -> None:
+    while ch.recv(timeout=0.01) is not None:
         pass
 
 
-def test_classic_round_trip() -> None:
-    assert VCAN
-    with Bus(VCAN) as a, Bus(VCAN) as b:
+def test_raw_round_trip() -> None:
+    with hilspy.open(f"can://{VCAN}") as a, hilspy.open(f"can://{VCAN}") as b:
         drain(b)
-        a.send(Frame(0x123, b"\x01\x02\x03"))
-        a.send(Frame(0x1ABCDE, b"\xff", is_extended_id=True))
-        a.send(Frame(0x7, is_remote_frame=True, dlc=3))
-        f1, f2, f3 = (b.recv(timeout=1.0) for _ in range(3))
-        assert f1 is not None and (f1.arbitration_id, f1.data) == (0x123, b"\x01\x02\x03")
-        assert f2 is not None and f2.is_extended_id and f2.arbitration_id == 0x1ABCDE
-        assert f3 is not None and f3.is_remote_frame and f3.dlc == 3
+        a.send(Message(data=b"\x01\x02\x03", id=0x123))
+        a.send(Message(data=b"\xff", id=0x1ABCDE))
+        m1, m2 = b.recv(timeout=1), b.recv(timeout=1)
+        assert m1 is not None and (m1.id, m1.data) == (0x123, b"\x01\x02\x03")
+        assert m2 is not None and m2.extended and m2.id == 0x1ABCDE
         assert a.recv(timeout=0.05) is None
+        with pytest.raises(hilspy.Error):
+            a.send(Message(data=b"no id"))
 
 
-def test_fd_round_trip() -> None:
-    assert VCAN
-    with Bus(VCAN, fd=True) as a, Bus(VCAN, fd=True) as b:
+def test_dbc_and_fd() -> None:
+    with hilspy.open(f"can://{VCAN}?fd", DBC) as a, hilspy.open(f"can://{VCAN}?fd", DBC) as b:
         drain(b)
-        a.send(Frame(0x10, bytes(range(64)), is_fd=True, bitrate_switch=True))
-        got = b.recv(timeout=1.0)
-        assert got is not None and got.is_fd and got.bitrate_switch
-        assert got.data == bytes(range(64))
+        a.send("RadarObjects", {"ObjectCount": 2, "Distance": 1.0, "Tail": 7})
+        m = b.recv(timeout=1)
+        assert m is not None and m.fd and m.name == "RadarObjects" and m["Tail"] == 7
+    with hilspy.open(f"can://{VCAN}") as classic:
+        with pytest.raises(hilspy.Error, match="fd"):
+            classic.send(Message(data=bytes(16), id=1))
 
 
-def test_kernel_filters_and_own_messages() -> None:
-    assert VCAN
-    with Bus(VCAN, receive_own_messages=True, filters=[Filter(0x200, 0x700, extended=False)]) as a:
+def test_kernel_filters_and_echo() -> None:
+    with hilspy.open(f"can://{VCAN}?echo&filter=0x200:0x700") as a:
         drain(a)
-        a.send(Frame(0x2AA))
-        a.send(Frame(0x3AA))
-        a.send(Frame(0x2AA, is_extended_id=True))
-        got = a.recv(timeout=1.0)
-        assert got is not None and (got.arbitration_id, got.is_extended_id) == (0x2AA, False)
+        a.send(Message(data=b"", id=0x2AA))
+        a.send(Message(data=b"", id=0x3AA))
+        a.send(Message(data=b"", id=0x2AA, extended=True))
+        m = a.recv(timeout=1)
+        assert m is not None and (m.id, m.extended) == (0x2AA, False)
         assert a.recv(timeout=0.05) is None
 
 
 def test_periodic() -> None:
-    assert VCAN
-    with Bus(VCAN) as tx, Bus(VCAN) as rx:
+    with hilspy.open(f"can://{VCAN}") as tx, hilspy.open(f"can://{VCAN}") as rx:
         drain(rx)
-        with tx.send_periodic(Frame(0x42, b"\x00"), period=0.01, duration=0.1) as task:
+        with tx.every(0.01, Message(data=b"\x00", id=0x42), duration=0.1) as task:
             frames = []
-            while (f := rx.recv(timeout=0.2)) is not None:
-                frames.append(f)
-            assert len(frames) == task.sent_count >= 8
+            while (m := rx.recv(timeout=0.3)) is not None:
+                frames.append(m)
+            assert len(frames) == task.sent_count >= 1

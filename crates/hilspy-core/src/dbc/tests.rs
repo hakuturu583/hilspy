@@ -172,8 +172,8 @@ fn floats_and_fd() {
     assert_eq!(decoded[1].1, Value::Float(-9.5));
 
     let radar = db.message_by_name("RadarObjects").unwrap();
-    let frame = radar
-        .encode_frame(
+    let data = radar
+        .encode(
             &values(&[
                 ("ObjectCount", Value::Int(3)),
                 ("Distance", Value::Float(42.0)),
@@ -182,19 +182,16 @@ fn floats_and_fd() {
             &EncodeOptions::default(),
         )
         .unwrap();
-    assert!(frame.fd && frame.brs);
-    assert_eq!(frame.data.len(), 64);
-    assert_eq!(frame.data[63], 0xEE);
-    let (m, decoded) = db.decode_frame(&frame, &DecodeOptions::default()).unwrap();
-    assert_eq!(m.name, "RadarObjects");
+    assert!(radar.fd);
+    assert_eq!(data.len(), 64);
+    assert_eq!(data[63], 0xEE);
+    let decoded = radar.decode(&data, &DecodeOptions::default()).unwrap();
     assert_eq!(decoded[2].1, Value::Int(0xEE));
     // A short payload fails unless truncation is allowed.
-    assert!(radar
-        .decode(&frame.data[..8], &DecodeOptions::default())
-        .is_err());
+    assert!(radar.decode(&data[..8], &DecodeOptions::default()).is_err());
     let partial = radar
         .decode(
-            &frame.data[..8],
+            &data[..8],
             &DecodeOptions {
                 allow_truncated: true,
                 ..Default::default()

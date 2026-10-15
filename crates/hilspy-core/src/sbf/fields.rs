@@ -2,17 +2,7 @@
 
 use libsbf::Messages;
 
-/// A field value. `Null` is SBF's do-not-use value.
-#[derive(Clone, Debug, PartialEq)]
-pub enum Field {
-    Null,
-    Bool(bool),
-    Int(i64),
-    Float(f64),
-    Str(String),
-    /// A group of fields (an optional sub-block).
-    Map(Vec<(String, Field)>),
-}
+pub use crate::value::Value as Field;
 
 pub(crate) trait IntoField {
     fn into_field(self) -> Field;

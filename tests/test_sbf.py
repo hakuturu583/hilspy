@@ -1,99 +1,93 @@
+"""The sbf codec over mem, file, UDP and TCP."""
+
 from __future__ import annotations
 
-import io
 import math
+import time
 from pathlib import Path
 
 import pytest
 
-from hilspy import sbf
+import hilspy
+from hilspy import Message
+
+PVT = {
+    "tow": 345_600_000,
+    "wnc": 2380,
+    "mode": 4,
+    "latitude": math.radians(35.6895),
+    "longitude": math.radians(139.6917),
+    "height": 40.0,
+    "vn": 1.5,
+    "nr_sv": 18,
+}
 
 
-def pvt(**overrides: float) -> bytes:
-    kwargs: dict[str, float] = {
-        "tow": 345_600_000,
-        "wnc": 2380,
-        "mode": 4,
-        "latitude": math.radians(35.6895),
-        "longitude": math.radians(139.6917),
-        "height": 40.0,
-        "vn": 1.5,
-        "ve": -0.5,
-        "vu": 0.0,
-        "nr_sv": 18,
-        "h_accuracy": 2,
-    }
-    kwargs.update(overrides)
-    return sbf.encode_pvt_geodetic(**kwargs)  # type: ignore[arg-type]
+def test_encode_decode(mem: str) -> None:
+    with hilspy.open(mem, "sbf") as tx, hilspy.open(mem, "sbf") as rx:
+        tx.send("PVTGeodetic", PVT)
+        tx.send("AttEuler", {"heading": 90.25, "mode": 4})
+        pvt, att = rx.recv(timeout=1), rx.recv(timeout=1)
+        assert pvt is not None and pvt.name == "PVTGeodetic"
+        assert pvt["tow"] == 345_600_000 and pvt["mode_name"] == "RTK Fixed"
+        assert pvt["latitude"] == math.radians(35.6895) and pvt["undulation"] is None
+        assert pvt["revision"] == 2 and len(pvt.data or b"") == 96
+        assert att is not None and att["heading"] == 90.25 and att["heading_dot"] is None
+        # tow/wnc default to the current GPS time.
+        assert att["wnc"] > 2300
+        with pytest.raises(hilspy.Error, match="no field"):
+            tx.send("PVTGeodetic", {"typo": 1})
+        with pytest.raises(hilspy.Error, match="cannot encode"):
+            tx.send("MeasEpoch", {})
 
 
-def test_crc() -> None:
-    assert sbf.crc16(b"123456789") == 0x31C3
-
-
-def test_pvt_geodetic_round_trip() -> None:
-    data = pvt()
-    assert len(data) == 96 and data[:2] == b"$@"
-    (block,) = sbf.decode(data)
-    assert (block.number, block.revision, block.name) == (4007, 2, "PVTGeodetic")
-    assert (block.tow, block.wnc) == (345_600_000, 2380)
-    assert block.raw == data and block.body == data[8:]
-    fields = block.fields
-    assert fields is not None
-    assert fields["mode"] == 4 and fields["mode_name"] == "RTK Fixed"
-    assert fields["latitude"] == math.radians(35.6895)
-    assert fields["vn"] == 1.5 and fields["undulation"] is None
-    assert block["nr_sv"] == 18
-    with pytest.raises(KeyError):
-        block["nope"]
-    assert block.parse_error is None
-
-
-def test_att_euler_round_trip() -> None:
-    data = sbf.encode_att_euler(tow=1000, wnc=2380, mode=4, heading=90.25, pitch=-1.0, roll=0.5)
-    (block,) = sbf.decode(data)
-    assert block.name == "AttEuler"
-    assert block["heading"] == 90.25 and block["heading_dot"] is None
-    assert block["mode"] == "HeadingPitchRollFixed"
-
-
-def test_streaming_with_noise_and_corruption() -> None:
-    good = pvt()
+def test_stream_reassembly_with_noise(mem: str) -> None:
+    with hilspy.open(mem, "sbf") as enc, hilspy.open(mem) as raw:
+        enc.send("PVTGeodetic", PVT)
+        block = raw.recv(timeout=1)
+        assert block is not None and block.data is not None
+        good = block.data
     corrupt = bytearray(good)
     corrupt[20] ^= 0xFF
-    unknown = sbf.frame_block(4999, 0, b"\x01\x00\x00\x00\x02\x00\x09\x09")
-    stream = b"$GPGGA,noise*00\r\n$" + good + b"\x00$" + bytes(corrupt) + good + unknown
-    decoder = sbf.Decoder()
-    blocks = []
-    for i in range(0, len(stream), 5):
-        blocks.extend(decoder.feed(stream[i : i + 5]))
-    assert [b.number for b in blocks] == [4007, 4007, 4999]
-    assert blocks[2].name is None and blocks[2].fields is None
-    assert (blocks[2].tow, blocks[2].wnc) == (1, 2)
-    assert decoder.stats["blocks"] == 3 and decoder.stats["crc_errors"] == 1
-    assert decoder.pending == 0
+    stream = b"$GPGGA,noise*00\r\n$" + good + b"\x00$" + bytes(corrupt) + good
+    with hilspy.open(mem) as tx, hilspy.open(mem, "sbf") as rx:
+        for i in range(0, len(stream), 5):
+            tx.send(Message(data=stream[i : i + 5]))
+        got = [rx.recv(timeout=1), rx.recv(timeout=1)]
+        assert all(m is not None and m.data == good for m in got)
+        assert rx.recv(timeout=0.05) is None
 
 
-def test_iter_blocks_and_read_file(tmp_path: Path) -> None:
-    data = b"".join(pvt(tow=t) for t in range(0, 1000, 100))
-    assert [b.tow for b in sbf.iter_blocks(io.BytesIO(data), chunk_size=7)] == list(
-        range(0, 1000, 100)
-    )
+def test_replay_a_recording(tmp_path: Path, mem: str) -> None:
     path = tmp_path / "log.sbf"
-    path.write_bytes(data)
-    assert len(sbf.read_file(path)) == 10
+    with hilspy.open(f"file://{path}?write", "sbf") as rec:
+        for t in range(0, 1000, 100):
+            rec.send("PVTGeodetic", {**PVT, "tow": t})
+    with hilspy.open(f"file://{path}", "sbf") as replay:
+        assert [m["tow"] for m in replay] == list(range(0, 1000, 100))
 
 
-def test_frame_block() -> None:
-    raw = sbf.frame_block(5000, 1, bytes(7))
-    assert len(raw) == 16 and raw[6:8] == (16).to_bytes(2, "little")
-    with pytest.raises(sbf.SbfError):
-        sbf.frame_block(0x2000, 0, b"")
+def test_tcp_server_to_client(free_port: int) -> None:
+    with (
+        hilspy.open(f"tcp://127.0.0.1:{free_port}?listen", "sbf") as receiver_sim,
+        hilspy.open(f"tcp://127.0.0.1:{free_port}", "sbf") as client,
+    ):
+        # The server sends to the clients connected so far.
+        deadline = time.monotonic() + 5
+        while (m := client.recv(timeout=0.05)) is None:
+            receiver_sim.send("AttEuler", {"heading": 42.0})
+            assert time.monotonic() < deadline, "no block received"
+        assert m.name == "AttEuler" and m["heading"] == 42.0
 
 
-def test_gps_time() -> None:
-    # 2024-01-01T00:00:00Z: GPS week 2295, Monday 00:00:18 GPS time.
-    wnc, tow = sbf.gps_time(1_704_067_200)
-    assert (wnc, tow) == (2295, (24 * 3600 + 18) * 1000)
-    with pytest.raises(ValueError):
-        sbf.gps_time(0)
+def test_udp(free_port: int) -> None:
+    with (
+        hilspy.open(f"udp://127.0.0.1:{free_port}?listen", "sbf") as server,
+        hilspy.open(f"udp://127.0.0.1:{free_port}", "sbf") as client,
+    ):
+        client.send("PVTGeodetic", PVT)
+        m = server.recv(timeout=2)
+        assert m is not None and m["nr_sv"] == 18
+        server.send("AttEuler", {"roll": 1.5})  # replies to the last sender
+        r = client.recv(timeout=2)
+        assert r is not None and r["roll"] == 1.5
