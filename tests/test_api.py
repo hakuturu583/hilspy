@@ -12,6 +12,7 @@ def test_public_surface_is_minimal() -> None:
     public = sorted(n for n in dir(hilspy) if not n.startswith("_"))
     assert public == [
         "Channel",
+        "Clock",
         "Error",
         "Message",
         "Periodic",

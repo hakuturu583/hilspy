@@ -11,6 +11,7 @@
 //! over it.
 
 pub mod channel;
+pub mod clock;
 pub mod codec;
 pub mod dbc;
 pub mod error;
@@ -23,6 +24,7 @@ pub mod url;
 pub mod value;
 
 pub use channel::{Channel, Periodic, Subscription};
+pub use clock::Clock;
 pub use codec::Codec;
 pub use error::{Error, Result};
 pub use message::{CanHeader, Message, Packet};

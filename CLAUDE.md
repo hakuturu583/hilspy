@@ -24,7 +24,7 @@ HILSPY_TEST_VCAN=vcan0 uv run pytest tests/test_socketcan.py   # needs vcan0 (CI
   releases the GIL around every core call that can reach a transport or codec,
   and wraps Python plugins as Rust traits. `hilspy-core` must not depend on PyO3.
 - The Python API is deliberately tiny: `open`, `Channel`, `merge`, `Message`,
-  `Periodic`, `Error`, `register_transport`, `register_codec`
+  `Periodic`, `Clock`, `Error`, `register_transport`, `register_codec`
   (`tests/test_api.py` pins it). New I/O goes behind a transport (URL scheme),
   new formats behind a codec (name), configured by URL query / codec options;
   do not add public Python classes or functions per format or transport.
