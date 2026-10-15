@@ -119,6 +119,8 @@ deadlocking. A Python exception raised in a plugin travels through the core as
   `SIG_VALTYPE_` floats and multiplexing (`M`/`mN` and `SG_MUL_VAL_` ranges).
   Bit layout: Intel signals occupy `start..start+size`; Motorola signals are
   `size` bits from the start bit's position in most-significant-first order.
+  Integer raw values are unsigned or two's complement (the DBC value types),
+  or sign-magnitude / one's complement (`ValueKind`, for FIBEX codings).
   The tests cross-check payloads against `cantools`.
 * `dbc` + `e2e`: `codec/e2e.rs` maps a per-message configuration (a
   mapping option) onto an `autosar-e2e` profile; a sender instance protects
@@ -129,11 +131,22 @@ deadlocking. A Python exception raised in a plugin travels through the core as
 * `fibex`: `afibex` parses channels, frames, PDUs, signals and coded types;
   `roxmltree` reads, by element ID, what it leaves out (frame triggerings
   with identifier, extended addressing and CAN FD; compu methods with
-  rational coefficients, `SCALE-LINEAR`, texttable limits, physical
+  scale limits, rational coefficients and texttable names, physical
   constraints and units). `fibex::load` turns one channel into a `dbc`
-  `Database` (PDU offsets added to signal start bits, clashing names
-  qualified as `PDU.Signal`), and the codec is the `dbc` codec over it, so
-  the bit layout, options and E2E are shared. `tests/data/network.dbc`
+  `Database` (each signal's PDU bits mapped through its PDU instance to
+  frame bits, low-high as an offset, high-low as the value bits of a
+  Motorola field of the PDU's length, which `dbc::bits::layout` turns back into a start bit and byte
+  order; clashing names qualified as `PDU.Signal`; a multiplexed PDU's switch
+  becomes the multiplexor and its switched PDUs' signals are multiplexed on
+  their switch codes, in the multiplexed PDU's bit numbering), and the codec is the `dbc` codec over it, so
+  the bit layout, options and E2E are shared. Compu methods that one factor
+  and offset plus exact value table entries cannot express become a
+  per-signal `dbc::Coding` (texttable ranges, piecewise linear and rational
+  scales; `dbc/coding.rs`) that `Signal` encoding and decoding consult
+  instead; DBC signals have none, so their fast path is unchanged. Rational
+  scales encode exactly when linear, else by bisection over a scale on which
+  the function is strictly monotonic (checked at every integer raw value up
+  to 2^16 of them, else at 2^16 evenly spaced points). `tests/data/network.dbc`
   describes the fixture's Body channel; the tests require identical models
   and payloads.
 * `someip:FILE`: `afibex` parses the FIBEX 4 services (methods, events,

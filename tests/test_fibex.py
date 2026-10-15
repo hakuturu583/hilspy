@@ -155,3 +155,128 @@ def test_every_on_a_clock(mem: str) -> None:
         clock.advance(0.01)
         got = drain(rx)
         assert [m["Gear"] for m in got] == ["R"]
+
+
+FEATURES = f"fibex:{DATA / 'fibex_features.xml'}"
+
+
+def round_trip(mem: str, name: str, values: dict[str, Any]) -> tuple[bytes, Message]:
+    """Send `values` through the features fixture: the payload and the decoded message."""
+    with (
+        hilspy.open(mem, FEATURES) as tx,
+        hilspy.open(mem) as raw,
+        hilspy.open(mem, FEATURES) as rx,
+    ):
+        tx.send(name, values)
+        frame, decoded = raw.recv(timeout=1), rx.recv(timeout=1)
+        assert frame is not None and frame.data is not None and decoded is not None
+        return frame.data, decoded
+
+
+def test_sign_magnitude_and_ones_complement(mem: str) -> None:
+    values = {"SmSmall": -5, "OcSmall": -5, "SmWide": -100.5, "OcWide": -2}
+    data, decoded = round_trip(mem, "Encodings", values)
+    assert data == bytes([0x85, 0xFA, 0xC9, 0x80, 0, 0, 0xFF, 0xFD])
+    assert decoded.fields == values
+    edges = {"SmSmall": -127, "OcSmall": 127, "SmWide": 16383.5, "OcWide": -32767}
+    data, decoded = round_trip(f"{mem}-edges", "Encodings", edges)
+    assert data == bytes([0xFF, 0x7F, 0xFF, 0x7F, 0, 0, 0x80, 0x00])
+    assert decoded.fields == edges
+    with hilspy.open(mem, FEATURES) as tx, pytest.raises(hilspy.Error, match="sign-magnitude"):
+        tx.send("Encodings", {**values, "SmSmall": -128})
+
+
+def test_texttable_ranges_piecewise_and_rational_codings(mem: str) -> None:
+    values = {
+        "Level": "High",
+        "Parabola": "NotAvailable",
+        "Curve": 90.0,
+        "Inverse": 100.0,
+        "Ratio": 20.0,
+    }
+    data, decoded = round_trip(mem, "Codings", values)
+    # Level High -> 4 (its lower limit), NotAvailable -> 15; Curve 2x - 150 = 90
+    # at 120; Inverse 1000 / (x + 1) = 100 at 9; Ratio (10 + 3x) / 2 = 20 at 10.
+    assert data == bytes([0xF4, 120, 9, 10, 0, 0, 0, 0])
+    assert decoded.fields == values
+    with (
+        hilspy.open(mem, FEATURES) as tx,
+        hilspy.open(mem) as raw,
+        hilspy.open(mem, FEATURES) as rx,
+    ):
+        # Any raw value of a texttable range decodes to its name (Level 14).
+        raw.send(Message(data=bytes([0x3E, 99, 0, 0, 0, 0, 0, 0]), id=0x401))
+        m = rx.recv(timeout=1)
+        assert m is not None
+        assert m.fields == {
+            "Level": "High",
+            "Parabola": 25.0,
+            "Curve": 49.5,
+            "Inverse": 1000.0,
+            "Ratio": 5.0,
+        }
+        with pytest.raises(hilspy.Error, match="signal Parabola.*monotonic"):
+            tx.send("Codings", {**values, "Parabola": 36.0})
+        with pytest.raises(hilspy.Error, match="signal Inverse.*outside"):
+            tx.send("Codings", {**values, "Inverse": 2000.0})
+
+
+FEATURES_DBC = DATA / "fibex_features.dbc"
+
+
+@pytest.mark.parametrize("name", ["Shifted", "Swapped"])
+def test_features_match_the_dbc(mem: str, name: str) -> None:
+    """Frames of the features fixture give the payloads of the equivalent DBC (and cantools)."""
+    rng = random.Random(name)
+    reference: Any = cantools.database.load_file(str(FEATURES_DBC))
+    theirs = reference.get_message_by_name(name)
+    raw: dict[str, Any] = {"scaling": False, "strict": False, "decode_choices": False}
+    fibex_bus, dbc_bus = f"{mem}-fibex", f"{mem}-dbc"
+    with (
+        hilspy.open(fibex_bus, FEATURES, **raw) as fibex,
+        hilspy.open(fibex_bus) as fibex_raw,
+        hilspy.open(dbc_bus, f"dbc:{FEATURES_DBC}", **raw) as dbc,
+        hilspy.open(dbc_bus) as dbc_raw,
+    ):
+        for _ in range(50):
+            values = random_raw(theirs, rng)
+            fibex.send(name, values)
+            dbc.send(name, values)
+            a, b = fibex_raw.recv(timeout=1), dbc_raw.recv(timeout=1)
+            assert a is not None and b is not None
+            assert a.data == b.data == theirs.encode(values, scaling=False, strict=False)
+            fibex_raw.send(b)
+            back = fibex.recv(timeout=1)
+            assert back is not None and back.fields == values
+
+
+MULTIPLEXED: dict[int, dict[str, Any]] = {
+    1: {"Mux": 1, "A16": 0x1234, "A8": 0xAB, "Counter": 7},
+    2: {"Mux": 2, "B16": 0xBEEF, "B4": 9, "Counter": 8},
+    3: {"Mux": 3, "B16": 1, "B4": 15, "Counter": 9},
+}
+
+
+@pytest.mark.parametrize("code", list(MULTIPLEXED))
+def test_multiplexed_pdu_matches_the_dbc(mem: str, code: int) -> None:
+    """Every switch code gives the payload of the DBC (`M`, `mN` and `SG_MUL_VAL_`)."""
+    values = MULTIPLEXED[code]
+    dbc_spec = f"dbc:{FEATURES_DBC}"
+    fibex_bus, dbc_bus = f"{mem}-fibex", f"{mem}-dbc"
+    with (
+        hilspy.open(fibex_bus, FEATURES) as fibex,
+        hilspy.open(fibex_bus) as fibex_raw,
+        hilspy.open(dbc_bus, dbc_spec) as dbc,
+        hilspy.open(dbc_bus) as dbc_raw,
+    ):
+        fibex.send("Multiplexed", values)
+        dbc.send("Multiplexed", values)
+        a, b = fibex_raw.recv(timeout=1), dbc_raw.recv(timeout=1)
+        assert a is not None and b is not None and a.data == b.data
+        assert a.data is not None and a.data[0] == code
+        # Each decodes the other's frame to the same fields.
+        fibex_raw.send(b)
+        dbc_raw.send(a)
+        from_dbc, from_fibex = fibex.recv(timeout=1), dbc.recv(timeout=1)
+        assert from_dbc is not None and from_fibex is not None
+        assert from_dbc.fields == from_fibex.fields == values

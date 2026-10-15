@@ -18,7 +18,12 @@ fn msb_index(start: u32) -> u32 {
 
 /// The payload bits a signal occupies, least significant value bit first,
 /// as `(byte, bit)` pairs; `None` if they do not fit in `len` bytes.
-fn positions(start: u32, size: u32, order: ByteOrder, len: usize) -> Option<Vec<(usize, u32)>> {
+pub(crate) fn positions(
+    start: u32,
+    size: u32,
+    order: ByteOrder,
+    len: usize,
+) -> Option<Vec<(usize, u32)>> {
     let total = len as u64 * 8;
     let mut out = Vec::with_capacity(size as usize);
     match order {
@@ -49,6 +54,31 @@ fn positions(start: u32, size: u32, order: ByteOrder, len: usize) -> Option<Vec<
 /// Whether the signal fits in a payload of `len` bytes.
 pub(crate) fn fits(start: u32, size: u32, order: ByteOrder, len: usize) -> bool {
     (1..=64).contains(&size) && positions(start, size, order, len).is_some()
+}
+
+/// The start bit and byte order of the signal that occupies `bits` (as
+/// [`positions`] lists them), trying `prefer` first; `None` if no signal
+/// does.
+pub(crate) fn layout(
+    bits: &[(usize, u32)],
+    prefer: ByteOrder,
+    len: usize,
+) -> Option<(u32, ByteOrder)> {
+    let size = u32::try_from(bits.len()).ok()?;
+    let sawtooth = |&(byte, bit): &(usize, u32)| u32::try_from(byte * 8).ok()?.checked_add(bit);
+    let other = match prefer {
+        ByteOrder::LittleEndian => ByteOrder::BigEndian,
+        ByteOrder::BigEndian => ByteOrder::LittleEndian,
+    };
+    [prefer, other].into_iter().find_map(|order| {
+        // Intel signals start at their least significant bit, Motorola
+        // signals at their most significant one.
+        let start = match order {
+            ByteOrder::LittleEndian => sawtooth(bits.first()?)?,
+            ByteOrder::BigEndian => sawtooth(bits.last()?)?,
+        };
+        (positions(start, size, order, len)?.as_slice() == bits).then_some((start, order))
+    })
 }
 
 /// The raw (unsigned) value of a signal, or `None` if it does not fit in `data`.
@@ -103,6 +133,28 @@ mod tests {
         assert!(write(&mut data, 3, 12, ByteOrder::BigEndian, 0xABC));
         assert_eq!(&data[..2], &[0x0A, 0xBC]);
         assert_eq!(read(&data, 3, 12, ByteOrder::BigEndian), Some(0xABC));
+    }
+
+    #[test]
+    fn layout_finds_the_signal() {
+        let le = positions(4, 12, ByteOrder::LittleEndian, 8).unwrap();
+        assert_eq!(
+            layout(&le, ByteOrder::BigEndian, 8),
+            Some((4, ByteOrder::LittleEndian))
+        );
+        let be = positions(3, 12, ByteOrder::BigEndian, 8).unwrap();
+        assert_eq!(
+            layout(&be, ByteOrder::LittleEndian, 8),
+            Some((3, ByteOrder::BigEndian))
+        );
+        // Within one byte both orders fit; the preferred one wins.
+        let byte = positions(2, 4, ByteOrder::LittleEndian, 8).unwrap();
+        assert_eq!(
+            layout(&byte, ByteOrder::BigEndian, 8),
+            Some((5, ByteOrder::BigEndian))
+        );
+        // Not contiguous in either order.
+        assert_eq!(layout(&[(0, 0), (1, 7)], ByteOrder::LittleEndian, 8), None);
     }
 
     #[test]

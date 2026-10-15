@@ -1,0 +1,687 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Layouts and codings beyond tests/data/network.xml for the fibex codec.
+     tests/data/fibex_features.dbc describes the frames that a DBC can express
+     the same way. -->
+<fx:FIBEX xmlns:fx="http://www.asam.net/xml/fbx" xmlns:ho="http://www.asam.net/xml" xmlns:can="http://www.asam.net/xml/fbx/can" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" VERSION="4.1.2">
+  <fx:PROJECT ID="PRJ_FEATURES">
+    <ho:SHORT-NAME>HilspyFibexFeatures</ho:SHORT-NAME>
+  </fx:PROJECT>
+  <fx:ELEMENTS>
+    <fx:CLUSTERS>
+      <fx:CLUSTER ID="CL_FEATURES" xsi:type="can:CLUSTER-TYPE">
+        <ho:SHORT-NAME>FeaturesCan</ho:SHORT-NAME>
+        <fx:SPEED>500000</fx:SPEED>
+        <fx:IS-HIGH-LOW-BIT-ORDER>false</fx:IS-HIGH-LOW-BIT-ORDER>
+        <fx:BIT-COUNTING-POLICY>SAWTOOTH</fx:BIT-COUNTING-POLICY>
+        <fx:PROTOCOL xsi:type="can:PROTOCOL-TYPE">CAN</fx:PROTOCOL>
+        <fx:PROTOCOL-VERSION>2.0</fx:PROTOCOL-VERSION>
+        <fx:CHANNEL-REFS>
+          <fx:CHANNEL-REF ID-REF="CH_FEATURES"/>
+        </fx:CHANNEL-REFS>
+        <fx:MEDIUM>ELECTRICAL</fx:MEDIUM>
+      </fx:CLUSTER>
+    </fx:CLUSTERS>
+    <fx:CHANNELS>
+      <fx:CHANNEL ID="CH_FEATURES">
+        <ho:SHORT-NAME>Features</ho:SHORT-NAME>
+        <fx:FRAME-TRIGGERINGS>
+          <fx:FRAME-TRIGGERING ID="FT_Encodings" xsi:type="can:FRAME-TRIGGERING-TYPE">
+            <fx:IDENTIFIER><fx:IDENTIFIER-VALUE>1024</fx:IDENTIFIER-VALUE></fx:IDENTIFIER>
+            <fx:FRAME-REF ID-REF="F_Encodings"/>
+          </fx:FRAME-TRIGGERING>
+          <fx:FRAME-TRIGGERING ID="FT_Codings" xsi:type="can:FRAME-TRIGGERING-TYPE">
+            <fx:IDENTIFIER><fx:IDENTIFIER-VALUE>1025</fx:IDENTIFIER-VALUE></fx:IDENTIFIER>
+            <fx:FRAME-REF ID-REF="F_Codings"/>
+          </fx:FRAME-TRIGGERING>
+          <fx:FRAME-TRIGGERING ID="FT_Shifted" xsi:type="can:FRAME-TRIGGERING-TYPE">
+            <fx:IDENTIFIER><fx:IDENTIFIER-VALUE>1026</fx:IDENTIFIER-VALUE></fx:IDENTIFIER>
+            <fx:FRAME-REF ID-REF="F_Shifted"/>
+          </fx:FRAME-TRIGGERING>
+          <fx:FRAME-TRIGGERING ID="FT_Swapped" xsi:type="can:FRAME-TRIGGERING-TYPE">
+            <fx:IDENTIFIER><fx:IDENTIFIER-VALUE>1027</fx:IDENTIFIER-VALUE></fx:IDENTIFIER>
+            <fx:FRAME-REF ID-REF="F_Swapped"/>
+          </fx:FRAME-TRIGGERING>
+          <fx:FRAME-TRIGGERING ID="FT_Multiplexed" xsi:type="can:FRAME-TRIGGERING-TYPE">
+            <fx:IDENTIFIER><fx:IDENTIFIER-VALUE>1028</fx:IDENTIFIER-VALUE></fx:IDENTIFIER>
+            <fx:FRAME-REF ID-REF="F_Multiplexed"/>
+          </fx:FRAME-TRIGGERING>
+        </fx:FRAME-TRIGGERINGS>
+      </fx:CHANNEL>
+    </fx:CHANNELS>
+    <fx:PDUS>
+      <fx:PDU ID="P_Encodings">
+        <ho:SHORT-NAME>EncodingsPdu</ho:SHORT-NAME>
+        <fx:BYTE-LENGTH>8</fx:BYTE-LENGTH>
+        <fx:PDU-TYPE>APPLICATION</fx:PDU-TYPE>
+        <fx:SIGNAL-INSTANCES>
+          <fx:SIGNAL-INSTANCE ID="SI_SmSmall">
+            <fx:BIT-POSITION>0</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+            <fx:SIGNAL-REF ID-REF="S_SmSmall"/>
+          </fx:SIGNAL-INSTANCE>
+          <fx:SIGNAL-INSTANCE ID="SI_OcSmall">
+            <fx:BIT-POSITION>8</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+            <fx:SIGNAL-REF ID-REF="S_OcSmall"/>
+          </fx:SIGNAL-INSTANCE>
+          <fx:SIGNAL-INSTANCE ID="SI_SmWide">
+            <fx:BIT-POSITION>16</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+            <fx:SIGNAL-REF ID-REF="S_SmWide"/>
+          </fx:SIGNAL-INSTANCE>
+          <fx:SIGNAL-INSTANCE ID="SI_OcWide">
+            <fx:BIT-POSITION>55</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>true</fx:IS-HIGH-LOW-BYTE-ORDER>
+            <fx:SIGNAL-REF ID-REF="S_OcWide"/>
+          </fx:SIGNAL-INSTANCE>
+        </fx:SIGNAL-INSTANCES>
+      </fx:PDU>
+      <fx:PDU ID="P_Codings">
+        <ho:SHORT-NAME>CodingsPdu</ho:SHORT-NAME>
+        <fx:BYTE-LENGTH>8</fx:BYTE-LENGTH>
+        <fx:PDU-TYPE>APPLICATION</fx:PDU-TYPE>
+        <fx:SIGNAL-INSTANCES>
+          <fx:SIGNAL-INSTANCE ID="SI_Level">
+            <fx:BIT-POSITION>0</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+            <fx:SIGNAL-REF ID-REF="S_Level"/>
+          </fx:SIGNAL-INSTANCE>
+          <fx:SIGNAL-INSTANCE ID="SI_Parabola">
+            <fx:BIT-POSITION>4</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+            <fx:SIGNAL-REF ID-REF="S_Parabola"/>
+          </fx:SIGNAL-INSTANCE>
+          <fx:SIGNAL-INSTANCE ID="SI_Curve">
+            <fx:BIT-POSITION>8</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+            <fx:SIGNAL-REF ID-REF="S_Curve"/>
+          </fx:SIGNAL-INSTANCE>
+          <fx:SIGNAL-INSTANCE ID="SI_Inverse">
+            <fx:BIT-POSITION>16</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+            <fx:SIGNAL-REF ID-REF="S_Inverse"/>
+          </fx:SIGNAL-INSTANCE>
+          <fx:SIGNAL-INSTANCE ID="SI_Ratio">
+            <fx:BIT-POSITION>24</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+            <fx:SIGNAL-REF ID-REF="S_Ratio"/>
+          </fx:SIGNAL-INSTANCE>
+        </fx:SIGNAL-INSTANCES>
+      </fx:PDU>
+      <fx:PDU ID="P_Shifted">
+        <ho:SHORT-NAME>ShiftedPdu</ho:SHORT-NAME>
+        <fx:BYTE-LENGTH>2</fx:BYTE-LENGTH>
+        <fx:PDU-TYPE>APPLICATION</fx:PDU-TYPE>
+        <fx:SIGNAL-INSTANCES>
+          <fx:SIGNAL-INSTANCE ID="SI_ShiftedA">
+            <fx:BIT-POSITION>0</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+            <fx:SIGNAL-REF ID-REF="S_ShiftedA"/>
+          </fx:SIGNAL-INSTANCE>
+          <fx:SIGNAL-INSTANCE ID="SI_ShiftedB">
+            <fx:BIT-POSITION>15</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>true</fx:IS-HIGH-LOW-BYTE-ORDER>
+            <fx:SIGNAL-REF ID-REF="S_ShiftedB"/>
+          </fx:SIGNAL-INSTANCE>
+        </fx:SIGNAL-INSTANCES>
+      </fx:PDU>
+      <fx:PDU ID="P_Tail">
+        <ho:SHORT-NAME>TailPdu</ho:SHORT-NAME>
+        <fx:BYTE-LENGTH>1</fx:BYTE-LENGTH>
+        <fx:PDU-TYPE>APPLICATION</fx:PDU-TYPE>
+        <fx:SIGNAL-INSTANCES>
+          <fx:SIGNAL-INSTANCE ID="SI_Tail">
+            <fx:BIT-POSITION>0</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+            <fx:SIGNAL-REF ID-REF="S_Tail"/>
+          </fx:SIGNAL-INSTANCE>
+        </fx:SIGNAL-INSTANCES>
+      </fx:PDU>
+      <fx:PDU ID="P_Swapped">
+        <ho:SHORT-NAME>SwappedPdu</ho:SHORT-NAME>
+        <fx:BYTE-LENGTH>4</fx:BYTE-LENGTH>
+        <fx:PDU-TYPE>APPLICATION</fx:PDU-TYPE>
+        <fx:SIGNAL-INSTANCES>
+          <fx:SIGNAL-INSTANCE ID="SI_SwapA">
+            <fx:BIT-POSITION>0</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+            <fx:SIGNAL-REF ID-REF="S_SwapA"/>
+          </fx:SIGNAL-INSTANCE>
+          <fx:SIGNAL-INSTANCE ID="SI_SwapB">
+            <fx:BIT-POSITION>23</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>true</fx:IS-HIGH-LOW-BYTE-ORDER>
+            <fx:SIGNAL-REF ID-REF="S_SwapB"/>
+          </fx:SIGNAL-INSTANCE>
+        </fx:SIGNAL-INSTANCES>
+      </fx:PDU>
+      <fx:PDU ID="P_Narrow">
+        <ho:SHORT-NAME>NarrowPdu</ho:SHORT-NAME>
+        <fx:BYTE-LENGTH>1</fx:BYTE-LENGTH>
+        <fx:PDU-TYPE>APPLICATION</fx:PDU-TYPE>
+        <fx:SIGNAL-INSTANCES>
+          <fx:SIGNAL-INSTANCE ID="SI_SwapC">
+            <fx:BIT-POSITION>0</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+            <fx:SIGNAL-REF ID-REF="S_SwapC"/>
+          </fx:SIGNAL-INSTANCE>
+        </fx:SIGNAL-INSTANCES>
+      </fx:PDU>
+      <fx:PDU ID="P_Mux">
+        <ho:SHORT-NAME>MuxPdu</ho:SHORT-NAME>
+        <fx:BYTE-LENGTH>8</fx:BYTE-LENGTH>
+        <fx:PDU-TYPE>APPLICATION</fx:PDU-TYPE>
+        <fx:MULTIPLEXER>
+          <fx:SWITCH ID="SW_Mux">
+            <ho:SHORT-NAME>Mux</ho:SHORT-NAME>
+            <fx:BIT-POSITION>0</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+            <ho:BIT-LENGTH>8</ho:BIT-LENGTH>
+          </fx:SWITCH>
+          <fx:DYNAMIC-PART ID="DP_Mux">
+            <ho:SHORT-NAME>MuxDynamic</ho:SHORT-NAME>
+            <fx:SEGMENT-POSITIONS>
+              <fx:SEGMENT-POSITION>
+                <fx:BIT-POSITION>8</fx:BIT-POSITION>
+                <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+                <ho:BIT-LENGTH>24</ho:BIT-LENGTH>
+              </fx:SEGMENT-POSITION>
+            </fx:SEGMENT-POSITIONS>
+            <fx:SWITCHED-PDU-INSTANCES>
+              <fx:SWITCHED-PDU-INSTANCE ID="SPI_Mux3">
+                <fx:PDU-REF ID-REF="P_MuxB"/>
+                <fx:SWITCH-CODE>3</fx:SWITCH-CODE>
+              </fx:SWITCHED-PDU-INSTANCE>
+              <fx:SWITCHED-PDU-INSTANCE ID="SPI_Mux1">
+                <fx:PDU-REF ID-REF="P_MuxA"/>
+                <fx:SWITCH-CODE>1</fx:SWITCH-CODE>
+              </fx:SWITCHED-PDU-INSTANCE>
+              <fx:SWITCHED-PDU-INSTANCE ID="SPI_Mux2">
+                <fx:PDU-REF ID-REF="P_MuxB"/>
+                <fx:SWITCH-CODE>2</fx:SWITCH-CODE>
+              </fx:SWITCHED-PDU-INSTANCE>
+            </fx:SWITCHED-PDU-INSTANCES>
+          </fx:DYNAMIC-PART>
+          <fx:STATIC-PART ID="ST_Mux">
+            <ho:SHORT-NAME>MuxStatic</ho:SHORT-NAME>
+            <fx:SEGMENT-POSITIONS>
+              <fx:SEGMENT-POSITION>
+                <fx:BIT-POSITION>48</fx:BIT-POSITION>
+                <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+                <ho:BIT-LENGTH>8</ho:BIT-LENGTH>
+              </fx:SEGMENT-POSITION>
+            </fx:SEGMENT-POSITIONS>
+            <fx:STATIC-PDU-INSTANCE ID="SPI_MuxStatic">
+              <fx:PDU-REF ID-REF="P_MuxStatic"/>
+            </fx:STATIC-PDU-INSTANCE>
+          </fx:STATIC-PART>
+        </fx:MULTIPLEXER>
+      </fx:PDU>
+      <fx:PDU ID="P_MuxA">
+        <ho:SHORT-NAME>MuxA</ho:SHORT-NAME>
+        <fx:BYTE-LENGTH>8</fx:BYTE-LENGTH>
+        <fx:PDU-TYPE>APPLICATION</fx:PDU-TYPE>
+        <fx:SIGNAL-INSTANCES>
+          <fx:SIGNAL-INSTANCE ID="SI_MuxA16">
+            <fx:BIT-POSITION>8</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+            <fx:SIGNAL-REF ID-REF="S_A16"/>
+          </fx:SIGNAL-INSTANCE>
+          <fx:SIGNAL-INSTANCE ID="SI_MuxA8">
+            <fx:BIT-POSITION>31</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>true</fx:IS-HIGH-LOW-BYTE-ORDER>
+            <fx:SIGNAL-REF ID-REF="S_A8"/>
+          </fx:SIGNAL-INSTANCE>
+        </fx:SIGNAL-INSTANCES>
+      </fx:PDU>
+      <fx:PDU ID="P_MuxB">
+        <ho:SHORT-NAME>MuxB</ho:SHORT-NAME>
+        <fx:BYTE-LENGTH>8</fx:BYTE-LENGTH>
+        <fx:PDU-TYPE>APPLICATION</fx:PDU-TYPE>
+        <fx:SIGNAL-INSTANCES>
+          <fx:SIGNAL-INSTANCE ID="SI_MuxB16">
+            <fx:BIT-POSITION>8</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+            <fx:SIGNAL-REF ID-REF="S_B16"/>
+          </fx:SIGNAL-INSTANCE>
+          <fx:SIGNAL-INSTANCE ID="SI_MuxB4">
+            <fx:BIT-POSITION>24</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+            <fx:SIGNAL-REF ID-REF="S_B4"/>
+          </fx:SIGNAL-INSTANCE>
+        </fx:SIGNAL-INSTANCES>
+      </fx:PDU>
+      <fx:PDU ID="P_MuxStatic">
+        <ho:SHORT-NAME>MuxStatic</ho:SHORT-NAME>
+        <fx:BYTE-LENGTH>8</fx:BYTE-LENGTH>
+        <fx:PDU-TYPE>APPLICATION</fx:PDU-TYPE>
+        <fx:SIGNAL-INSTANCES>
+          <fx:SIGNAL-INSTANCE ID="SI_Counter">
+            <fx:BIT-POSITION>48</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+            <fx:SIGNAL-REF ID-REF="S_Counter"/>
+          </fx:SIGNAL-INSTANCE>
+        </fx:SIGNAL-INSTANCES>
+      </fx:PDU>
+    </fx:PDUS>
+    <fx:FRAMES>
+      <fx:FRAME ID="F_Encodings">
+        <ho:SHORT-NAME>Encodings</ho:SHORT-NAME>
+        <fx:BYTE-LENGTH>8</fx:BYTE-LENGTH>
+        <fx:FRAME-TYPE>APPLICATION</fx:FRAME-TYPE>
+        <fx:PDU-INSTANCES>
+          <fx:PDU-INSTANCE ID="F_Encodings_0">
+            <fx:PDU-REF ID-REF="P_Encodings"/>
+            <fx:BIT-POSITION>0</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+          </fx:PDU-INSTANCE>
+        </fx:PDU-INSTANCES>
+      </fx:FRAME>
+      <fx:FRAME ID="F_Codings">
+        <ho:SHORT-NAME>Codings</ho:SHORT-NAME>
+        <fx:BYTE-LENGTH>8</fx:BYTE-LENGTH>
+        <fx:FRAME-TYPE>APPLICATION</fx:FRAME-TYPE>
+        <fx:PDU-INSTANCES>
+          <fx:PDU-INSTANCE ID="F_Codings_0">
+            <fx:PDU-REF ID-REF="P_Codings"/>
+            <fx:BIT-POSITION>0</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+          </fx:PDU-INSTANCE>
+        </fx:PDU-INSTANCES>
+      </fx:FRAME>
+      <fx:FRAME ID="F_Shifted">
+        <ho:SHORT-NAME>Shifted</ho:SHORT-NAME>
+        <fx:BYTE-LENGTH>8</fx:BYTE-LENGTH>
+        <fx:FRAME-TYPE>APPLICATION</fx:FRAME-TYPE>
+        <fx:PDU-INSTANCES>
+          <fx:PDU-INSTANCE ID="F_Shifted_0">
+            <fx:PDU-REF ID-REF="P_Shifted"/>
+            <fx:BIT-POSITION>4</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+          </fx:PDU-INSTANCE>
+          <fx:PDU-INSTANCE ID="F_Shifted_1">
+            <fx:PDU-REF ID-REF="P_Tail"/>
+            <fx:BIT-POSITION>27</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+          </fx:PDU-INSTANCE>
+        </fx:PDU-INSTANCES>
+      </fx:FRAME>
+      <fx:FRAME ID="F_Swapped">
+        <ho:SHORT-NAME>Swapped</ho:SHORT-NAME>
+        <fx:BYTE-LENGTH>8</fx:BYTE-LENGTH>
+        <fx:FRAME-TYPE>APPLICATION</fx:FRAME-TYPE>
+        <fx:PDU-INSTANCES>
+          <fx:PDU-INSTANCE ID="F_Swapped_0">
+            <fx:PDU-REF ID-REF="P_Swapped"/>
+            <fx:BIT-POSITION>15</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>true</fx:IS-HIGH-LOW-BYTE-ORDER>
+          </fx:PDU-INSTANCE>
+          <fx:PDU-INSTANCE ID="F_Swapped_1">
+            <fx:PDU-REF ID-REF="P_Narrow"/>
+            <fx:BIT-POSITION>45</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>true</fx:IS-HIGH-LOW-BYTE-ORDER>
+          </fx:PDU-INSTANCE>
+        </fx:PDU-INSTANCES>
+      </fx:FRAME>
+      <fx:FRAME ID="F_Multiplexed">
+        <ho:SHORT-NAME>Multiplexed</ho:SHORT-NAME>
+        <fx:BYTE-LENGTH>8</fx:BYTE-LENGTH>
+        <fx:FRAME-TYPE>APPLICATION</fx:FRAME-TYPE>
+        <fx:PDU-INSTANCES>
+          <fx:PDU-INSTANCE ID="F_Multiplexed_0">
+            <fx:PDU-REF ID-REF="P_Mux"/>
+            <fx:BIT-POSITION>0</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+          </fx:PDU-INSTANCE>
+        </fx:PDU-INSTANCES>
+      </fx:FRAME>
+    </fx:FRAMES>
+    <fx:SIGNALS>
+      <fx:SIGNAL ID="S_SmSmall">
+        <ho:SHORT-NAME>SmSmall</ho:SHORT-NAME>
+        <fx:CODING-REF ID-REF="C_Sm8"/>
+      </fx:SIGNAL>
+      <fx:SIGNAL ID="S_OcSmall">
+        <ho:SHORT-NAME>OcSmall</ho:SHORT-NAME>
+        <fx:CODING-REF ID-REF="C_Oc8"/>
+      </fx:SIGNAL>
+      <fx:SIGNAL ID="S_SmWide">
+        <ho:SHORT-NAME>SmWide</ho:SHORT-NAME>
+        <fx:CODING-REF ID-REF="C_Sm16"/>
+      </fx:SIGNAL>
+      <fx:SIGNAL ID="S_OcWide">
+        <ho:SHORT-NAME>OcWide</ho:SHORT-NAME>
+        <fx:CODING-REF ID-REF="C_Oc16"/>
+      </fx:SIGNAL>
+      <fx:SIGNAL ID="S_Level">
+        <ho:SHORT-NAME>Level</ho:SHORT-NAME>
+        <fx:CODING-REF ID-REF="C_Level"/>
+      </fx:SIGNAL>
+      <fx:SIGNAL ID="S_Parabola">
+        <ho:SHORT-NAME>Parabola</ho:SHORT-NAME>
+        <fx:CODING-REF ID-REF="C_Parabola"/>
+      </fx:SIGNAL>
+      <fx:SIGNAL ID="S_Curve">
+        <ho:SHORT-NAME>Curve</ho:SHORT-NAME>
+        <fx:CODING-REF ID-REF="C_Curve"/>
+      </fx:SIGNAL>
+      <fx:SIGNAL ID="S_Inverse">
+        <ho:SHORT-NAME>Inverse</ho:SHORT-NAME>
+        <fx:CODING-REF ID-REF="C_Inverse"/>
+      </fx:SIGNAL>
+      <fx:SIGNAL ID="S_Ratio">
+        <ho:SHORT-NAME>Ratio</ho:SHORT-NAME>
+        <fx:CODING-REF ID-REF="C_Ratio"/>
+      </fx:SIGNAL>
+      <fx:SIGNAL ID="S_ShiftedA">
+        <ho:SHORT-NAME>ShiftedA</ho:SHORT-NAME>
+        <fx:CODING-REF ID-REF="C_U10"/>
+      </fx:SIGNAL>
+      <fx:SIGNAL ID="S_ShiftedB">
+        <ho:SHORT-NAME>ShiftedB</ho:SHORT-NAME>
+        <fx:CODING-REF ID-REF="C_U4"/>
+      </fx:SIGNAL>
+      <fx:SIGNAL ID="S_Tail">
+        <ho:SHORT-NAME>Tail</ho:SHORT-NAME>
+        <fx:CODING-REF ID-REF="C_U8"/>
+      </fx:SIGNAL>
+      <fx:SIGNAL ID="S_SwapA">
+        <ho:SHORT-NAME>SwapA</ho:SHORT-NAME>
+        <fx:CODING-REF ID-REF="C_U12"/>
+      </fx:SIGNAL>
+      <fx:SIGNAL ID="S_SwapB">
+        <ho:SHORT-NAME>SwapB</ho:SHORT-NAME>
+        <fx:CODING-REF ID-REF="C_U16"/>
+      </fx:SIGNAL>
+      <fx:SIGNAL ID="S_SwapC">
+        <ho:SHORT-NAME>SwapC</ho:SHORT-NAME>
+        <fx:CODING-REF ID-REF="C_U8"/>
+      </fx:SIGNAL>
+      <fx:SIGNAL ID="S_A16">
+        <ho:SHORT-NAME>A16</ho:SHORT-NAME>
+        <fx:CODING-REF ID-REF="C_U16"/>
+      </fx:SIGNAL>
+      <fx:SIGNAL ID="S_A8">
+        <ho:SHORT-NAME>A8</ho:SHORT-NAME>
+        <fx:CODING-REF ID-REF="C_U8"/>
+      </fx:SIGNAL>
+      <fx:SIGNAL ID="S_B16">
+        <ho:SHORT-NAME>B16</ho:SHORT-NAME>
+        <fx:CODING-REF ID-REF="C_U16"/>
+      </fx:SIGNAL>
+      <fx:SIGNAL ID="S_B4">
+        <ho:SHORT-NAME>B4</ho:SHORT-NAME>
+        <fx:CODING-REF ID-REF="C_U4"/>
+      </fx:SIGNAL>
+      <fx:SIGNAL ID="S_Counter">
+        <ho:SHORT-NAME>Counter</ho:SHORT-NAME>
+        <fx:CODING-REF ID-REF="C_U8"/>
+      </fx:SIGNAL>
+    </fx:SIGNALS>
+  </fx:ELEMENTS>
+  <fx:PROCESSING-INFORMATION>
+    <fx:CODINGS>
+      <fx:CODING ID="C_Sm8">
+        <ho:SHORT-NAME>Sm8</ho:SHORT-NAME>
+        <ho:CODED-TYPE ho:BASE-DATA-TYPE="A_INT8" CATEGORY="STANDARD-LENGTH-TYPE" ENCODING="SM">
+          <ho:BIT-LENGTH>8</ho:BIT-LENGTH>
+        </ho:CODED-TYPE>
+        <ho:COMPU-METHODS>
+          <ho:COMPU-METHOD>
+            <ho:SHORT-NAME>Sm8</ho:SHORT-NAME>
+            <ho:CATEGORY>IDENTICAL</ho:CATEGORY>
+          </ho:COMPU-METHOD>
+        </ho:COMPU-METHODS>
+      </fx:CODING>
+      <fx:CODING ID="C_Oc8">
+        <ho:SHORT-NAME>Oc8</ho:SHORT-NAME>
+        <ho:CODED-TYPE ho:BASE-DATA-TYPE="A_INT8" CATEGORY="STANDARD-LENGTH-TYPE" ENCODING="1C">
+          <ho:BIT-LENGTH>8</ho:BIT-LENGTH>
+        </ho:CODED-TYPE>
+        <ho:COMPU-METHODS>
+          <ho:COMPU-METHOD>
+            <ho:SHORT-NAME>Oc8</ho:SHORT-NAME>
+            <ho:CATEGORY>IDENTICAL</ho:CATEGORY>
+          </ho:COMPU-METHOD>
+        </ho:COMPU-METHODS>
+      </fx:CODING>
+      <fx:CODING ID="C_Sm16">
+        <ho:SHORT-NAME>Sm16</ho:SHORT-NAME>
+        <ho:CODED-TYPE ho:BASE-DATA-TYPE="A_INT16" CATEGORY="STANDARD-LENGTH-TYPE" ENCODING="SM">
+          <ho:BIT-LENGTH>16</ho:BIT-LENGTH>
+        </ho:CODED-TYPE>
+        <ho:COMPU-METHODS>
+          <ho:COMPU-METHOD>
+            <ho:SHORT-NAME>Sm16</ho:SHORT-NAME>
+            <ho:CATEGORY>LINEAR</ho:CATEGORY>
+            <ho:COMPU-INTERNAL-TO-PHYS>
+              <ho:COMPU-SCALES>
+                <ho:COMPU-SCALE>
+                  <ho:COMPU-RATIONAL-COEFFS>
+                    <ho:COMPU-NUMERATOR><ho:V>0</ho:V><ho:V>0.5</ho:V></ho:COMPU-NUMERATOR>
+                    <ho:COMPU-DENOMINATOR><ho:V>1</ho:V></ho:COMPU-DENOMINATOR>
+                  </ho:COMPU-RATIONAL-COEFFS>
+                </ho:COMPU-SCALE>
+              </ho:COMPU-SCALES>
+            </ho:COMPU-INTERNAL-TO-PHYS>
+          </ho:COMPU-METHOD>
+        </ho:COMPU-METHODS>
+      </fx:CODING>
+      <fx:CODING ID="C_Oc16">
+        <ho:SHORT-NAME>Oc16</ho:SHORT-NAME>
+        <ho:CODED-TYPE ho:BASE-DATA-TYPE="A_INT16" CATEGORY="STANDARD-LENGTH-TYPE" ENCODING="1C">
+          <ho:BIT-LENGTH>16</ho:BIT-LENGTH>
+        </ho:CODED-TYPE>
+        <ho:COMPU-METHODS>
+          <ho:COMPU-METHOD>
+            <ho:SHORT-NAME>Oc16</ho:SHORT-NAME>
+            <ho:CATEGORY>IDENTICAL</ho:CATEGORY>
+          </ho:COMPU-METHOD>
+        </ho:COMPU-METHODS>
+      </fx:CODING>
+      <fx:CODING ID="C_Level">
+        <ho:SHORT-NAME>Level</ho:SHORT-NAME>
+        <ho:CODED-TYPE ho:BASE-DATA-TYPE="A_UINT8" CATEGORY="STANDARD-LENGTH-TYPE" ENCODING="UNSIGNED">
+          <ho:BIT-LENGTH>4</ho:BIT-LENGTH>
+        </ho:CODED-TYPE>
+        <ho:COMPU-METHODS>
+          <ho:COMPU-METHOD>
+            <ho:SHORT-NAME>Level</ho:SHORT-NAME>
+            <ho:CATEGORY>TEXTTABLE</ho:CATEGORY>
+            <ho:COMPU-INTERNAL-TO-PHYS>
+              <ho:COMPU-SCALES>
+                <ho:COMPU-SCALE>
+                  <ho:LOWER-LIMIT>0</ho:LOWER-LIMIT>
+                  <ho:UPPER-LIMIT>3</ho:UPPER-LIMIT>
+                  <ho:COMPU-CONST><ho:VT>Low</ho:VT></ho:COMPU-CONST>
+                </ho:COMPU-SCALE>
+                <ho:COMPU-SCALE>
+                  <ho:LOWER-LIMIT>4</ho:LOWER-LIMIT>
+                  <ho:UPPER-LIMIT>14</ho:UPPER-LIMIT>
+                  <ho:COMPU-CONST><ho:VT>High</ho:VT></ho:COMPU-CONST>
+                </ho:COMPU-SCALE>
+                <ho:COMPU-SCALE>
+                  <ho:LOWER-LIMIT>15</ho:LOWER-LIMIT>
+                  <ho:UPPER-LIMIT>15</ho:UPPER-LIMIT>
+                  <ho:COMPU-CONST><ho:VT>Error</ho:VT></ho:COMPU-CONST>
+                </ho:COMPU-SCALE>
+              </ho:COMPU-SCALES>
+            </ho:COMPU-INTERNAL-TO-PHYS>
+          </ho:COMPU-METHOD>
+        </ho:COMPU-METHODS>
+      </fx:CODING>
+      <fx:CODING ID="C_Curve">
+        <ho:SHORT-NAME>Curve</ho:SHORT-NAME>
+        <ho:CODED-TYPE ho:BASE-DATA-TYPE="A_UINT8" CATEGORY="STANDARD-LENGTH-TYPE" ENCODING="UNSIGNED">
+          <ho:BIT-LENGTH>8</ho:BIT-LENGTH>
+        </ho:CODED-TYPE>
+        <ho:COMPU-METHODS>
+          <ho:COMPU-METHOD>
+            <ho:SHORT-NAME>Curve</ho:SHORT-NAME>
+            <ho:CATEGORY>SCALE-LINEAR</ho:CATEGORY>
+            <ho:PHYS-CONSTRS>
+              <ho:SCALE-CONSTR VALIDITY="VALID">
+                <ho:LOWER-LIMIT>0</ho:LOWER-LIMIT>
+                <ho:UPPER-LIMIT>360</ho:UPPER-LIMIT>
+              </ho:SCALE-CONSTR>
+            </ho:PHYS-CONSTRS>
+            <ho:COMPU-INTERNAL-TO-PHYS>
+              <ho:COMPU-SCALES>
+                <ho:COMPU-SCALE>
+                  <ho:LOWER-LIMIT>0</ho:LOWER-LIMIT>
+                  <ho:UPPER-LIMIT>99</ho:UPPER-LIMIT>
+                  <ho:COMPU-RATIONAL-COEFFS>
+                    <ho:COMPU-NUMERATOR><ho:V>0</ho:V><ho:V>0.5</ho:V></ho:COMPU-NUMERATOR>
+                    <ho:COMPU-DENOMINATOR><ho:V>1</ho:V></ho:COMPU-DENOMINATOR>
+                  </ho:COMPU-RATIONAL-COEFFS>
+                </ho:COMPU-SCALE>
+                <ho:COMPU-SCALE>
+                  <ho:LOWER-LIMIT>100</ho:LOWER-LIMIT>
+                  <ho:UPPER-LIMIT>255</ho:UPPER-LIMIT>
+                  <ho:COMPU-RATIONAL-COEFFS>
+                    <ho:COMPU-NUMERATOR><ho:V>-150</ho:V><ho:V>2</ho:V></ho:COMPU-NUMERATOR>
+                    <ho:COMPU-DENOMINATOR><ho:V>1</ho:V></ho:COMPU-DENOMINATOR>
+                  </ho:COMPU-RATIONAL-COEFFS>
+                </ho:COMPU-SCALE>
+              </ho:COMPU-SCALES>
+            </ho:COMPU-INTERNAL-TO-PHYS>
+          </ho:COMPU-METHOD>
+        </ho:COMPU-METHODS>
+      </fx:CODING>
+      <fx:CODING ID="C_Inverse">
+        <ho:SHORT-NAME>Inverse</ho:SHORT-NAME>
+        <ho:CODED-TYPE ho:BASE-DATA-TYPE="A_UINT8" CATEGORY="STANDARD-LENGTH-TYPE" ENCODING="UNSIGNED">
+          <ho:BIT-LENGTH>8</ho:BIT-LENGTH>
+        </ho:CODED-TYPE>
+        <ho:COMPU-METHODS>
+          <ho:COMPU-METHOD>
+            <ho:SHORT-NAME>Inverse</ho:SHORT-NAME>
+            <ho:CATEGORY>RAT-FUNC</ho:CATEGORY>
+            <ho:COMPU-INTERNAL-TO-PHYS>
+              <ho:COMPU-SCALES>
+                <ho:COMPU-SCALE>
+                  <ho:LOWER-LIMIT>0</ho:LOWER-LIMIT>
+                  <ho:UPPER-LIMIT>255</ho:UPPER-LIMIT>
+                  <ho:COMPU-RATIONAL-COEFFS>
+                    <ho:COMPU-NUMERATOR><ho:V>1000</ho:V></ho:COMPU-NUMERATOR>
+                    <ho:COMPU-DENOMINATOR><ho:V>1</ho:V><ho:V>1</ho:V></ho:COMPU-DENOMINATOR>
+                  </ho:COMPU-RATIONAL-COEFFS>
+                </ho:COMPU-SCALE>
+              </ho:COMPU-SCALES>
+            </ho:COMPU-INTERNAL-TO-PHYS>
+          </ho:COMPU-METHOD>
+        </ho:COMPU-METHODS>
+      </fx:CODING>
+      <fx:CODING ID="C_Ratio">
+        <ho:SHORT-NAME>Ratio</ho:SHORT-NAME>
+        <ho:CODED-TYPE ho:BASE-DATA-TYPE="A_UINT8" CATEGORY="STANDARD-LENGTH-TYPE" ENCODING="UNSIGNED">
+          <ho:BIT-LENGTH>8</ho:BIT-LENGTH>
+        </ho:CODED-TYPE>
+        <ho:COMPU-METHODS>
+          <ho:COMPU-METHOD>
+            <ho:SHORT-NAME>Ratio</ho:SHORT-NAME>
+            <ho:CATEGORY>RAT-FUNC</ho:CATEGORY>
+            <ho:COMPU-INTERNAL-TO-PHYS>
+              <ho:COMPU-SCALES>
+                <ho:COMPU-SCALE>
+                  <ho:COMPU-RATIONAL-COEFFS>
+                    <ho:COMPU-NUMERATOR><ho:V>10</ho:V><ho:V>3</ho:V></ho:COMPU-NUMERATOR>
+                    <ho:COMPU-DENOMINATOR><ho:V>2</ho:V></ho:COMPU-DENOMINATOR>
+                  </ho:COMPU-RATIONAL-COEFFS>
+                </ho:COMPU-SCALE>
+              </ho:COMPU-SCALES>
+            </ho:COMPU-INTERNAL-TO-PHYS>
+          </ho:COMPU-METHOD>
+        </ho:COMPU-METHODS>
+      </fx:CODING>
+      <fx:CODING ID="C_Parabola">
+        <ho:SHORT-NAME>Parabola</ho:SHORT-NAME>
+        <ho:CODED-TYPE ho:BASE-DATA-TYPE="A_UINT8" CATEGORY="STANDARD-LENGTH-TYPE" ENCODING="UNSIGNED">
+          <ho:BIT-LENGTH>4</ho:BIT-LENGTH>
+        </ho:CODED-TYPE>
+        <ho:COMPU-METHODS>
+          <ho:COMPU-METHOD>
+            <ho:SHORT-NAME>Parabola</ho:SHORT-NAME>
+            <ho:CATEGORY>SCALE-RAT-FUNC</ho:CATEGORY>
+            <ho:COMPU-INTERNAL-TO-PHYS>
+              <ho:COMPU-SCALES>
+                <ho:COMPU-SCALE>
+                  <ho:LOWER-LIMIT>0</ho:LOWER-LIMIT>
+                  <ho:UPPER-LIMIT INTERVAL-TYPE="OPEN">15</ho:UPPER-LIMIT>
+                  <ho:COMPU-RATIONAL-COEFFS>
+                    <ho:COMPU-NUMERATOR><ho:V>64</ho:V><ho:V>-16</ho:V><ho:V>1</ho:V></ho:COMPU-NUMERATOR>
+                    <ho:COMPU-DENOMINATOR><ho:V>1</ho:V></ho:COMPU-DENOMINATOR>
+                  </ho:COMPU-RATIONAL-COEFFS>
+                </ho:COMPU-SCALE>
+                <ho:COMPU-SCALE>
+                  <ho:LOWER-LIMIT>15</ho:LOWER-LIMIT>
+                  <ho:UPPER-LIMIT>15</ho:UPPER-LIMIT>
+                  <ho:COMPU-CONST><ho:VT>NotAvailable</ho:VT></ho:COMPU-CONST>
+                </ho:COMPU-SCALE>
+              </ho:COMPU-SCALES>
+            </ho:COMPU-INTERNAL-TO-PHYS>
+          </ho:COMPU-METHOD>
+        </ho:COMPU-METHODS>
+      </fx:CODING>
+      <fx:CODING ID="C_U10">
+        <ho:SHORT-NAME>U10</ho:SHORT-NAME>
+        <ho:CODED-TYPE ho:BASE-DATA-TYPE="A_UINT16" CATEGORY="STANDARD-LENGTH-TYPE" ENCODING="UNSIGNED">
+          <ho:BIT-LENGTH>10</ho:BIT-LENGTH>
+        </ho:CODED-TYPE>
+        <ho:COMPU-METHODS>
+          <ho:COMPU-METHOD>
+            <ho:SHORT-NAME>U10</ho:SHORT-NAME>
+            <ho:CATEGORY>IDENTICAL</ho:CATEGORY>
+          </ho:COMPU-METHOD>
+        </ho:COMPU-METHODS>
+      </fx:CODING>
+      <fx:CODING ID="C_U4">
+        <ho:SHORT-NAME>U4</ho:SHORT-NAME>
+        <ho:CODED-TYPE ho:BASE-DATA-TYPE="A_UINT16" CATEGORY="STANDARD-LENGTH-TYPE" ENCODING="UNSIGNED">
+          <ho:BIT-LENGTH>4</ho:BIT-LENGTH>
+        </ho:CODED-TYPE>
+        <ho:COMPU-METHODS>
+          <ho:COMPU-METHOD>
+            <ho:SHORT-NAME>U4</ho:SHORT-NAME>
+            <ho:CATEGORY>IDENTICAL</ho:CATEGORY>
+          </ho:COMPU-METHOD>
+        </ho:COMPU-METHODS>
+      </fx:CODING>
+      <fx:CODING ID="C_U8">
+        <ho:SHORT-NAME>U8</ho:SHORT-NAME>
+        <ho:CODED-TYPE ho:BASE-DATA-TYPE="A_UINT16" CATEGORY="STANDARD-LENGTH-TYPE" ENCODING="UNSIGNED">
+          <ho:BIT-LENGTH>8</ho:BIT-LENGTH>
+        </ho:CODED-TYPE>
+        <ho:COMPU-METHODS>
+          <ho:COMPU-METHOD>
+            <ho:SHORT-NAME>U8</ho:SHORT-NAME>
+            <ho:CATEGORY>IDENTICAL</ho:CATEGORY>
+          </ho:COMPU-METHOD>
+        </ho:COMPU-METHODS>
+      </fx:CODING>
+      <fx:CODING ID="C_U12">
+        <ho:SHORT-NAME>U12</ho:SHORT-NAME>
+        <ho:CODED-TYPE ho:BASE-DATA-TYPE="A_UINT16" CATEGORY="STANDARD-LENGTH-TYPE" ENCODING="UNSIGNED">
+          <ho:BIT-LENGTH>12</ho:BIT-LENGTH>
+        </ho:CODED-TYPE>
+        <ho:COMPU-METHODS>
+          <ho:COMPU-METHOD>
+            <ho:SHORT-NAME>U12</ho:SHORT-NAME>
+            <ho:CATEGORY>IDENTICAL</ho:CATEGORY>
+          </ho:COMPU-METHOD>
+        </ho:COMPU-METHODS>
+      </fx:CODING>
+      <fx:CODING ID="C_U16">
+        <ho:SHORT-NAME>U16</ho:SHORT-NAME>
+        <ho:CODED-TYPE ho:BASE-DATA-TYPE="A_UINT16" CATEGORY="STANDARD-LENGTH-TYPE" ENCODING="UNSIGNED">
+          <ho:BIT-LENGTH>16</ho:BIT-LENGTH>
+        </ho:CODED-TYPE>
+        <ho:COMPU-METHODS>
+          <ho:COMPU-METHOD>
+            <ho:SHORT-NAME>U16</ho:SHORT-NAME>
+            <ho:CATEGORY>IDENTICAL</ho:CATEGORY>
+          </ho:COMPU-METHOD>
+        </ho:COMPU-METHODS>
+      </fx:CODING>
+    </fx:CODINGS>
+  </fx:PROCESSING-INFORMATION>
+</fx:FIBEX>

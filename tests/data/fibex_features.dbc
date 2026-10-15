@@ -1,0 +1,28 @@
+VERSION ""
+
+NS_ :
+
+BS_:
+
+BU_:
+
+BO_ 1026 Shifted: 8 Vector__XXX
+ SG_ ShiftedA : 4|10@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ ShiftedB : 19|4@0+ (1,0) [0|0] "" Vector__XXX
+ SG_ Tail : 27|8@1+ (1,0) [0|0] "" Vector__XXX
+
+BO_ 1027 Swapped: 8 Vector__XXX
+ SG_ SwapA : 27|12@0+ (1,0) [0|0] "" Vector__XXX
+ SG_ SwapB : 8|16@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ SwapC : 45|8@0+ (1,0) [0|0] "" Vector__XXX
+
+BO_ 1028 Multiplexed: 8 Vector__XXX
+ SG_ Mux M : 0|8@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ A16 m1 : 8|16@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ A8 m1 : 31|8@0+ (1,0) [0|0] "" Vector__XXX
+ SG_ B16 m2 : 8|16@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ B4 m2 : 24|4@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ Counter : 48|8@1+ (1,0) [0|0] "" Vector__XXX
+
+SG_MUL_VAL_ 1028 B16 Mux 2-3;
+SG_MUL_VAL_ 1028 B4 Mux 2-3;

@@ -169,12 +169,13 @@ fn unsupported_content_is_reported() {
     let text = network();
     let cases = [
         (
-            "range",
-            text.replace(
-                "<ho:LOWER-LIMIT>3</ho:LOWER-LIMIT>\n                <ho:UPPER-LIMIT>3</ho:UPPER-LIMIT>",
-                "<ho:LOWER-LIMIT>3</ho:LOWER-LIMIT>\n                <ho:UPPER-LIMIT>7</ho:UPPER-LIMIT>",
+            "nonlinear",
+            text.replacen(
+                "<ho:V>0</ho:V><ho:V>0.01</ho:V>",
+                "<ho:V>0</ho:V><ho:V>0.01</ho:V><ho:V>1</ho:V>",
+                1,
             ),
-            "texttable ranges",
+            "a rational function is RAT-FUNC",
         ),
         (
             "category",
@@ -199,15 +200,15 @@ fn unsupported_content_is_reported() {
                 "<fx:PDU-REF ID-REF=\"P_Brake\"/>\n            <fx:BIT-POSITION>32</fx:BIT-POSITION>",
                 "<fx:PDU-REF ID-REF=\"P_Brake\"/>\n            <fx:BIT-POSITION>36</fx:BIT-POSITION>",
             ),
-            "byte offset",
+            "does not fit in frame",
         ),
         (
-            "pdu-order",
+            "split",
             text.replace(
-                "<fx:PDU-REF ID-REF=\"P_Speed\"/>\n            <fx:BIT-POSITION>0</fx:BIT-POSITION>\n            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>",
-                "<fx:PDU-REF ID-REF=\"P_Speed\"/>\n            <fx:BIT-POSITION>0</fx:BIT-POSITION>\n            <fx:IS-HIGH-LOW-BYTE-ORDER>true</fx:IS-HIGH-LOW-BYTE-ORDER>",
+                "<fx:PDU-REF ID-REF=\"P_Brake\"/>\n            <fx:BIT-POSITION>32</fx:BIT-POSITION>",
+                "<fx:PDU-REF ID-REF=\"P_Brake\"/>\n            <fx:BIT-POSITION>28</fx:BIT-POSITION>",
             ),
-            "high-low byte order PDU instances",
+            "BrakePressure of PDU BrakePdu: its bits are not one signal",
         ),
         (
             "identifier",
@@ -221,5 +222,407 @@ fn unsupported_content_is_reported() {
         let e = load_err(&path, Some("Body"));
         assert!(e.contains(expected), "{name}: {e}");
         std::fs::remove_file(path).unwrap();
+    }
+}
+
+fn features() -> Database {
+    load(data("fibex_features.xml"), None).unwrap()
+}
+
+fn named(v: &[(&str, Value)]) -> Vec<(String, Value)> {
+    v.iter().map(|(n, v)| (n.to_string(), v.clone())).collect()
+}
+
+#[test]
+fn sign_magnitude_and_ones_complement_codings() {
+    let db = features();
+    let m = db.message_by_name("Encodings").unwrap();
+    let kinds: Vec<_> = m.signals.iter().map(|s| (s.kind, s.signed)).collect();
+    assert_eq!(
+        kinds,
+        [
+            (ValueKind::SignMagnitude, true),
+            (ValueKind::OnesComplement, true),
+            (ValueKind::SignMagnitude, true),
+            (ValueKind::OnesComplement, true),
+        ]
+    );
+    let values = named(&[
+        ("SmSmall", Value::Int(-5)),
+        ("OcSmall", Value::Int(-5)),
+        ("SmWide", Value::Float(-100.5)),
+        ("OcWide", Value::Int(-2)),
+    ]);
+    let data = m.encode(&values, &EncodeOptions::default()).unwrap();
+    // -5: 0x85 (sign + magnitude), 0xFA (NOT 5); -100.5 / 0.5 = -201 =
+    // 0x80C9 little endian; -2 = NOT 2 = 0xFFFD big endian in bytes 6-7.
+    assert_eq!(data, [0x85, 0xFA, 0xC9, 0x80, 0, 0, 0xFF, 0xFD]);
+    let decoded = m.decode(&data, &DecodeOptions::default()).unwrap();
+    assert_eq!(decoded, values);
+    // Negative zeros decode to 0.
+    let zeros = m
+        .decode(
+            &[0x80, 0xFF, 0x00, 0x80, 0, 0, 0xFF, 0xFF],
+            &DecodeOptions::default(),
+        )
+        .unwrap();
+    assert!(
+        zeros
+            .iter()
+            .all(|(_, v)| *v == Value::Int(0) || *v == Value::Float(0.0)),
+        "{zeros:?}"
+    );
+}
+
+#[test]
+fn texttable_ranges_piecewise_and_rational_codings() {
+    let db = features();
+    let m = db.message_by_name("Codings").unwrap();
+    // A single linear RAT-FUNC is a plain factor and offset.
+    let ratio = m.signal("Ratio").unwrap();
+    assert_eq!(
+        (ratio.factor, ratio.offset, ratio.coding.is_none()),
+        (1.5, 5.0, true)
+    );
+    let level = m.signal("Level").unwrap();
+    assert!(level.coding.is_some());
+    // The names, by their lower limits.
+    assert_eq!(
+        level.choices,
+        [(0, "Low".into()), (4, "High".into()), (15, "Error".into())]
+    );
+
+    let decode = |data: [u8; 8]| m.decode(&data, &DecodeOptions::default()).unwrap();
+    // Level 9 (High), Parabola 3: (3 - 8)^2, Curve 120: 2 * 120 - 150,
+    // Inverse 9: 1000 / (9 + 1), Ratio 10: (10 + 3 * 10) / 2.
+    assert_eq!(
+        decode([0x39, 120, 9, 10, 0, 0, 0, 0]),
+        named(&[
+            ("Level", Value::Str("High".into())),
+            ("Parabola", Value::Float(25.0)),
+            ("Curve", Value::Float(90.0)),
+            ("Inverse", Value::Float(100.0)),
+            ("Ratio", Value::Float(20.0)),
+        ])
+    );
+    // Level 3 (Low), Parabola 15 (its function's scale is open at 15),
+    // Curve 99: 0.5 * 99, Inverse 0: 1000.
+    assert_eq!(
+        decode([0xF3, 99, 0, 0, 0, 0, 0, 0])[..4],
+        named(&[
+            ("Level", Value::Str("Low".into())),
+            ("Parabola", Value::Str("NotAvailable".into())),
+            ("Curve", Value::Float(49.5)),
+            ("Inverse", Value::Float(1000.0)),
+        ])
+    );
+    // Without names, a texttable-only raw value stays raw.
+    let raw_names = m
+        .decode(
+            &[0xF3, 99, 0, 0, 0, 0, 0, 0],
+            &DecodeOptions {
+                decode_choices: false,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(raw_names[0].1, Value::Int(3));
+    assert_eq!(raw_names[1].1, Value::Int(15));
+
+    let values = named(&[
+        ("Level", Value::Str("High".into())),
+        ("Parabola", Value::Str("NotAvailable".into())),
+        ("Curve", Value::Float(90.0)),
+        ("Inverse", Value::Float(100.0)),
+        ("Ratio", Value::Float(20.0)),
+    ]);
+    let opts = EncodeOptions::default();
+    // Names encode to their lower limits; numbers invert within a scale.
+    assert_eq!(
+        m.encode(&values, &opts).unwrap(),
+        [0xF4, 120, 9, 10, 0, 0, 0, 0]
+    );
+    for (curve, raw) in [(0.0, 0u8), (49.5, 99), (52.0, 101), (360.0, 255)] {
+        let mut v = values.clone();
+        v[2].1 = Value::Float(curve);
+        assert_eq!(m.encode(&v, &opts).unwrap()[1], raw, "{curve}");
+    }
+    for (inverse, raw) in [(1000.0, 0u8), (500.0, 1), (101.0, 9), (1000.0 / 256.0, 255)] {
+        let mut v = values.clone();
+        v[3].1 = Value::Float(inverse);
+        assert_eq!(m.encode(&v, &opts).unwrap()[2], raw, "{inverse}");
+    }
+    let err = |i: usize, value: Value| {
+        let mut v = values.clone();
+        v[i].1 = value;
+        m.encode(&v, &opts).unwrap_err().to_string()
+    };
+    // Physical constraints still apply; a value no scale reaches fails.
+    assert!(err(2, Value::Float(361.0)).contains("maximum"));
+    let e = err(3, Value::Float(2000.0));
+    assert!(e.contains("signal Inverse") && e.contains("outside"), "{e}");
+    // (x - 8)^2 is not monotonic over its scale: it decodes but cannot encode.
+    let e = err(1, Value::Float(25.0));
+    assert!(
+        e.contains("signal Parabola") && e.contains("monotonic"),
+        "{e}"
+    );
+    assert!(err(0, Value::Str("Medium".into())).contains("Low, High, Error"));
+}
+
+/// The frames of the features fixture that a DBC can express match it.
+#[test]
+fn features_match_the_equivalent_dbc() {
+    let fibex = features();
+    let dbc = Database::from_file(data("fibex_features.dbc")).unwrap();
+    for d in &dbc.messages {
+        let f = fibex.message_by_name(&d.name).unwrap();
+        assert_eq!((f.id, f.size), (d.id, d.size), "{}", d.name);
+        let mut expected = d.signals.clone();
+        for s in &mut expected {
+            s.receivers.clear();
+        }
+        assert_eq!(f.signals, expected, "{}", d.name);
+    }
+}
+
+#[test]
+fn pdus_at_bit_offsets() {
+    let db = features();
+    let m = db.message_by_name("Shifted").unwrap();
+    let layout: Vec<_> = m
+        .signals
+        .iter()
+        .map(|s| (s.name.as_str(), s.start_bit, s.byte_order))
+        .collect();
+    assert_eq!(
+        layout,
+        [
+            ("ShiftedA", 4, ByteOrder::LittleEndian),
+            ("ShiftedB", 19, ByteOrder::BigEndian),
+            ("Tail", 27, ByteOrder::LittleEndian),
+        ]
+    );
+    let values = named(&[
+        ("ShiftedA", Value::Int(0x3A5)),
+        ("ShiftedB", Value::Int(0xC)),
+        ("Tail", Value::Int(0xB7)),
+    ]);
+    let data = m.encode(&values, &EncodeOptions::default()).unwrap();
+    // A: bits 4..14; B: byte 2 bits 3..0; Tail: bits 27..35.
+    assert_eq!(data, [0x50, 0x3A, 0x0C, 0xB8, 0x05, 0, 0, 0]);
+    assert_eq!(m.decode(&data, &DecodeOptions::default()).unwrap(), values);
+}
+
+#[test]
+fn high_low_pdu_instances() {
+    let db = features();
+    let m = db.message_by_name("Swapped").unwrap();
+    let layout: Vec<_> = m
+        .signals
+        .iter()
+        .map(|s| (s.name.as_str(), s.start_bit, s.byte_order))
+        .collect();
+    // SwappedPdu (4 bytes, MSB at bit 15) fills bytes 1-4, its last byte
+    // first: Intel SwapA (PDU bits 0-11) becomes Motorola from frame bit 27,
+    // Motorola SwapB (PDU bytes 2-3) becomes Intel from frame bit 8.
+    // NarrowPdu (1 byte, MSB at bit 45) is bits 45..40 and 55..54.
+    assert_eq!(
+        layout,
+        [
+            ("SwapA", 27, ByteOrder::BigEndian),
+            ("SwapB", 8, ByteOrder::LittleEndian),
+            ("SwapC", 45, ByteOrder::BigEndian),
+        ]
+    );
+    let values = named(&[
+        ("SwapA", Value::Int(0xABC)),
+        ("SwapB", Value::Int(0x1234)),
+        ("SwapC", Value::Int(0x5A)),
+    ]);
+    let payload = m.encode(&values, &EncodeOptions::default()).unwrap();
+    // The PDU's bytes BC 0A 12 34 (A little endian, B big endian), reversed
+    // into frame bytes 1-4; 0x5A = 010110 in byte 5 bits 5..0, 10 in byte 6
+    // bits 7..6.
+    assert_eq!(payload, [0x00, 0x34, 0x12, 0x0A, 0xBC, 0x16, 0x80, 0x00]);
+    assert_eq!(
+        m.decode(&payload, &DecodeOptions::default()).unwrap(),
+        values
+    );
+
+    // Low-high instances are unchanged: the same PDU low-high at byte 1.
+    let text = std::fs::read_to_string(data("fibex_features.xml"))
+        .unwrap()
+        .replace(
+            "<fx:BIT-POSITION>15</fx:BIT-POSITION>\n            <fx:IS-HIGH-LOW-BYTE-ORDER>true",
+            "<fx:BIT-POSITION>8</fx:BIT-POSITION>\n            <fx:IS-HIGH-LOW-BYTE-ORDER>false",
+        );
+    let path = variant("low-high", &text);
+    let db = load(&path, None).unwrap();
+    std::fs::remove_file(path).unwrap();
+    let m = db.message_by_name("Swapped").unwrap();
+    let payload = m.encode(&values, &EncodeOptions::default()).unwrap();
+    assert_eq!(&payload[..5], [0x00, 0xBC, 0x0A, 0x12, 0x34]);
+
+    // Off a byte boundary, the Motorola signal across PDU bytes is split.
+    let text = std::fs::read_to_string(data("fibex_features.xml"))
+        .unwrap()
+        .replace(
+            "<fx:BIT-POSITION>15</fx:BIT-POSITION>\n            <fx:IS-HIGH-LOW-BYTE-ORDER>true",
+            "<fx:BIT-POSITION>13</fx:BIT-POSITION>\n            <fx:IS-HIGH-LOW-BYTE-ORDER>true",
+        );
+    let path = variant("high-low-split", &text);
+    let e = load_err(&path, None);
+    std::fs::remove_file(path).unwrap();
+    assert!(
+        e.contains("signal SwapB of PDU SwappedPdu: its bits are not one signal"),
+        "{e}"
+    );
+}
+
+#[test]
+fn multiplexed_pdus() {
+    let db = features();
+    let m = db.message_by_name("Multiplexed").unwrap();
+    let mux: Vec<_> = m
+        .signals
+        .iter()
+        .map(|s| {
+            (
+                s.name.as_str(),
+                s.is_multiplexor,
+                s.multiplexing
+                    .as_ref()
+                    .map(|x| (x.multiplexor, x.ranges.clone())),
+            )
+        })
+        .collect();
+    assert_eq!(
+        mux,
+        [
+            ("Mux", true, None),
+            ("A16", false, Some((0, vec![(1, 1)]))),
+            ("A8", false, Some((0, vec![(1, 1)]))),
+            ("B16", false, Some((0, vec![(2, 3)]))),
+            ("B4", false, Some((0, vec![(2, 3)]))),
+            ("Counter", false, None),
+        ]
+    );
+    let opts = EncodeOptions::default();
+    let cases = [
+        (
+            named(&[
+                ("Mux", Value::Int(1)),
+                ("A16", Value::Int(0x1234)),
+                ("A8", Value::Int(0xAB)),
+                ("Counter", Value::Int(7)),
+            ]),
+            [1, 0x34, 0x12, 0xAB, 0, 0, 7, 0],
+        ),
+        (
+            named(&[
+                ("Mux", Value::Int(2)),
+                ("B16", Value::Int(0xBEEF)),
+                ("B4", Value::Int(0x9)),
+                ("Counter", Value::Int(8)),
+            ]),
+            [2, 0xEF, 0xBE, 0x09, 0, 0, 8, 0],
+        ),
+        (
+            named(&[
+                ("Mux", Value::Int(3)),
+                ("B16", Value::Int(1)),
+                ("B4", Value::Int(0xF)),
+                ("Counter", Value::Int(9)),
+            ]),
+            [3, 0x01, 0x00, 0x0F, 0, 0, 9, 0],
+        ),
+    ];
+    for (values, bytes) in cases {
+        let data = m.encode(&values, &opts).unwrap();
+        assert_eq!(data, bytes, "{values:?}");
+        assert_eq!(m.decode(&data, &DecodeOptions::default()).unwrap(), values);
+    }
+    // A switched PDU's signal is absent under another code.
+    let e = m
+        .encode(
+            &named(&[
+                ("Mux", Value::Int(1)),
+                ("A16", Value::Int(0)),
+                ("A8", Value::Int(0)),
+                ("B4", Value::Int(0)),
+                ("Counter", Value::Int(0)),
+            ]),
+            &opts,
+        )
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("B4") && e.contains("not present"), "{e}");
+    // Only the switch and the static part under an unknown code.
+    let decoded = m
+        .decode(&[9, 1, 2, 3, 0, 0, 5, 0], &DecodeOptions::default())
+        .unwrap();
+    assert_eq!(
+        decoded,
+        named(&[("Mux", Value::Int(9)), ("Counter", Value::Int(5))])
+    );
+}
+
+#[test]
+fn unsupported_multiplexing_is_reported() {
+    let text = std::fs::read_to_string(data("fibex_features.xml")).unwrap();
+    let cases = [
+        (
+            "code",
+            text.replace(
+                "<fx:SWITCH-CODE>3</fx:SWITCH-CODE>",
+                "<fx:SWITCH-CODE>256</fx:SWITCH-CODE>",
+            ),
+            "switch code 256 does not fit in the 8 bits of switch Mux",
+        ),
+        (
+            "duplicate",
+            text.replace(
+                "<fx:SWITCH-CODE>3</fx:SWITCH-CODE>",
+                "<fx:SWITCH-CODE>2</fx:SWITCH-CODE>",
+            ),
+            "distinct integer SWITCH-CODE",
+        ),
+        (
+            "position",
+            text.replace(
+                "<fx:PDU-REF ID-REF=\"P_MuxA\"/>",
+                "<fx:PDU-REF ID-REF=\"P_MuxA\"/><fx:BIT-POSITION>8</fx:BIT-POSITION>",
+            ),
+            "must be at bit 0",
+        ),
+        (
+            "nested",
+            text.replace(
+                "<fx:PDU-REF ID-REF=\"P_MuxStatic\"/>",
+                "<fx:PDU-REF ID-REF=\"P_Mux\"/>",
+            ),
+            "nested multiplexing",
+        ),
+        (
+            "switch",
+            text.replace(
+                "<fx:BIT-POSITION>0</fx:BIT-POSITION>\n            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>\n            <ho:BIT-LENGTH>8</ho:BIT-LENGTH>",
+                "<fx:BIT-POSITION>60</fx:BIT-POSITION>\n            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>\n            <ho:BIT-LENGTH>8</ho:BIT-LENGTH>",
+            ),
+            "switch Mux from bit 60 do not fit",
+        ),
+        (
+            "dynamic",
+            without(&text, "<fx:DYNAMIC-PART ID=\"DP_Mux\">", "</fx:DYNAMIC-PART>"),
+            "no DYNAMIC-PART",
+        ),
+    ];
+    for (name, changed, expected) in cases {
+        assert_ne!(changed, text, "{name}: the fixture changed");
+        let path = variant(name, &changed);
+        let e = load_err(&path, None);
+        std::fs::remove_file(path).unwrap();
+        assert!(e.contains(expected), "{name}: {e}");
     }
 }
