@@ -17,14 +17,17 @@ import threading
 import weakref
 from collections.abc import AsyncIterator, Callable, Iterator, Mapping
 from types import TracebackType
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from hilspy._hilspy import Error, Message, Periodic, _Channel, _open, _Subscription
 
-if sys.version_info >= (3, 11):
-    from typing import Self
-else:
-    from typing_extensions import Self
+if TYPE_CHECKING:
+    # Annotations only (postponed by `from __future__ import annotations`):
+    # typing_extensions is not a runtime dependency.
+    if sys.version_info >= (3, 11):
+        from typing import Self
+    else:
+        from typing_extensions import Self
 
 Value = Any
 #: How long a blocking wait sleeps between checks for Ctrl-C.
