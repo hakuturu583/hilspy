@@ -29,7 +29,7 @@ with hilspy.open("can://vcan0", "dbc:vehicle.dbc") as ecu:
 | Codec | |
 | --- | --- |
 | `raw` (default) | none: messages carry `data` (and `id` for CAN) |
-| `dbc:FILE` | CAN frames <-> DBC messages, via [`can-dbc`](https://crates.io/crates/can-dbc) (options `strict`, `scaling`, `decode_choices`, `e2e`) |
+| `dbc:FILE` | CAN frames <-> DBC messages, via [`can-dbc`](https://crates.io/crates/can-dbc) (options `strict`, `scaling`, `decode_choices`, `e2e`, `ecu`) |
 | `fibex:FILE` | CAN / CAN FD frames <-> the frames of an ASAM FIBEX channel, via [`afibex`](https://crates.io/crates/afibex) (option `channel`, and the `dbc:` options); see [FIBEX](#fibex-networks) |
 | `someip:FILE` | SOME/IP messages <-> the methods, events and fields of ASAM FIBEX 4 services, parsed by [`afibex`](https://crates.io/crates/afibex) and checked against [`asomeip`](https://crates.io/crates/asomeip) (options `client_id`, `decode_choices`, `stream`); see [SOME/IP](#someip-services) |
 | `sbf` | Septentrio Binary Format stream <-> blocks, via [`libsbf`](https://crates.io/crates/libsbf); encodes `PVTGeodetic` and `AttEuler` |
@@ -69,7 +69,7 @@ The whole public API:
 | `hilspy.open(url, codec="raw", *, clock=None, **codec_options) -> Channel` | open a channel (on a virtual clock with `clock=`) |
 | `Channel.send(message)` / `send(name, fields)` | encode and send |
 | `Channel.recv(timeout=None) -> Message \| None` | next message (iterate the channel for all) |
-| `Channel.every(period, message_or_name, fields=None, *, duration=None) -> Periodic` | cyclic send from a Rust thread; `update()`, `stop()`, `period`, `sent_count` |
+| `Channel.every(period, message_or_name, fields=None, *, duration=None) -> Periodic` | cyclic send from a Rust thread; `update()`, `stop()`, `period`, `sent_count`. `period=None`: the message's cycle time from the DBC / FIBEX (see [Cycle times](#cycle-times)) |
 | `Channel.close()` | also via `with` / `async with` |
 | `await Channel.asend(...)`, `await Channel.arecv(timeout=None)`, `async for msg in channel` | asyncio |
 | `hilspy.merge(*channels)` | `(channel, message)` from several buses as they arrive (`for` / `async for`) |
@@ -77,6 +77,45 @@ The whole public API:
 | `hilspy.Clock(start=0.0)` | simulated time: `advance(dt)`, `advance_to(t)`, `now`, `next_due` |
 | `hilspy.register_transport(scheme, factory)` / `register_codec(name, factory)` | plugins |
 | `hilspy.Error` | bad URL/codec/option, encode/decode failure, closed channel |
+
+### Cycle times
+
+`every(None, ...)` sends a message at the period its network description
+gives it: a DBC's `GenMsgCycleTime` (milliseconds) or, for `fibex:`, the
+`REPEATING-TIME-RANGE` of the frame triggering's `CYCLIC-TIMING` (an
+`xs:duration` such as `PT0.01S`, so per channel). A message without one (or
+with a cycle time of 0) raises `hilspy.Error` naming it; other codecs have
+no cycle times. The `Periodic`'s `period` can still be changed afterwards.
+
+```python
+with hilspy.open("can://can0", "dbc:vehicle.dbc") as ecu:
+    speed = ecu.every(None, "VehicleSpeed", {"Speed": 0.0, "Gear": "D"})  # every 10 ms
+```
+
+### Acting as an ECU
+
+`ecu="Name"` (for `dbc:` and `fibex:`) makes the channel one ECU of the
+network:
+
+```python
+with hilspy.open("can://can0", "dbc:vehicle.dbc", ecu="VCU") as vcu:
+    vcu.send("VehicleSpeed", {"Speed": 12.5, "Gear": "D"})  # the VCU transmits it
+    vcu.send("SteeringCmd", {"Enable": 1})  # hilspy.Error: SteeringCmd is sent by ADAS, not VCU
+    for msg in vcu:  # decoded: what the VCU receives; nameless: the rest
+        ...
+```
+
+* Sending: only messages the ECU transmits encode; any other is an encode
+  error naming its transmitter(s).
+* Receiving: only messages the ECU receives decode; the others arrive as
+  nameless messages with their identifier and bytes, like unknown frames.
+* A DBC's transmitters are the `BO_` sender and any `BO_TX_BU_` ones, and its
+  receivers those of the message's signals (`Vector__XXX` is none). A FIBEX
+  frame's are the ECUs whose `CONNECTORS` have an `OUTPUT-PORT` /
+  `INPUT-PORT` with a `FRAME-TRIGGERING-REF` to the channel's triggering of
+  it. ECUs are named by `SHORT-NAME` (`BU_` for a DBC); an unknown name is an
+  error listing the network's ECUs.
+* Decoded messages carry no transmitter field.
 
 ### FIBEX networks
 
@@ -123,7 +162,8 @@ with hilspy.open("can://can0", "fibex:network.xml", channel="Chassis") as ecu:
   is linear or strictly monotonic over its scale (otherwise sending the signal
   fails, naming it). A single linear function with exact texttable entries is
   a plain DBC factor, offset and value table.
-* `strict`, `scaling`, `decode_choices` and `e2e` work as for `dbc:`; frames
+* `strict`, `scaling`, `decode_choices`, `e2e` and `ecu` work as for `dbc:`
+  (see [Acting as an ECU](#acting-as-an-ecu) for FIBEX connectors); frames
   the channel lacks decode as nameless messages. `FORMULA` compu methods,
   nested multiplexing, switched or static PDU instances off bit 0 or
   high-low, and encodings other than those above are rejected when the file

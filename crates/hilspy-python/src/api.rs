@@ -27,7 +27,8 @@ fn duration(seconds: f64, what: &str) -> PyResult<Duration> {
 /// Transports: `can://vcan0` (Linux SocketCAN; `?fd`, `?echo`,
 /// `?filter=0x100:0x700`), `udp://host:port` (`?listen`, `?bind=`),
 /// `tcp://host:port` (`?listen`), `mem://name` (in-process). Codecs: `raw`,
-/// `dbc:FILE` (options `strict`, `scaling`, `decode_choices`), `sbf`.
+/// `dbc:FILE` (options `strict`, `scaling`, `decode_choices`, `e2e`, `ecu`),
+/// `fibex:FILE` (option `channel`, and the `dbc` options), `sbf`, ...
 /// Keyword arguments configure the codec.
 #[pyfunction(name = "_open")]
 #[pyo3(signature = (url, codec = String::from("raw"), *, clock = None, **options))]
@@ -94,18 +95,19 @@ impl Channel {
     }
 
     /// Send a message every `period` seconds from a background thread, for
-    /// `duration` seconds or until stopped.
+    /// `duration` seconds or until stopped. `period=None` uses the message's
+    /// cycle time from the codec's network description (DBC, FIBEX).
     #[pyo3(signature = (period, message, fields = None, *, duration = None))]
     fn every(
         &self,
         py: Python<'_>,
-        period: f64,
+        period: Option<f64>,
         message: &Bound<'_, PyAny>,
         fields: Option<&Bound<'_, PyAny>>,
         duration: Option<f64>,
     ) -> PyResult<Periodic> {
         let message = message_arg(message, fields)?;
-        let period = self::duration(period, "period")?;
+        let period = period.map(|p| self::duration(p, "period")).transpose()?;
         let total = duration
             .map(|d| self::duration(d, "duration"))
             .transpose()?;

@@ -127,3 +127,38 @@ def test_windows_1252(tmp_path: Path, mem: str) -> None:
     path.write_bytes(text.encode("cp1252"))
     with hilspy.open(mem, f"dbc:{path}") as ch:
         assert not ch.closed
+
+
+def test_acts_as_an_ecu(mem: str, vehicle_dbc: str) -> None:
+    # VehicleSpeed: VCU -> ADAS; SteeringCmd: ADAS -> VCU; ImuData: GNSS -> ADAS.
+    with (
+        hilspy.open(mem, vehicle_dbc, ecu="VCU", strict=False) as vcu,
+        hilspy.open(mem, vehicle_dbc, ecu="ADAS", strict=False) as adas,
+        hilspy.open(mem, vehicle_dbc, strict=False) as anyone,
+    ):
+        vcu.send("VehicleSpeed", {"Speed": 1.0})
+        with pytest.raises(hilspy.Error, match="SteeringCmd is sent by ADAS, not VCU"):
+            vcu.send("SteeringCmd", {"SteeringAngle": 1.0})
+        with pytest.raises(hilspy.Error, match="sent by ADAS"):
+            vcu.every(0.01, "SteeringCmd", {"SteeringAngle": 1.0})
+        got = adas.recv(timeout=1)
+        assert got is not None and got.name == "VehicleSpeed"
+        seen = anyone.recv(timeout=1)
+        assert seen is not None and seen.name == "VehicleSpeed"
+        # A VehicleSpeed frame from elsewhere is not one the VCU receives.
+        anyone.send("VehicleSpeed", {"Speed": 2.0})
+        own = vcu.recv(timeout=1)
+        assert own is not None and own.name is None and own.id == 0x100 and own.fields == {}
+        got = adas.recv(timeout=1)
+        assert got is not None and got.name == "VehicleSpeed"
+        # ImuData is for ADAS only: nameless at the VCU, like an unknown frame.
+        anyone.send("ImuData", {"YawRate": 0.5})
+        imu = vcu.recv(timeout=1)
+        assert imu is not None and (imu.name, imu.id) == (None, 0x300)
+        imu = adas.recv(timeout=1)
+        assert imu is not None and imu.name == "ImuData" and imu["YawRate"] == 0.5
+        adas.send("SteeringCmd", {"SteeringAngle": 1.0})
+        steer = vcu.recv(timeout=1)
+        assert steer is not None and steer.name == "SteeringCmd"
+    with pytest.raises(hilspy.Error, match=r'no ECU "BCM" \(ECUs: VCU, ADAS, GNSS\)'):
+        hilspy.open(mem, vehicle_dbc, ecu="BCM")

@@ -70,11 +70,18 @@ fn matches_the_equivalent_dbc() {
     let fibex = load(data("network.xml"), Some("CH_BODY")).unwrap();
     let dbc = Database::from_file(data("network.dbc")).unwrap();
     assert_eq!(fibex.messages.len(), dbc.messages.len());
+    assert_eq!(fibex.nodes, dbc.nodes);
     for d in &dbc.messages {
         let f = fibex.message_by_name(&d.name).unwrap();
         assert_eq!(
-            (f.id, f.extended, f.size, f.fd, &f.comment),
-            (d.id, d.extended, d.size, d.fd, &d.comment),
+            (f.id, f.extended, f.size, f.fd, &f.comment, f.cycle_time),
+            (d.id, d.extended, d.size, d.fd, &d.comment, d.cycle_time),
+            "{}",
+            d.name
+        );
+        assert_eq!(
+            (&f.transmitters, &f.receivers),
+            (&d.transmitters, &d.receivers),
             "{}",
             d.name
         );
@@ -83,6 +90,119 @@ fn matches_the_equivalent_dbc() {
             s.receivers.clear();
         }
         assert_eq!(f.signals, expected, "{}", d.name);
+    }
+}
+
+#[test]
+fn cycle_times_from_cyclic_timings() {
+    let ms = |n| Some(std::time::Duration::from_millis(n));
+    let body = load(data("network.xml"), Some("Body")).unwrap();
+    let cycle = |db: &Database, name: &str| db.message_by_name(name).unwrap().cycle_time;
+    assert_eq!(cycle(&body, "VehicleStatus"), ms(10));
+    assert_eq!(cycle(&body, "SteeringCmd"), None);
+    assert_eq!(cycle(&body, "RadarObjects"), ms(50));
+    // Timing belongs to the triggering: the same frame on the chassis
+    // channel has none.
+    let chassis = load(data("network.xml"), Some("Chassis")).unwrap();
+    assert_eq!(cycle(&chassis, "VehicleStatus"), None);
+    // A zero time is no cycle time; a bad one is an error naming it.
+    let with = |value: &str| {
+        let text = network().replace(
+            "<fx:VALUE>PT0.01S</fx:VALUE>",
+            &format!("<fx:VALUE>{value}</fx:VALUE>"),
+        );
+        variant(&format!("cycle-{}", value.len()), &text)
+    };
+    let path = with("PT0S");
+    assert_eq!(
+        cycle(&load(&path, Some("Body")).unwrap(), "VehicleStatus"),
+        None
+    );
+    std::fs::remove_file(path).unwrap();
+    let path = with("P1M");
+    let e = load_err(&path, Some("Body"));
+    assert!(
+        e.contains("FT_VehicleStatus_Body") && e.contains("\"P1M\""),
+        "{e}"
+    );
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn ecus_from_connector_ports() {
+    let names = |v: &[String]| v.join(",");
+    let chassis = load(data("network.xml"), Some("Chassis")).unwrap();
+    assert_eq!(chassis.nodes, ["Gateway", "Adas", "Radar", "Abs"]);
+    // Ports refer to frame triggerings, so the same frame has other ECUs on
+    // the other channel.
+    let status = chassis.message_by_name("VehicleStatus").unwrap();
+    assert_eq!(
+        (names(&status.transmitters), names(&status.receivers)),
+        ("Gateway".into(), "Abs".into())
+    );
+    let wheels = chassis.message_by_name("WheelSpeeds").unwrap();
+    assert_eq!(
+        (names(&wheels.transmitters), names(&wheels.receivers)),
+        ("Abs".into(), "Gateway".into())
+    );
+    let body = load(data("network.xml"), Some("Body")).unwrap();
+    let radar = body.message_by_name("RadarObjects").unwrap();
+    assert_eq!(
+        (names(&radar.transmitters), names(&radar.receivers)),
+        ("Radar".into(), "Adas".into())
+    );
+    // Several senders; an ECU without a short name is named by its ID;
+    // without ECUs a frame has neither.
+    let text = network()
+        .replace(
+            "<fx:CONNECTOR ID=\"CON_Radar_Body\" xsi:type=\"can:CONNECTOR-TYPE\">\n            <fx:CHANNEL-REF ID-REF=\"CH_BODY\"/>",
+            "<fx:CONNECTOR ID=\"CON_Radar_Body\" xsi:type=\"can:CONNECTOR-TYPE\">\n            <fx:CHANNEL-REF ID-REF=\"CH_BODY\"/>\n            <fx:INPUTS><fx:INPUT-PORT ID=\"IP_X\"><fx:FRAME-TRIGGERING-REF ID-REF=\"FT_SteeringCmd\"/></fx:INPUT-PORT></fx:INPUTS>",
+        )
+        .replace(
+            "<ho:SHORT-NAME>Abs</ho:SHORT-NAME>",
+            "",
+        )
+        .replace(
+            "<fx:OUTPUT-PORT ID=\"OP_Radar_Body_RadarObjects\">",
+            "<fx:OUTPUT-PORT ID=\"OP_Gw_Radar\"><fx:FRAME-TRIGGERING-REF ID-REF=\"FT_VehicleStatus_Body\"/></fx:OUTPUT-PORT><fx:OUTPUT-PORT ID=\"OP_Radar_Body_RadarObjects\">",
+        );
+    let path = variant("ecus", &text);
+    let db = load(&path, Some("Body")).unwrap();
+    assert_eq!(db.nodes, ["Gateway", "Adas", "Radar", "ECU_ABS"]);
+    let status = db.message_by_name("VehicleStatus").unwrap();
+    assert_eq!(names(&status.transmitters), "Gateway,Radar");
+    let steer = db.message_by_name("SteeringCmd").unwrap();
+    assert_eq!(names(&steer.receivers), "Gateway,Radar");
+    std::fs::remove_file(path).unwrap();
+    let text = without(&network(), "<fx:ECUS>", "</fx:ECUS>");
+    let path = variant("no-ecus", &text);
+    let db = load(&path, Some("Body")).unwrap();
+    assert!(db.nodes.is_empty());
+    assert!(db
+        .messages
+        .iter()
+        .all(|m| m.transmitters.is_empty() && m.receivers.is_empty()));
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn xs_durations() {
+    use std::time::Duration;
+    let ok = |s: &str| xs_duration(s).unwrap_or_else(|| panic!("{s}"));
+    assert_eq!(ok("PT0.01S"), Duration::from_millis(10));
+    assert_eq!(ok("PT0.0005S"), Duration::from_micros(500));
+    assert_eq!(ok("PT1.000000001S"), Duration::from_nanos(1_000_000_001));
+    assert_eq!(ok("PT10S"), Duration::from_secs(10));
+    assert_eq!(ok("PT0S"), Duration::ZERO);
+    assert_eq!(ok("PT1M30S"), Duration::from_secs(90));
+    assert_eq!(ok("PT2H"), Duration::from_secs(7200));
+    assert_eq!(ok("P1DT1S"), Duration::from_secs(86_401));
+    assert_eq!(ok("P1D"), Duration::from_secs(86_400));
+    for bad in [
+        "", "P", "PT", "0.01", "PT0.01", "-PT1S", "P1Y", "P1M", "PT1S1M", "PT1.5M", "PT.5S",
+        "PT1..5S", "PTS", "P1DT", "PT1S2S", "pt1s",
+    ] {
+        assert_eq!(xs_duration(bad), None, "{bad}");
     }
 }
 

@@ -35,7 +35,12 @@ real-time process can use it directly.
   transport serves a receiving thread and periodic senders at once.
 * **Codec** (`encode(&mut, &Message)`, `decode(&mut, Packet)`; `Send`): may keep
   state across packets (the SBF decoder reassembles blocks across TCP chunks).
-  The channel holds it behind a mutex.
+  The channel holds it behind a mutex. `cycle_time(&Message)` (default
+  `None`) answers from a network description: `dbc` and `fibex` give the
+  message's `dbc::Message::cycle_time`, which is `GenMsgCycleTime` or the
+  frame triggering's `CYCLIC-TIMING` (`xs:duration`, read with `roxmltree`
+  as afibex skips timings). `Channel::every(None, ..)` takes it as the
+  period and fails with a `Config` error naming the message without one.
 * **Periodic**: one thread per cyclic message with absolute deadlines (no
   drift; a deadline missed by more than a period is skipped). The message is
   encoded on every tick, so time-stamping codecs (`sbf` fills `tow`/`wnc`)
@@ -128,9 +133,18 @@ deadlocking. A Python exception raised in a plugin travels through the core as
   the result becomes the `e2e` field. `every()` sends its first message
   itself instead of dry-run encoding it, so stateful codecs (E2E counters,
   sequence numbers) never lose a value.
+* `dbc` + `ecu`: `dbc::Message` keeps its `transmitters` (`BO_` and
+  `BO_TX_BU_`) and `receivers` (its signals' receivers), and
+  `Database::ecus` lists the nodes plus any ECU they name. With the option,
+  `encode` refuses a message the ECU does not transmit and `decode` returns
+  a frame it does not receive as a nameless message, before any E2E check.
+  No transmitter field is added to decoded messages: it would change every
+  decoded field set and what a decoded message re-encodes (strict mode).
 * `fibex`: `afibex` parses channels, frames, PDUs, signals and coded types;
   `roxmltree` reads, by element ID, what it leaves out (frame triggerings
-  with identifier, extended addressing and CAN FD; compu methods with
+  with identifier, extended addressing, CAN FD and cyclic timing; ECU
+  connectors, whose input and output ports' `FRAME-TRIGGERING-REF`s become
+  each message's receivers and transmitters; compu methods with
   scale limits, rational coefficients and texttable names, physical
   constraints and units). `fibex::load` turns one channel into a `dbc`
   `Database` (each signal's PDU bits mapped through its PDU instance to

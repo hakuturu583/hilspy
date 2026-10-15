@@ -81,7 +81,7 @@ class _Channel:
     def recv(self, timeout: float | None = None) -> Message | None: ...
     def every(
         self,
-        period: float,
+        period: float | None,
         message: Message | str,
         fields: Mapping[str, Value] | None = None,
         *,

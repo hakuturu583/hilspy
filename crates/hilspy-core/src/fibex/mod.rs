@@ -6,7 +6,10 @@
 //! instances, PDUs with their signal instances, signals and the coded types
 //! of codings. What it leaves out is read from the same document with
 //! `roxmltree`, by element ID: the frame triggerings of a channel (CAN
-//! identifier, extended addressing, CAN FD) and the compu methods of a coding
+//! identifier, extended addressing, CAN FD, the `CYCLIC-TIMING` that becomes
+//! the message's cycle time), the connectors of the ECUs (the `OUTPUT-PORT`s
+//! and `INPUT-PORT`s that refer to a frame triggering make its message's
+//! transmitters and receivers; the ECUs are the database's nodes) and the compu methods of a coding
 //! (scales with their limits, rational coefficients and texttable names,
 //! physical constraints, units).
 //!
@@ -49,6 +52,7 @@
 use std::collections::HashMap;
 use std::ops::Bound;
 use std::path::Path;
+use std::time::Duration;
 
 use afibex::fibex::{
     BaseDataType, Category, Encoding, FibexData, Pdu, PduInstance, SignalInstance,
@@ -90,7 +94,66 @@ pub fn load(path: impl AsRef<Path>, channel: Option<&str>) -> Result<Database> {
         .descendants()
         .filter_map(|n| Some((attr(n, "ID")?, n)))
         .collect();
-    Network { data: &data, ids }.database(channel)
+    let (ecus, ports) = ecus(&xml);
+    Network {
+        data: &data,
+        ids,
+        ecus,
+        ports,
+    }
+    .database(channel)
+}
+
+/// The ECUs that send and receive a frame triggering, by name.
+#[derive(Default)]
+struct Ports {
+    outputs: Vec<String>,
+    inputs: Vec<String>,
+}
+
+/// The ECUs of the file by name (`SHORT-NAME`, else `ID`), and the ports of
+/// their connectors by frame triggering ID (`OUTPUT-PORT` /
+/// `INPUT-PORT` `FRAME-TRIGGERING-REF`s). `afibex` skips connectors.
+fn ecus<'a>(xml: &'a Document<'_>) -> (Vec<String>, HashMap<&'a str, Ports>) {
+    let mut names = Vec::new();
+    let mut ports: HashMap<&str, Ports> = HashMap::new();
+    let ecu_elements = xml.descendants().filter(|n| {
+        n.is_element()
+            && n.tag_name().name() == "ECU"
+            && n.parent_element()
+                .is_some_and(|p| p.tag_name().name() == "ECUS")
+    });
+    for ecu in ecu_elements {
+        let Some(name) = child(ecu, "SHORT-NAME")
+            .map(text)
+            .filter(|n| !n.is_empty())
+            .or_else(|| attr(ecu, "ID"))
+        else {
+            continue;
+        };
+        if !names.iter().any(|n| n == name) {
+            names.push(name.to_owned());
+        }
+        for port in ecu.descendants().filter(|n| n.is_element()) {
+            let output = match port.tag_name().name() {
+                "OUTPUT-PORT" => true,
+                "INPUT-PORT" => false,
+                _ => continue,
+            };
+            for t in children(port, "FRAME-TRIGGERING-REF").filter_map(|r| attr(r, "ID-REF")) {
+                let p = ports.entry(t).or_default();
+                let list = if output {
+                    &mut p.outputs
+                } else {
+                    &mut p.inputs
+                };
+                if !list.iter().any(|n| n == name) {
+                    list.push(name.to_owned());
+                }
+            }
+        }
+    }
+    (names, ports)
 }
 
 /// The value of an attribute by local name (any namespace).
@@ -125,10 +188,14 @@ fn number(n: Node<'_, '_>, what: &str) -> Result<f64> {
 
 /// A frame triggering: how a channel carries a frame.
 struct Triggering {
+    /// The triggering's own `ID`.
+    tid: String,
     id: u32,
     extended: bool,
     fd: bool,
     frame: String,
+    /// The `REPEATING-TIME-RANGE` of its first `CYCLIC-TIMING`.
+    cycle_time: Option<Duration>,
 }
 
 /// The physical meaning of a coding: its scales, range and unit.
@@ -257,6 +324,10 @@ struct Network<'d, 'a, 'i> {
     data: &'d FibexData,
     /// Elements by `ID` attribute.
     ids: HashMap<&'a str, Node<'a, 'i>>,
+    /// ECU names, in document order.
+    ecus: Vec<String>,
+    /// The sending and receiving ECUs by frame triggering ID.
+    ports: HashMap<&'a str, Ports>,
 }
 
 impl Network<'_, '_, '_> {
@@ -276,7 +347,7 @@ impl Network<'_, '_, '_> {
                 messages.push(self.message(&t)?);
             }
         }
-        Database::new(String::new(), Vec::new(), messages).map_err(|e| match e {
+        Database::new(String::new(), self.ecus.clone(), messages).map_err(|e| match e {
             Error::DbcParse(m) => bad(format!("channel {channel}: {m}")),
             e => e,
         })
@@ -396,10 +467,19 @@ impl Network<'_, '_, '_> {
             extended: t.extended,
             name,
             size,
-            transmitter: None,
+            transmitters: self
+                .ports
+                .get(t.tid.as_str())
+                .map(|p| p.outputs.clone())
+                .unwrap_or_default(),
+            receivers: self
+                .ports
+                .get(t.tid.as_str())
+                .map(|p| p.inputs.clone())
+                .unwrap_or_default(),
             signals: out,
             comment: frame.desc.clone(),
-            cycle_time_ms: None,
+            cycle_time: t.cycle_time,
             fd: t.fd || size > 8,
         })
     }
@@ -887,11 +967,86 @@ fn triggering(t: Node<'_, '_>) -> Result<Option<Triggering>> {
         .and_then(|f| attr(f, "ID-REF"))
         .ok_or_else(|| bad(format!("frame triggering {tid} has no FRAME-REF")))?;
     Ok(Some(Triggering {
+        tid: tid.to_owned(),
         id,
         extended,
         fd,
         frame: frame.to_owned(),
+        cycle_time: cycle_time(t, tid)?,
     }))
+}
+
+/// The cycle time of a frame triggering: the `VALUE` of the
+/// `REPEATING-TIME-RANGE` of its first `TIMINGS/CYCLIC-TIMING`; `None`
+/// without one, or for a zero time (as a DBC `GenMsgCycleTime` of 0).
+fn cycle_time(t: Node<'_, '_>, tid: &str) -> Result<Option<Duration>> {
+    let Some(value) = children(t, "TIMINGS")
+        .flat_map(|n| children(n, "CYCLIC-TIMING"))
+        .find_map(|n| child(n, "REPEATING-TIME-RANGE"))
+        .and_then(|n| child(n, "VALUE"))
+    else {
+        return Ok(None);
+    };
+    let s = text(value);
+    let d = xs_duration(s).ok_or_else(|| {
+        bad(format!(
+            "frame triggering {tid}: cycle time {s:?} is not a duration of days, hours, \
+             minutes and seconds such as PT0.01S"
+        ))
+    })?;
+    Ok((!d.is_zero()).then_some(d))
+}
+
+/// An XML Schema `xs:duration` of days, hours, minutes and (fractional)
+/// seconds, such as `PT0.01S` or `P1DT2H`. Years and months, which have no
+/// fixed length, and negative durations are `None`.
+fn xs_duration(s: &str) -> Option<Duration> {
+    let rest = s.strip_prefix('P')?;
+    let (date, time) = match rest.split_once('T') {
+        Some((d, t)) if !t.is_empty() => (d, Some(t)),
+        Some(_) => return None,
+        None => (rest, None),
+    };
+    if date.is_empty() && time.is_none() {
+        return None;
+    }
+    let mut total = Duration::ZERO;
+    // Components in order, each at most once: (designator, seconds each,
+    // whether a fraction is allowed).
+    let mut parse = |part: &str, units: &[(char, u64, bool)]| -> Option<()> {
+        let mut part = part;
+        let mut units = units.iter();
+        while !part.is_empty() {
+            let end = part.find(|c: char| !c.is_ascii_digit() && c != '.')?;
+            let (number, designator) = (&part[..end], part[end..].chars().next()?);
+            let &(_, seconds, fraction) = units.find(|(d, _, _)| *d == designator)?;
+            if number.is_empty() || (!fraction && number.contains('.')) {
+                return None;
+            }
+            let (whole, frac) = number.split_once('.').unwrap_or((number, ""));
+            if whole.is_empty() || frac.contains('.') {
+                return None;
+            }
+            // Exact decimal: whole seconds, then the fraction in nanoseconds.
+            let whole: u64 = whole.parse().ok()?;
+            let nanos: u64 = format!("{:0<9}", frac.get(..frac.len().min(9))?)
+                .parse()
+                .ok()?;
+            let part_total = Duration::from_secs(whole.checked_mul(seconds)?)
+                .checked_add(Duration::from_nanos(nanos.checked_mul(seconds)?))?;
+            total = total.checked_add(part_total)?;
+            part = &part[end + 1..];
+        }
+        Some(())
+    };
+    parse(date, &[('D', 86_400, false)])?;
+    if let Some(time) = time {
+        parse(
+            time,
+            &[('H', 3_600, false), ('M', 60, false), ('S', 1, true)],
+        )?;
+    }
+    Some(total)
 }
 
 #[cfg(test)]
