@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import sys
-import tty
 
 import pytest
 
@@ -14,6 +13,8 @@ pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="uses a Linux ps
 
 
 def test_sbf_over_a_serial_port() -> None:
+    import tty  # Unix only: importing it at module level breaks collection on Windows
+
     master, slave = os.openpty()
     tty.setraw(master)
     path = os.ttyname(slave)
