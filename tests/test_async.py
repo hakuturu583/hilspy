@@ -212,3 +212,74 @@ def test_dropping_a_merge_stops_its_threads() -> None:
     time.sleep(0.3)
     assert calls == settled, "the receive thread is still running"
     assert ch.recv(timeout=0) is None  # the channel is free again
+
+
+def test_arecv_with_zero_timeout_returns_a_waiting_message(mem: str) -> None:
+    async def main() -> None:
+        async with hilspy.open(mem) as rx, hilspy.open(mem) as tx:
+            assert await rx.arecv(timeout=0) is None  # subscribes
+            await tx.asend(Message(data=b"x"))
+            for _ in range(500):  # until the receive thread has queued it
+                m = await rx.arecv(timeout=0)
+                if m is not None:
+                    break
+                await asyncio.sleep(0.01)
+            assert m is not None and m.data == b"x"
+
+    run(main())
+
+
+def test_closing_a_merge_wakes_its_iterators(mem: str) -> None:
+    import threading
+
+    async def main() -> None:
+        async with hilspy.open(mem) as ch:
+            merged = hilspy.merge(ch)
+
+            async def consume() -> list[Message]:
+                return [m async for _, m in merged]
+
+            task = asyncio.create_task(consume())
+            await asyncio.sleep(0.1)
+            merged.close()
+            assert await asyncio.wait_for(task, 5) == []
+
+    run(main())
+    with hilspy.open(f"{mem}-sync") as ch:
+        merged = hilspy.merge(ch)
+        out: list[object] = []
+        t = threading.Thread(target=lambda: out.extend(merged))
+        t.start()
+        time.sleep(0.1)
+        merged.close()
+        t.join(timeout=5)
+        assert not t.is_alive() and out == []
+        assert list(merged) == []  # closed: no new subscriptions
+        assert ch.recv(timeout=0) is None
+
+
+def test_a_failing_transport_is_retried_slowly() -> None:
+    calls = 0
+
+    class Broken:
+        def __init__(self, address: str, options: dict[str, str]) -> None:
+            pass
+
+        def send(self, packet: Message) -> None:
+            pass
+
+        def recv(self, timeout: float | None) -> Message | None:
+            nonlocal calls
+            calls += 1
+            raise ConnectionError("link down")
+
+    hilspy.register_transport("broken", Broken)
+
+    async def main() -> None:
+        async with hilspy.open("broken://x") as ch:
+            with pytest.raises(ConnectionError):
+                await ch.arecv(timeout=5)
+            await asyncio.sleep(0.5)
+
+    run(main())
+    assert calls <= 15, f"{calls} receive attempts in ~0.5 s"

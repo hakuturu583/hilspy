@@ -30,6 +30,8 @@ Value = Any
 #: How long a blocking wait sleeps between checks for Ctrl-C.
 _POLL = 0.1
 _live: weakref.WeakSet[Channel] = weakref.WeakSet()
+#: Put into a merge's queue by close() to wake its iterator.
+_WAKE: Any = object()
 
 
 @atexit.register
@@ -156,8 +158,12 @@ class Channel:
             raise Error("the channel is closed")
         q = self._async_queue()
         try:
-            item = await (q.get() if timeout is None else asyncio.wait_for(q.get(), timeout))
-        except asyncio.TimeoutError:
+            if timeout is not None and timeout <= 0:
+                # wait_for(..., 0) would cancel the get before it runs.
+                item = q.get_nowait()
+            else:
+                item = await (q.get() if timeout is None else asyncio.wait_for(q.get(), timeout))
+        except (asyncio.TimeoutError, asyncio.QueueEmpty):
             return None
         if item is None:
             self._ended = True
@@ -215,6 +221,8 @@ class merge:
         self._open = len(channels)
         self._sync: queue.Queue[tuple[Channel, object]] | None = None
         self._async: asyncio.Queue[tuple[Channel, object]] | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._closed = False
 
     def _start(self, put: Callable[[tuple[Channel, object]], object]) -> None:
         started: list[Channel] = []
@@ -247,9 +255,19 @@ class merge:
         return ch, item
 
     def close(self) -> None:
-        """Stop receiving; the channels stay open."""
+        """Stop receiving; the channels stay open. Iteration in progress
+        (another thread or task) ends."""
+        self._closed = True
         for ch in self._channels:
             ch._release()
+        # Wake a waiting iterator.
+        if self._sync is not None:
+            self._sync.put((_WAKE, None))
+        if self._async is not None and self._loop is not None:
+            try:
+                self._loop.call_soon_threadsafe(self._async.put_nowait, (_WAKE, None))
+            except RuntimeError:  # the event loop is closed
+                pass
 
     def __del__(self) -> None:
         # The channels may outlive this merge: stop feeding its queue.
@@ -261,16 +279,20 @@ class merge:
     # --- synchronous ------------------------------------------------------
 
     def __iter__(self) -> Iterator[tuple[Channel, Message]]:
+        if self._closed:
+            return
         if self._sync is None:
             q: queue.Queue[tuple[Channel, object]] = queue.Queue()
             self._start(q.put)
             self._sync = q
         sync = self._sync
-        while self._open > 0:
+        while self._open > 0 and not self._closed:
             try:
                 ch, item = sync.get(timeout=_POLL)  # a timeout keeps Ctrl-C working
             except queue.Empty:
                 continue
+            if ch is _WAKE:
+                return
             pair = self._handle(ch, item)
             if pair is not None:
                 yield pair
@@ -292,14 +314,18 @@ class merge:
         return self._aiter()
 
     async def _aiter(self) -> AsyncIterator[tuple[Channel, Message]]:
+        if self._closed:
+            return
         if self._async is None:
             loop = asyncio.get_running_loop()
             q: asyncio.Queue[tuple[Channel, object]] = asyncio.Queue()
             self._start(lambda pair: loop.call_soon_threadsafe(q.put_nowait, pair))
-            self._async = q
+            self._async, self._loop = q, loop
         aq = self._async
-        while self._open > 0:
+        while self._open > 0 and not self._closed:
             ch, item = await aq.get()
+            if ch is _WAKE:
+                return
             pair = self._handle(ch, item)
             if pair is not None:
                 yield pair

@@ -133,23 +133,30 @@ impl Channel {
         let thread = std::thread::Builder::new()
             .name("hilspy-subscription".into())
             .spawn(move || {
+                let mut backoff = Duration::ZERO;
                 while !flag.load(Ordering::Acquire) {
                     match channel.recv(Some(SUBSCRIPTION_POLL)) {
                         Ok(Some(m)) => {
+                            backoff = Duration::ZERO;
                             if !deliver(Ok(m)) {
                                 break;
                             }
                         }
-                        Ok(None) => {}
+                        Ok(None) => backoff = Duration::ZERO,
                         Err(Error::Closed) => {
                             deliver(Err(Error::Closed));
                             break;
                         }
-                        // A packet that does not decode does not end the stream.
+                        // A packet that does not decode does not end the
+                        // stream; an error that repeats at once (a failing
+                        // transport) is retried ever more slowly, so it
+                        // neither spins nor floods the consumer.
                         Err(e) => {
                             if !deliver(Err(e)) {
                                 break;
                             }
+                            sleep_unless_stopped(&flag, backoff);
+                            backoff = (backoff * 2).clamp(ERROR_BACKOFF_MIN, ERROR_BACKOFF_MAX);
                         }
                     }
                 }
@@ -175,6 +182,22 @@ impl Channel {
 
 /// How often a subscription thread checks whether it was stopped.
 const SUBSCRIPTION_POLL: Duration = Duration::from_millis(50);
+/// Delay before retrying after consecutive receive errors (doubling from the
+/// first to the second value; the first error is retried at once).
+const ERROR_BACKOFF_MIN: Duration = Duration::from_millis(10);
+const ERROR_BACKOFF_MAX: Duration = Duration::from_secs(1);
+
+/// Sleep `total`, waking early once `stop` is set.
+fn sleep_unless_stopped(stop: &AtomicBool, total: Duration) {
+    let end = Instant::now() + total;
+    while !stop.load(Ordering::Acquire) {
+        let now = Instant::now();
+        if now >= end {
+            break;
+        }
+        std::thread::sleep((end - now).min(SUBSCRIPTION_POLL));
+    }
+}
 
 /// A running [`Channel::subscribe`]; dropping it stops it.
 pub struct Subscription {
@@ -509,6 +532,38 @@ mod tests {
         subs[0].stop();
         assert!(!subs[0].is_running());
         assert!(buses[1].subscribe(|_| true).is_err());
+    }
+
+    #[test]
+    fn persistent_receive_errors_back_off() {
+        struct Failing;
+        impl Transport for Failing {
+            fn send(&self, _: &Packet) -> Result<()> {
+                Ok(())
+            }
+            fn recv(&self, _: Option<Duration>) -> Result<Option<Packet>> {
+                Err(Error::Decode("broken".into()))
+            }
+        }
+        let ch = Channel::new(
+            Arc::new(Failing),
+            codec::open("raw", Options::new()).unwrap(),
+        );
+        let errors = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let count = Arc::clone(&errors);
+        let sub = ch
+            .subscribe(move |m| {
+                assert!(m.is_err());
+                count.fetch_add(1, Ordering::Relaxed);
+                true
+            })
+            .unwrap();
+        std::thread::sleep(Duration::from_millis(500));
+        sub.stop();
+        // 0 + 10 + 20 + 40 + 80 + 160 ms ... : about 7 errors in 500 ms,
+        // not millions.
+        let n = errors.load(Ordering::Relaxed);
+        assert!((2..=12).contains(&n), "{n} errors");
     }
 
     #[test]
