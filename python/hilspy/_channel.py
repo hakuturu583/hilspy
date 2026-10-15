@@ -344,7 +344,8 @@ def open(url: str, codec: str = "raw", *, clock: Clock | None = None, **options:
     ``tcp://host:port`` (``?listen``), ``mem://name`` (in-process),
     ``file://path`` (``?write``), ``serial:///dev/ttyUSB0`` (``?baud=``,
     ``parity``, ...). Codecs: ``raw``, ``dbc:FILE`` (options
-    ``strict``, ``scaling``, ``decode_choices``), ``sbf``, ``lidar:MODEL``
+    ``strict``, ``scaling``, ``decode_choices``), ``sbf``, ``nmea``
+    (option ``talker``), ``ubx``, ``rtcm``, ``lidar:MODEL``
     (Hesai/Velodyne data packets <-> ``scan`` point clouds; options
     ``frame``, ``phase``, ``rpm``, ``return_mode``, ``pace``, ``profiles``). Keyword
     arguments configure the codec.

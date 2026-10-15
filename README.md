@@ -30,6 +30,9 @@ with hilspy.open("can://vcan0", "dbc:vehicle.dbc") as ecu:
 | `raw` (default) | none: messages carry `data` (and `id` for CAN) |
 | `dbc:FILE` | CAN frames <-> DBC messages, via [`can-dbc`](https://crates.io/crates/can-dbc) (options `strict`, `scaling`, `decode_choices`) |
 | `sbf` | Septentrio Binary Format stream <-> blocks, via [`libsbf`](https://crates.io/crates/libsbf); encodes `PVTGeodetic` and `AttEuler` |
+| `nmea` | NMEA 0183 sentences <-> messages via [`nmea`](https://crates.io/crates/nmea) (`GGA`, `RMC`, `GSV`, ...); encodes `GGA`, `RMC`, `VTG`, `HDT`, `ZDA` |
+| `ubx` | u-blox UBX frames <-> messages via [`ublox`](https://crates.io/crates/ublox) (`NAV-PVT`, `NAV-ATT`, `MON-VER`, ...); encodes `NAV-PVT` |
+| `rtcm` | RTCM 3 corrections <-> messages via [`rtcm-rs`](https://crates.io/crates/rtcm-rs) (`1005`, `1077`, ...), both ways for every message it knows |
 | `lidar:MODEL` | LiDAR UDP data packets <-> point clouds: Hesai and Velodyne line-ups, described by [profiles](#lidar-hesai-velodyne) |
 
 ## Install
@@ -142,6 +145,27 @@ with hilspy.open("tcp://0.0.0.0:28784?listen", "sbf") as receiver:
     receiver.send("AttEuler", {"heading": 90.0, "pitch": 0.0, "roll": 0.0})
     # tow/wnc default to the current GPS time
 ```
+
+### GNSS receivers (NMEA, UBX, RTCM) over serial
+
+```python
+clock = hilspy.Clock(start=time.time())
+gps = hilspy.open("serial:///dev/ttyUSB0?baud=115200", "nmea", talker="GN", clock=clock)
+fix = gps.every(
+    0.1, "GGA", {"latitude": lat, "longitude": lon, "fix_type": "Rtk", "fix_satellites": 14}
+)
+
+ublox = hilspy.open("serial:///dev/ttyACM0", "ubx")
+for msg in ublox:  # interleaved NMEA is skipped
+    if msg.name == "NAV-PVT":
+        print(msg["lat"], msg["lon"], msg["fix_type"])
+```
+
+Decoded fields are the parsing crate's (names and units, e.g. NAV-PVT in
+degrees, metres and m/s); encoding takes the same fields, so a received
+sentence or packet can be sent on, edited or not. Times default to the
+message's time (the channel's clock). Repeated records (GSV satellites, MSM
+signal data) arrive as lists of dicts.
 
 ### LiDAR (Hesai, Velodyne)
 

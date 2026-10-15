@@ -120,6 +120,14 @@ deadlocking. A Python exception raised in a plugin travels through the core as
   `libsbf::parse_datagram` and `sbf/fields.rs` maps common navigation blocks to
   fields. Encoders follow the SBF reference layouts (PVTGeodetic rev 2,
   AttEuler rev 1).
+* `nmea`, `ubx`, `rtcm`: stream framing per packet source (sentences to
+  `\n`; UBX sync, length and Fletcher checksum; RTCM through
+  `rtcm_rs::next_msg_frame`), then the `nmea`, `ublox` and `rtcm-rs` crates
+  parse; their serde representation becomes the fields (`value::from_json`:
+  numeric arrays become typed arrays, other arrays `Value::List`). RTCM
+  encodes through the crate as well (`to_json` -> serde -> `MessageBuilder`);
+  the crates do not write NMEA sentences or NAV-PVT, so those encoders are
+  ours, cross-checked against pynmeagps and pyubx2 in the tests.
 * `lidar:MODEL`: data-driven. A sensor is a **profile**
   (`crates/hilspy-core/lidar/lidar_profile.proto`): the packet layout
   (size, constant/verified bytes, blocks of `azimuth + units`, unit layout,
@@ -152,6 +160,6 @@ step turns ground truth (CARLA ego pose and velocity) into device traffic
 (`tcp://...?listen` + `sbf` for a GNSS receiver, `can://` + `dbc:` cyclic
 messages via `every()`), and decodes the device under test's output back into
 observations. Next: serial transport, E2E counters/CRCs in cyclic messages,
-candump/BLF logs, more formats (NMEA, UBX, RTCM) behind the same traits.
+candump/BLF logs behind the same traits.
 A simulated LiDAR is `udp://driver:2368` + `lidar:MODEL`, sending the
 raycast point cloud of each revolution.

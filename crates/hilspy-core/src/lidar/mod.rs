@@ -12,7 +12,6 @@
 //! revolution ([`Model::encode`]).
 
 mod packet;
-mod time;
 
 use std::path::Path;
 use std::sync::OnceLock;

@@ -50,7 +50,7 @@ jobs:
           # pull in packages the package itself may not declare.
           python -m pip install dist/*.whl
           python -c "import hilspy; print(hilspy.__version__)"
-          python -m pip install pytest cantools numpy tomli
+          python -m pip install pytest cantools numpy pynmeagps pyubx2 pyrtcm tomli
           cd tests && python -m pytest -q -p no:cacheprovider .
       - uses: actions/upload-artifact@v4
         with:
@@ -74,7 +74,7 @@ jobs:
         run: |
           python -m pip install dist/*.tar.gz
           python -c "import hilspy; print(hilspy.__version__)"
-          python -m pip install pytest cantools numpy
+          python -m pip install pytest cantools numpy pynmeagps pyubx2 pyrtcm
           cd tests && python -m pytest -q -p no:cacheprovider .
       - uses: actions/upload-artifact@v4
         with:

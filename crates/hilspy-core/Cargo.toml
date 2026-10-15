@@ -12,6 +12,10 @@ can-dbc.workspace = true
 libsbf.workspace = true
 prost.workspace = true
 serialport.workspace = true
+nmea.workspace = true
+ublox.workspace = true
+rtcm-rs.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
@@ -23,5 +27,8 @@ prost-build.workspace = true
 protox.workspace = true
 
 [dev-dependencies]
+rand.workspace = true
+# Random valid RTCM messages for round-trip tests.
+rtcm-rs = { workspace = true, features = ["test_gen"] }
 prost-reflect.workspace = true
 protox.workspace = true

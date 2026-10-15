@@ -5,14 +5,20 @@
 //! | `raw` | none: every packet is a nameless message carrying its data |
 //! | `dbc:FILE` | CAN frames <-> DBC messages (options `strict`, `scaling`, `decode_choices`) |
 //! | `sbf` | a Septentrio Binary Format byte stream <-> SBF blocks |
+//! | `nmea` | NMEA 0183 sentences <-> messages (`GGA`, `RMC`, ...) |
+//! | `ubx` | u-blox UBX frames <-> messages (`NAV-PVT`, ...) |
+//! | `rtcm` | RTCM 3 frames <-> messages (`1005`, `1077`, ...) |
 //! | `lidar:MODEL` | LiDAR data packets <-> point clouds (Hesai, Velodyne, or a profile file) |
 //!
 //! Other codecs are added with [`register`].
 
 mod dbc;
 mod lidar;
+mod nmea;
 mod raw;
+mod rtcm;
 mod sbf;
+mod ubx;
 
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock, RwLock};
@@ -56,6 +62,18 @@ fn registry() -> &'static RwLock<HashMap<String, Factory>> {
         m.insert(
             "lidar".into(),
             Arc::new(|s| Ok(Box::new(lidar::Lidar::open(s)?) as Box<dyn Codec>)),
+        );
+        m.insert(
+            "nmea".into(),
+            Arc::new(|s| Ok(Box::new(nmea::Nmea::open(s)?) as Box<dyn Codec>)),
+        );
+        m.insert(
+            "ubx".into(),
+            Arc::new(|s| Ok(Box::new(ubx::Ubx::open(s)?) as Box<dyn Codec>)),
+        );
+        m.insert(
+            "rtcm".into(),
+            Arc::new(|s| Ok(Box::new(rtcm::Rtcm::open(s)?) as Box<dyn Codec>)),
         );
         m.insert(
             "sbf".into(),

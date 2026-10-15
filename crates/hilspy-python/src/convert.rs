@@ -36,7 +36,8 @@ pub(crate) fn value_from_py(obj: &Bound<'_, PyAny>) -> PyResult<Value> {
     }
 }
 
-/// A list or tuple of numbers: an int64 array if all are ints, else float64.
+/// A list or tuple: an int64 array if all are ints, a float64 array if all
+/// are numbers, else a list of values.
 fn sequence_from_py(obj: &Bound<'_, PyAny>) -> PyResult<Value> {
     let items: Vec<Bound<'_, PyAny>> = obj.try_iter()?.collect::<PyResult<_>>()?;
     if items
@@ -46,14 +47,16 @@ fn sequence_from_py(obj: &Bound<'_, PyAny>) -> PyResult<Value> {
         let v = items.iter().map(|i| i.extract()).collect::<PyResult<_>>()?;
         return Ok(Value::Array(Array::I64(v)));
     }
-    let v = items
+    let numbers = items
         .iter()
-        .map(|i| {
-            i.extract::<f64>()
-                .map_err(|_| PyTypeError::new_err("a sequence field must hold only numbers"))
-        })
-        .collect::<PyResult<_>>()?;
-    Ok(Value::Array(Array::F64(v)))
+        .all(|i| !i.is_instance_of::<PyString>() && i.extract::<f64>().is_ok());
+    if numbers {
+        let v = items.iter().map(|i| i.extract()).collect::<PyResult<_>>()?;
+        return Ok(Value::Array(Array::F64(v)));
+    }
+    // Anything else (dicts, strings, nested lists) is a list of values.
+    let v = items.iter().map(value_from_py).collect::<PyResult<_>>()?;
+    Ok(Value::List(v))
 }
 
 fn chunks<const N: usize, T>(b: &[u8], f: impl Fn([u8; N]) -> T) -> Vec<T> {
@@ -153,6 +156,13 @@ pub(crate) fn value_to_py<'py>(py: Python<'py>, v: &Value) -> PyResult<Bound<'py
         Value::Str(s) => s.into_pyobject(py)?.into_any(),
         Value::Map(m) => fields_to_py(py, m)?.into_any(),
         Value::Array(a) => array_to_py(py, a)?,
+        Value::List(l) => {
+            let items = l
+                .iter()
+                .map(|v| value_to_py(py, v))
+                .collect::<PyResult<Vec<_>>>()?;
+            PyList::new(py, items)?.into_any()
+        }
     })
 }
 

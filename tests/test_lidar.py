@@ -167,7 +167,7 @@ def test_errors(mem: str, tmp_path: Path) -> None:
             lidar.send("scan", {"x": [1.0]})
         with pytest.raises(hilspy.Error, match="finite"):
             lidar.send("scan", {**ring(), "timestamp": float("nan")})
-        with pytest.raises(TypeError, match="numbers"):
+        with pytest.raises(hilspy.Error, match="numbers"):
             lidar.send("scan", {"x": [1.0, "a"], "y": [0.0], "z": [0.0]})
         raw.send(hilspy.Message(data=b"\x00" * 64))
         with pytest.raises(hilspy.Error, match="not a pandar_xt32 data packet"):

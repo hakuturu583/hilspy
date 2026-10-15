@@ -16,11 +16,9 @@ __version__: str
 class Error(Exception): ...
 
 #: A field value: decoded values, and what ``send`` accepts. Numeric arrays
-#: decode as ``array.array``; ``send`` also takes lists, tuples and numpy
-#: arrays of numbers.
-Value: TypeAlias = (
-    None | bool | int | float | str | Mapping[str, Any] | array[Any] | Sequence[float]
-)
+#: decode as ``array.array`` (``send`` also takes lists, tuples and numpy
+#: arrays of numbers); other sequences (satellite records, ...) as lists.
+Value: TypeAlias = None | bool | int | float | str | Mapping[str, Any] | array[Any] | Sequence[Any]
 BytesLike: TypeAlias = bytes | bytearray | memoryview | Sequence[int]
 
 class Message:
