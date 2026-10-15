@@ -12,7 +12,6 @@ from __future__ import annotations
 import asyncio
 import atexit
 import queue
-import sys
 import threading
 import weakref
 from collections.abc import AsyncIterator, Callable, Iterator, Mapping
@@ -20,11 +19,6 @@ from types import TracebackType
 from typing import Any
 
 from hilspy._hilspy import Error, Message, Periodic, _Channel, _open, _Subscription
-
-if sys.version_info >= (3, 11):
-    from typing import Self
-else:
-    from typing_extensions import Self
 
 Value = Any
 #: How long a blocking wait sleeps between checks for Ctrl-C.
@@ -127,7 +121,7 @@ class Channel:
     def closed(self) -> bool:
         return self._inner.closed
 
-    def __enter__(self) -> Self:
+    def __enter__(self) -> Channel:
         return self
 
     def __exit__(
@@ -172,7 +166,7 @@ class Channel:
         assert isinstance(item, Message)
         return item
 
-    async def __aenter__(self) -> Self:
+    async def __aenter__(self) -> Channel:
         return self
 
     async def __aexit__(
@@ -297,7 +291,7 @@ class merge:
             if pair is not None:
                 yield pair
 
-    def __enter__(self) -> Self:
+    def __enter__(self) -> merge:
         return self
 
     def __exit__(
@@ -330,7 +324,7 @@ class merge:
             if pair is not None:
                 yield pair
 
-    async def __aenter__(self) -> Self:
+    async def __aenter__(self) -> merge:
         return self
 
     async def __aexit__(
