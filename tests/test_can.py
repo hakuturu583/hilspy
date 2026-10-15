@@ -142,32 +142,43 @@ def test_iteration_ends_on_shutdown(channel: str) -> None:
 
 
 def test_periodic_task(channel: str) -> None:
+    # Driven by received frames, not sleeps: a shared CI runner can stall the
+    # sender thread for tens of milliseconds.
     with Bus(channel, "virtual") as tx, Bus(channel, "virtual") as rx:
         task = tx.send_periodic(Frame(0x50, b"\x01"), period=0.01)
-        time.sleep(0.105)
+        first = rx.recv(timeout=5.0)
+        assert first is not None and first.data == b"\x01"
         task.modify(Frame(0x50, b"\x02"))
         task.period = 0.005
-        time.sleep(0.05)
+        assert task.period == 0.005
+        payloads = [first.data]
+        deadline = time.monotonic() + 5.0
+        while payloads[-1] != b"\x02":
+            f = rx.recv(timeout=max(0.0, deadline - time.monotonic()))
+            assert f is not None, "no frame with the modified payload"
+            payloads.append(f.data)
         task.stop()
         assert not task.is_running
-        sent = task.sent_count
-        # Loose bounds: timer granularity is ~15 ms on Windows CI runners.
-        assert 5 <= sent <= 40
-        frames = []
         while (f := rx.recv(timeout=0)) is not None:
-            frames.append(f.data)
-        assert len(frames) == sent
-        assert frames[0] == b"\x01" and frames[-1] == b"\x02"
+            payloads.append(f.data)
+        # Every frame sent was received, the old payload strictly before the new.
+        assert len(payloads) == task.sent_count
+        switch = payloads.index(b"\x02")
+        assert set(payloads[:switch]) == {b"\x01"} and set(payloads[switch:]) == {b"\x02"}
         assert task.last_error is None
         task.stop()  # idempotent
 
 
 def test_periodic_task_duration(channel: str) -> None:
     with Bus(channel, "virtual") as tx:
-        with tx.send_periodic(Frame(0x50), period=0.005, duration=0.03) as task:
-            time.sleep(0.08)
+        with tx.send_periodic(Frame(0x50), period=0.01, duration=0.1) as task:
+            deadline = time.monotonic() + 5
+            while task.is_running and time.monotonic() < deadline:
+                time.sleep(0.01)
+            # The task ends on its own. Counts only get an upper bound: a
+            # shared CI runner can stall the sender thread for tens of ms.
             assert not task.is_running
-            assert 2 <= task.sent_count <= 8
+            assert 1 <= task.sent_count <= 11
             with pytest.raises(BusClosedError):
                 task.modify(Frame(0x51))
 

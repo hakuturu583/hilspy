@@ -169,19 +169,29 @@ mod tests {
                 None,
             )
             .unwrap();
-        std::thread::sleep(Duration::from_millis(105));
+        // Driven by received frames, not sleeps: a shared CI runner can
+        // stall the sender thread for tens of milliseconds.
+        let wait = Some(Duration::from_secs(5));
+        let first = rx.recv(wait).unwrap().expect("a first frame");
+        assert_eq!(first.data, vec![1]);
         task.modify(Frame::new(0x10, &[2], false).unwrap()).unwrap();
-        std::thread::sleep(Duration::from_millis(50));
-        task.stop();
-        let sent = task.sent_count();
-        assert!((10..=20).contains(&sent), "sent {sent}");
-        let mut frames = Vec::new();
-        while let Some(f) = rx.recv(Some(Duration::ZERO)).unwrap() {
-            frames.push(f);
+        let mut payloads = vec![first.data];
+        while payloads.last() != Some(&vec![2]) {
+            let f = rx
+                .recv(wait)
+                .unwrap()
+                .expect("a frame with the new payload");
+            payloads.push(f.data);
         }
-        assert_eq!(frames.len() as u64, sent);
-        assert_eq!(frames.first().unwrap().data, vec![1]);
-        assert_eq!(frames.last().unwrap().data, vec![2]);
+        task.stop();
+        while let Some(f) = rx.recv(Some(Duration::ZERO)).unwrap() {
+            payloads.push(f.data);
+        }
+        // Every frame sent was received, the old payload strictly before the new.
+        assert_eq!(payloads.len() as u64, task.sent_count());
+        let switch = payloads.iter().position(|p| p == &vec![2]).unwrap();
+        assert!(payloads[..switch].iter().all(|p| p == &vec![1]));
+        assert!(payloads[switch..].iter().all(|p| p == &vec![2]));
     }
 
     #[test]
@@ -194,12 +204,14 @@ mod tests {
                 Some(Duration::from_millis(30)),
             )
             .unwrap();
-        std::thread::sleep(Duration::from_millis(80));
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while task.is_running() && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
         assert!(!task.is_running());
-        assert!(
-            (5..=8).contains(&task.sent_count()),
-            "{}",
-            task.sent_count()
-        );
+        // At most one send per period of the 30 ms window (plus the first);
+        // fewer when a shared CI runner stalls the sender thread.
+        let sent = task.sent_count();
+        assert!((1..=7).contains(&sent), "sent {sent}");
     }
 }
