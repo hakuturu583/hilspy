@@ -290,7 +290,7 @@ impl Signal {
                 }
                 if !options.scaling {
                     if options.strict {
-                        if let Some(physical) = coding.physical(v) {
+                        if let Some(physical) = coding.physical(RawValue::Float(v)) {
                             self.check_range(physical)?;
                         }
                     }
@@ -375,7 +375,7 @@ impl Signal {
 }
 
 #[derive(Clone, Copy, Debug)]
-enum RawValue {
+pub(crate) enum RawValue {
     Int(i128),
     Float(f64),
 }
@@ -383,16 +383,12 @@ enum RawValue {
 /// [`Signal::decode_raw`] through a coding: a name, else the physical value
 /// of the first rational scale holding the raw value, else the raw value.
 fn decode_coded(coding: &Coding, raw: RawValue, options: &DecodeOptions) -> Value {
-    let r = match raw {
-        RawValue::Int(i) => i as f64,
-        RawValue::Float(f) => f,
-    };
     if options.decode_choices {
-        if let Some(name) = coding.name(r) {
+        if let Some(name) = coding.name(raw) {
             return Value::Str(name.to_owned());
         }
     }
-    match (options.scaling.then(|| coding.physical(r)).flatten(), raw) {
+    match (options.scaling.then(|| coding.physical(raw)).flatten(), raw) {
         (Some(physical), _) => Value::Float(physical),
         (None, RawValue::Int(i)) => int_or_float(i),
         (None, RawValue::Float(f)) => Value::Float(f),
