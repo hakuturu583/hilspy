@@ -3,7 +3,7 @@
 ## Layers
 
 ```
-Python API     python/hilspy/__init__.py      open, Channel, Message, Periodic, Error, register_*
+Python API     python/hilspy/                 open, Channel (sync + asyncio), merge, Message, Periodic, Error, register_*
 PyO3 layer     crates/hilspy-python           conversions, GIL release, Python plugins as Rust traits
 Rust core      crates/hilspy-core             Channel = Transport + Codec; registries; formats
 Crates         socketcan, can-dbc, libsbf     I/O and parsing
@@ -40,6 +40,19 @@ real-time process can use it directly.
   encoded on every tick, so time-stamping codecs (`sbf` fills `tow`/`wnc`)
   stamp each send; it is encoded once up front so a bad message fails at
   `every()`, not silently on the thread.
+
+## Asynchronous reception and several buses
+
+`Channel::subscribe(deliver)` receives on a dedicated thread and hands every
+message (or receive error, then one `Closed`) to `deliver` as it arrives.
+The Python layer builds on it: `arecv` / `async for` deliver into an
+`asyncio.Queue` through `loop.call_soon_threadsafe`, and `merge(*channels)`
+subscribes every channel into one queue (asyncio or thread-safe), tagged with
+its channel. Awaiting therefore never blocks the event loop and buses are
+received concurrently. A subscription is its channel's only consumer
+(`recv` refuses meanwhile); dropping it (or the `merge`) stops its thread.
+Sends from asyncio (`asend`) run in a worker thread because a transport may
+block (a full CAN queue, TCP back-pressure).
 
 ## Pluggability
 

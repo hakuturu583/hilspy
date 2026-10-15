@@ -23,13 +23,16 @@ HILSPY_TEST_VCAN=vcan0 uv run pytest tests/test_socketcan.py   # needs vcan0 (CI
 - Behaviour lives in `hilspy-core`; `hilspy-python` only converts types,
   releases the GIL around every core call that can reach a transport or codec,
   and wraps Python plugins as Rust traits. `hilspy-core` must not depend on PyO3.
-- The Python API is deliberately tiny: `open`, `Channel`, `Message`,
+- The Python API is deliberately tiny: `open`, `Channel`, `merge`, `Message`,
   `Periodic`, `Error`, `register_transport`, `register_codec`
   (`tests/test_api.py` pins it). New I/O goes behind a transport (URL scheme),
   new formats behind a codec (name), configured by URL query / codec options;
   do not add public Python classes or functions per format or transport.
 - Use existing Rust crates for formats and I/O (`can-dbc`, `libsbf`,
   `socketcan`); do not hand-write a parser a maintained crate provides.
+- `Channel`/`merge`/`open` are Python (`python/hilspy/_channel.py`) over the
+  Rust `_Channel`: asyncio glue only; receiving stays in Rust
+  (`Channel::subscribe`, one thread per channel).
 - Every Python-visible change updates `python/hilspy/_hilspy.pyi`; mypy runs
   in strict mode over the package, tests and examples.
 - `socketcan` is Linux-only: keep it behind `cfg(target_os = "linux")` so the

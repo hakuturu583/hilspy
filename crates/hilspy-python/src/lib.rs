@@ -14,6 +14,7 @@ fn _hilspy(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("Error", m.py().get_type::<errors::Error>())?;
     m.add_class::<convert::Message>()?;
     m.add_class::<api::Channel>()?;
+    m.add_class::<api::Subscription>()?;
     m.add_class::<api::Periodic>()?;
     m.add_function(wrap_pyfunction!(api::open, m)?)?;
     m.add_function(wrap_pyfunction!(plugins::register_transport, m)?)?;

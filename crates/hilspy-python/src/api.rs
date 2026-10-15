@@ -2,7 +2,10 @@
 
 use std::time::{Duration, Instant};
 
-use hilspy_core::{Channel as CoreChannel, Error as CoreError, Periodic as CorePeriodic};
+use hilspy_core::{
+    Channel as CoreChannel, Error as CoreError, Periodic as CorePeriodic,
+    Subscription as CoreSubscription,
+};
 use pyo3::exceptions::{PyStopIteration, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
@@ -26,7 +29,7 @@ fn duration(seconds: f64, what: &str) -> PyResult<Duration> {
 /// `tcp://host:port` (`?listen`), `mem://name` (in-process). Codecs: `raw`,
 /// `dbc:FILE` (options `strict`, `scaling`, `decode_choices`), `sbf`.
 /// Keyword arguments configure the codec.
-#[pyfunction]
+#[pyfunction(name = "_open")]
 #[pyo3(signature = (url, codec = String::from("raw"), **options))]
 pub(crate) fn open(
     py: Python<'_>,
@@ -42,7 +45,7 @@ pub(crate) fn open(
 }
 
 /// A transport and a codec composed: send and receive messages.
-#[pyclass(module = "hilspy", name = "Channel", frozen)]
+#[pyclass(module = "hilspy._hilspy", name = "_Channel", frozen)]
 pub(crate) struct Channel {
     inner: CoreChannel,
     url: String,
@@ -112,6 +115,34 @@ impl Channel {
         Ok(Periodic { inner: task })
     }
 
+    /// Receive on a background thread and call `callback(item)` for every
+    /// item (with the GIL): a `Message`, an exception instance for a receive
+    /// error, or None once when the channel closes. A falsy return value or
+    /// an exception from the callback ends the subscription.
+    fn subscribe(&self, py: Python<'_>, callback: Py<PyAny>) -> PyResult<Subscription> {
+        let deliver = move |item: hilspy_core::Result<hilspy_core::Message>| -> bool {
+            Python::attach(|py| {
+                let arg = match item {
+                    Ok(m) => match Py::new(py, Message::from_core(m)) {
+                        Ok(m) => m.into_any(),
+                        Err(e) => e.into_value(py).into_any(),
+                    },
+                    Err(CoreError::Closed) => py.None(),
+                    Err(e) => to_py(e).into_value(py).into_any(),
+                };
+                match callback.call1(py, (arg,)) {
+                    Ok(r) => r.bind(py).is_truthy().unwrap_or(false),
+                    Err(e) => {
+                        e.write_unraisable(py, Some(callback.bind(py)));
+                        false
+                    }
+                }
+            })
+        };
+        let inner = py.detach(|| self.inner.subscribe(deliver)).py()?;
+        Ok(Subscription { inner })
+    }
+
     /// Close the channel; blocked receivers stop, iteration ends.
     fn close(&self) {
         self.inner.close();
@@ -158,6 +189,34 @@ impl Channel {
                 ""
             }
         )
+    }
+}
+
+/// A running `_Channel.subscribe`.
+#[pyclass(module = "hilspy._hilspy", name = "_Subscription", frozen)]
+pub(crate) struct Subscription {
+    inner: CoreSubscription,
+}
+
+impl Drop for Subscription {
+    /// Stop without the GIL: the receive thread may be waiting for it to
+    /// deliver a message.
+    fn drop(&mut self) {
+        let sub = &self.inner;
+        Python::attach(|py| py.detach(|| sub.stop()));
+    }
+}
+
+#[pymethods]
+impl Subscription {
+    /// Stop delivering and wait for the receive thread (idempotent).
+    fn stop(&self, py: Python<'_>) {
+        py.detach(|| self.inner.stop());
+    }
+
+    #[getter]
+    fn running(&self) -> bool {
+        self.inner.is_running()
     }
 }
 

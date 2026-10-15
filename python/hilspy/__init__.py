@@ -11,20 +11,21 @@ they mean)::
             print(msg.name, msg.fields)
 
 Transports: ``can://`` (SocketCAN), ``udp://``, ``tcp://``, ``mem://``
-(in-process). Codecs: ``raw``, ``dbc:FILE``, ``sbf``. Add more with
-:func:`register_transport` and :func:`register_codec`.
+(in-process), ``file://``. Codecs: ``raw``, ``dbc:FILE``, ``sbf``. Add more
+with :func:`register_transport` and :func:`register_codec`.
+
+Several buses at once, with asyncio::
+
+    async with hilspy.merge(can0, can1, gnss) as buses:
+        async for bus, msg in buses:
+            ...
+
+or per channel: ``await ch.arecv()``, ``await ch.asend(...)``,
+``async for msg in ch``.
 """
 
-from hilspy._hilspy import (
-    Channel,
-    Error,
-    Message,
-    Periodic,
-    __version__,
-    open,
-    register_codec,
-    register_transport,
-)
+from hilspy._channel import Channel, merge, open
+from hilspy._hilspy import Error, Message, Periodic, __version__, register_codec, register_transport
 
 __all__ = [
     "Channel",
@@ -32,6 +33,7 @@ __all__ = [
     "Message",
     "Periodic",
     "__version__",
+    "merge",
     "open",
     "register_codec",
     "register_transport",
