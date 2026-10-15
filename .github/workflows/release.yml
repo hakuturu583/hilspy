@@ -204,7 +204,8 @@ jobs:
           if ! gh release view "$TAG" > /dev/null 2>&1; then
             notes="Install: \`pip install hilspy==${TAG#v}\`"
             if [ -n "$PRS" ]; then
-              notes="${notes}"$'\n\n'"Released by $(printf '#%s ' $PRS)(bump ${BUMP})."
+              read -ra prs <<< "$PRS"
+              notes="${notes}"$'\n\n'"Released by $(printf '#%s ' "${prs[@]}")(bump ${BUMP})."
             fi
             gh release create "$TAG" --title "hilspy $TAG" --notes "$notes" --generate-notes
           fi
