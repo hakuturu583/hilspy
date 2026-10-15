@@ -136,6 +136,20 @@ deadlocking. A Python exception raised in a plugin travels through the core as
   the bit layout, options and E2E are shared. `tests/data/network.dbc`
   describes the fixture's Body channel; the tests require identical models
   and payloads.
+* `someip:FILE`: `afibex` parses the FIBEX 4 services (methods, events,
+  fields with getter/setter/notifier, datatypes, codings, utilizations).
+  `asomeip` only renders a payload as display text, so the PRS_SOMEIP
+  serializer (`codec/someip/payload.rs`) is ours, both ways, over afibex's
+  model: whole-byte integers in either byte order, floats, enums, UTF-8 /
+  UTF-16 / Latin-1 strings with leading length or fixed size, fixed and
+  dynamic (multi-dimensional) arrays, structures with optional length fields,
+  unions and typedefs. The tests decode every encoded payload with `asomeip`
+  and require the same values. Messages are `Service.Method`; the header
+  becomes fields and is filled on encode (session IDs count per method).
+  Framing is by the length field with a buffer per packet source, which
+  covers several messages per UDP datagram and TCP streams alike; a payload
+  that fails stashes the messages decoded before it for the next call.
+  SOME/IP-TP and SOME/IP-SD are not interpreted (nameless messages).
 * `sbf`: own framing (`$@`, length a multiple of 4, CRC-16/XMODEM, resync one
   byte after a bad CRC) so every block keeps its raw bytes; bodies go to
   `libsbf::parse_datagram` and `sbf/fields.rs` maps common navigation blocks to

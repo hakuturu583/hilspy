@@ -347,7 +347,9 @@ def open(url: str, codec: str = "raw", *, clock: Clock | None = None, **options:
     ``parity``, ...). Codecs: ``raw``, ``dbc:FILE`` (options
     ``strict``, ``scaling``, ``decode_choices``, ``e2e``), ``fibex:FILE``
     (ASAM FIBEX CAN / CAN FD frames; option ``channel`` and the ``dbc:``
-    options), ``sbf``, ``nmea``
+    options), ``someip:FILE`` (SOME/IP methods, events and fields of
+    FIBEX 4 services, as ``Service.Method``; options ``client_id``,
+    ``decode_choices``), ``sbf``, ``nmea``
     (option ``talker``), ``ubx``, ``rtcm``, ``lidar:MODEL``
     (Hesai/Velodyne data packets <-> ``scan`` point clouds; options
     ``frame``, ``phase``, ``rpm``, ``return_mode``, ``pace``, ``profiles``). Keyword
