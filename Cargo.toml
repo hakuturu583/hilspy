@@ -1,0 +1,22 @@
+[workspace]
+resolver = "2"
+members = ["crates/hilspy-core", "crates/hilspy-python"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.83"
+license = "Apache-2.0"
+repository = "https://github.com/hakuturu583/hilspy"
+
+[workspace.dependencies]
+hilspy-core = { path = "crates/hilspy-core" }
+can-dbc = "10.0.0"
+libsbf = "0.18.0"
+socketcan = { version = "4.0.0", default-features = false }
+thiserror = "2"
+pyo3 = "0.29"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

@@ -1,0 +1,20 @@
+[package]
+name = "hilspy-python"
+description = "PyO3 bindings of hilspy-core (the hilspy._hilspy extension module)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "_hilspy"
+crate-type = ["cdylib"]
+
+[dependencies]
+hilspy-core.workspace = true
+pyo3 = { workspace = true, features = ["abi3-py310"] }
+
+[features]
+extension-module = ["pyo3/extension-module"]

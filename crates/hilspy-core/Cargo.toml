@@ -1,0 +1,17 @@
+[package]
+name = "hilspy-core"
+description = "Rust core of hilspy: CAN buses (SocketCAN / virtual), DBC codec and Septentrio Binary Format (SBF) parser for HILS"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+can-dbc.workspace = true
+libsbf.workspace = true
+thiserror.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+socketcan.workspace = true
+libc = "0.2"

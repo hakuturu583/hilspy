@@ -1,0 +1,36 @@
+# hilspy
+
+HILS I/O library: a Rust core (`crates/hilspy-core`) with a thin PyO3 layer
+(`crates/hilspy-python`, module `hilspy._hilspy`) and a Python package
+(`python/hilspy`). Intended to be embedded in a scenario library
+(`autoware_carla_scenario`). Design: `docs/design.md`.
+
+## Commands
+
+```sh
+uv sync                                   # build the extension (maturin) + dev deps
+uv run pytest                             # Python tests (cantools cross-checks DBC)
+cargo test -p hilspy-core                 # Rust tests
+cargo fmt --all && cargo clippy --all-targets -- -D warnings
+uv run ruff check . && uv run ruff format . && uv run mypy
+HILSPY_TEST_VCAN=vcan0 uv run pytest tests/test_socketcan.py   # needs vcan0 (CI job `socketcan`)
+```
+
+`uv sync` rebuilds the extension when Rust sources change (`tool.uv.cache-keys`).
+
+## Rules
+
+- Behaviour lives in `hilspy-core`; `hilspy-python` only converts types,
+  releases the GIL around blocking work and maps errors to the exception
+  classes in `errors.rs`. `hilspy-core` must not depend on PyO3.
+- Use existing Rust crates for formats and I/O (`can-dbc`, `libsbf`,
+  `socketcan`); do not hand-write a parser a maintained crate provides.
+- Every Python-visible API change updates `python/hilspy/_hilspy.pyi` and the
+  re-exports in `python/hilspy/{can,dbc,sbf}.py`; mypy runs in strict mode
+  over the package, tests and examples.
+- `socketcan` is Linux-only: keep it behind `cfg(target_os = "linux")` so the
+  core builds elsewhere with the virtual bus.
+- New behaviour gets a Rust unit test in the core and a Python test; DBC
+  bit-layout changes must keep `tests/test_dbc.py::test_matches_cantools` green.
+- The Python package supports 3.10+ (abi3 wheel); write 3.10-compatible code.
+- All repository content is in English.
