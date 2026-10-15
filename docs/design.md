@@ -35,7 +35,12 @@ real-time process can use it directly.
   transport serves a receiving thread and periodic senders at once.
 * **Codec** (`encode(&mut, &Message)`, `decode(&mut, Packet)`; `Send`): may keep
   state across packets (the SBF decoder reassembles blocks across TCP chunks).
-  The channel holds it behind a mutex.
+  The channel holds it behind a mutex. `cycle_time(&Message)` (default
+  `None`) answers from a network description: `dbc` and `fibex` give the
+  message's `dbc::Message::cycle_time`, which is `GenMsgCycleTime` or the
+  frame triggering's `CYCLIC-TIMING` (`xs:duration`, read with `roxmltree`
+  as afibex skips timings). `Channel::every(None, ..)` takes it as the
+  period and fails with a `Config` error naming the message without one.
 * **Periodic**: one thread per cyclic message with absolute deadlines (no
   drift; a deadline missed by more than a period is skipped). The message is
   encoded on every tick, so time-stamping codecs (`sbf` fills `tow`/`wnc`)

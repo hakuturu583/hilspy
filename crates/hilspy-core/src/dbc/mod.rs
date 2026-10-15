@@ -6,6 +6,7 @@ pub mod coding;
 
 use std::collections::HashMap;
 use std::path::Path;
+use std::time::Duration;
 
 use can_dbc::{
     AttributeDefinition, AttributeValue, AttributeValueType, Dbc, MessageId, MultiplexIndicator,
@@ -414,8 +415,9 @@ pub struct Message {
     pub transmitter: Option<String>,
     pub signals: Vec<Signal>,
     pub comment: Option<String>,
-    /// `GenMsgCycleTime` in milliseconds.
-    pub cycle_time_ms: Option<u64>,
+    /// How often the message is sent (`GenMsgCycleTime`; a FIBEX frame
+    /// triggering's `CYCLIC-TIMING`).
+    pub cycle_time: Option<Duration>,
     /// Sent as CAN FD (`VFrameFormat`, or a payload over 8 bytes).
     pub fd: bool,
 }
@@ -688,10 +690,11 @@ impl Database {
                 size,
                 transmitter: m.transmitter.clone(),
                 comment: dbc.message_comment(m.id).map(str::to_owned),
-                cycle_time_ms: dbc
+                cycle_time: dbc
                     .resolved_message_attribute(m.id, "GenMsgCycleTime")
                     .and_then(attr_u64)
-                    .filter(|&t| t > 0),
+                    .filter(|&t| t > 0)
+                    .map(Duration::from_millis),
                 fd: fd_by_attr || size > 8,
                 signals,
             });

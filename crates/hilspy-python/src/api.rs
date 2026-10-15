@@ -94,18 +94,19 @@ impl Channel {
     }
 
     /// Send a message every `period` seconds from a background thread, for
-    /// `duration` seconds or until stopped.
+    /// `duration` seconds or until stopped. `period=None` uses the message's
+    /// cycle time from the codec's network description (DBC, FIBEX).
     #[pyo3(signature = (period, message, fields = None, *, duration = None))]
     fn every(
         &self,
         py: Python<'_>,
-        period: f64,
+        period: Option<f64>,
         message: &Bound<'_, PyAny>,
         fields: Option<&Bound<'_, PyAny>>,
         duration: Option<f64>,
     ) -> PyResult<Periodic> {
         let message = message_arg(message, fields)?;
-        let period = self::duration(period, "period")?;
+        let period = period.map(|p| self::duration(p, "period")).transpose()?;
         let total = duration
             .map(|d| self::duration(d, "duration"))
             .transpose()?;

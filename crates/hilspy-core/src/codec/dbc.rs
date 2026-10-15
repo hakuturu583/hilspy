@@ -5,8 +5,10 @@
 //! `decode_choices` (default true: value-table names instead of numbers),
 //! `e2e` (AUTOSAR E2E protection per message, see [`super::e2e`]).
 //! Frames whose identifier the database lacks decode as nameless messages.
+//! A message's `GenMsgCycleTime` is its [`Codec::cycle_time`].
 
 use std::collections::HashMap;
+use std::time::Duration;
 
 use super::e2e::{status_name, Protection};
 use super::Codec;
@@ -156,6 +158,11 @@ impl Codec for Dbc {
             timestamp: None,
             source: None,
         }])
+    }
+
+    fn cycle_time(&self, message: &Message) -> Option<Duration> {
+        let name = message.name.as_deref()?;
+        self.db.message_by_name(name).ok()?.cycle_time
     }
 
     fn decode(&mut self, packet: Packet) -> Result<Vec<Message>> {

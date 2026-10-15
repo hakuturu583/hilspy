@@ -210,16 +210,38 @@ impl Channel {
     }
 
     /// Send `message` every `period` from a background thread (for
-    /// `duration`, or until stopped). It is encoded on every send, so
-    /// time-stamping codecs stamp each one. On a virtual clock the sends
-    /// happen as the clock advances past them instead (the first at once).
+    /// `duration`, or until stopped). Without a period, the message's cycle
+    /// time in the codec's network description is the period (see
+    /// [`Channel::cycle_time`]); a message without one is an error. It is
+    /// encoded on every send, so time-stamping codecs stamp each one. On a
+    /// virtual clock the sends happen as the clock advances past them
+    /// instead (the first at once).
     pub fn every(
         &self,
-        period: Duration,
+        period: Option<Duration>,
         message: Message,
         duration: Option<Duration>,
     ) -> Result<Periodic> {
+        let period = match period {
+            Some(p) => p,
+            None => self.cycle_time(&message).ok_or_else(|| {
+                Error::Config(match &message.name {
+                    Some(name) => format!(
+                        "message {name:?} has no cycle time in the codec's network \
+                         description; give every() a period"
+                    ),
+                    None => "a nameless message has no cycle time; give every() a period".into(),
+                })
+            })?,
+        };
         Periodic::start(Arc::clone(&self.inner), period, message, duration)
+    }
+
+    /// How often the codec's network description says `message` is sent (a
+    /// DBC `GenMsgCycleTime`, a FIBEX `CYCLIC-TIMING`), if it says.
+    pub fn cycle_time(&self, message: &Message) -> Option<Duration> {
+        message.name.as_ref()?;
+        self.inner.codec.lock().unwrap().cycle_time(message)
     }
 
     /// Receive on a background thread, handing every message (or receive
@@ -601,7 +623,7 @@ mod tests {
         .unwrap();
         let p = tx
             .every(
-                Duration::from_millis(100),
+                Some(Duration::from_millis(100)),
                 Message::raw(Packet::bytes(vec![1])),
                 Some(Duration::from_millis(500)),
             )
@@ -629,7 +651,7 @@ mod tests {
         // A duration that is not a whole number of periods.
         let p = tx
             .every(
-                Duration::from_millis(100),
+                Some(Duration::from_millis(100)),
                 Message::raw(Packet::bytes(vec![2])),
                 Some(Duration::from_millis(250)),
             )
@@ -638,6 +660,64 @@ mod tests {
         assert_eq!(p.sent_count(), 3);
         assert!(!p.is_running());
         assert_eq!(clock.next_due(), None);
+    }
+
+    #[test]
+    fn every_without_a_period_uses_the_cycle_time() {
+        let clock = Clock::new(0.0).unwrap();
+        let mut lax = Options::new();
+        lax.insert("strict", Value::Bool(false));
+        let tx = Channel::open_on("mem://t-cycle", &dbc(), lax, Some(clock.clone())).unwrap();
+        let rx =
+            Channel::open_on("mem://t-cycle", "raw", Options::new(), Some(clock.clone())).unwrap();
+        let speed = Message::new("VehicleSpeed", vec![]);
+        let steer = Message::new("SteeringCmd", vec![]);
+        assert_eq!(tx.cycle_time(&speed), Some(Duration::from_millis(10)));
+        assert_eq!(tx.cycle_time(&steer), Some(Duration::from_millis(20)));
+        let a = tx.every(None, speed, None).unwrap();
+        let b = tx.every(None, steer, None).unwrap();
+        assert_eq!(a.period(), Duration::from_millis(10));
+        assert_eq!(b.period(), Duration::from_millis(20));
+        clock.advance(0.1).unwrap();
+        assert_eq!((a.sent_count(), b.sent_count()), (11, 6));
+        let ids: Vec<u32> = drain(&rx)
+            .iter()
+            .map(|m| m.packet.as_ref().unwrap().can.unwrap().id)
+            .collect();
+        assert_eq!(ids.iter().filter(|&&id| id == 0x100).count(), 11);
+        assert_eq!(ids.iter().filter(|&&id| id == 0x200).count(), 6);
+        // A period given wins over the cycle time.
+        let c = tx
+            .every(
+                Some(Duration::from_millis(50)),
+                Message::new("VehicleSpeed", vec![]),
+                None,
+            )
+            .unwrap();
+        assert_eq!(c.period(), Duration::from_millis(50));
+        // No cycle time: an error naming the message, and nothing sent.
+        let e = tx
+            .every(None, Message::new("ImuData", vec![]), None)
+            .err()
+            .unwrap();
+        assert!(matches!(e, Error::Config(_)), "{e:?}");
+        assert!(
+            e.to_string().contains("\"ImuData\" has no cycle time"),
+            "{e}"
+        );
+        let e = tx
+            .every(None, Message::raw(Packet::bytes(vec![1])), None)
+            .err()
+            .unwrap();
+        assert!(e.to_string().contains("nameless"), "{e}");
+        let e = tx
+            .every(None, Message::new("Nope", vec![]), None)
+            .err()
+            .unwrap();
+        assert!(e.to_string().contains("\"Nope\""), "{e}");
+        // Codecs without network descriptions have no cycle times.
+        let raw = Channel::open("mem://t-cycle-raw", "raw", Options::new()).unwrap();
+        assert_eq!(raw.cycle_time(&Message::new("VehicleSpeed", vec![])), None);
     }
 
     #[test]
@@ -804,7 +884,7 @@ mod tests {
         let rx = Channel::open("mem://t-ch-periodic", "raw", Options::new()).unwrap();
         let task = tx
             .every(
-                Duration::from_millis(10),
+                Some(Duration::from_millis(10)),
                 Message::raw(Packet::bytes(vec![1])),
                 None,
             )
@@ -834,7 +914,7 @@ mod tests {
         let tx = Channel::open("mem://t-ch-duration", "raw", Options::new()).unwrap();
         let task = tx
             .every(
-                Duration::from_millis(5),
+                Some(Duration::from_millis(5)),
                 Message::raw(Packet::bytes(vec![])),
                 Some(Duration::from_millis(30)),
             )

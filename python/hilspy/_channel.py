@@ -104,13 +104,18 @@ class Channel:
 
     def every(
         self,
-        period: float,
+        period: float | None,
         message: Message | str,
         fields: Mapping[str, Value] | None = None,
         *,
         duration: float | None = None,
     ) -> Periodic:
-        """Send a message every `period` seconds from a background thread."""
+        """Send a message every `period` seconds from a background thread.
+
+        With `period=None` the period is the message's cycle time in the
+        codec's network description (a DBC ``GenMsgCycleTime``, a FIBEX
+        ``CYCLIC-TIMING``); a message without one raises `Error`.
+        """
         return self._inner.every(period, message, fields, duration=duration)
 
     def close(self) -> None:

@@ -73,8 +73,8 @@ fn matches_the_equivalent_dbc() {
     for d in &dbc.messages {
         let f = fibex.message_by_name(&d.name).unwrap();
         assert_eq!(
-            (f.id, f.extended, f.size, f.fd, &f.comment),
-            (d.id, d.extended, d.size, d.fd, &d.comment),
+            (f.id, f.extended, f.size, f.fd, &f.comment, f.cycle_time),
+            (d.id, d.extended, d.size, d.fd, &d.comment, d.cycle_time),
             "{}",
             d.name
         );
@@ -83,6 +83,62 @@ fn matches_the_equivalent_dbc() {
             s.receivers.clear();
         }
         assert_eq!(f.signals, expected, "{}", d.name);
+    }
+}
+
+#[test]
+fn cycle_times_from_cyclic_timings() {
+    let ms = |n| Some(std::time::Duration::from_millis(n));
+    let body = load(data("network.xml"), Some("Body")).unwrap();
+    let cycle = |db: &Database, name: &str| db.message_by_name(name).unwrap().cycle_time;
+    assert_eq!(cycle(&body, "VehicleStatus"), ms(10));
+    assert_eq!(cycle(&body, "SteeringCmd"), None);
+    assert_eq!(cycle(&body, "RadarObjects"), ms(50));
+    // Timing belongs to the triggering: the same frame on the chassis
+    // channel has none.
+    let chassis = load(data("network.xml"), Some("Chassis")).unwrap();
+    assert_eq!(cycle(&chassis, "VehicleStatus"), None);
+    // A zero time is no cycle time; a bad one is an error naming it.
+    let with = |value: &str| {
+        let text = network().replace(
+            "<fx:VALUE>PT0.01S</fx:VALUE>",
+            &format!("<fx:VALUE>{value}</fx:VALUE>"),
+        );
+        variant(&format!("cycle-{}", value.len()), &text)
+    };
+    let path = with("PT0S");
+    assert_eq!(
+        cycle(&load(&path, Some("Body")).unwrap(), "VehicleStatus"),
+        None
+    );
+    std::fs::remove_file(path).unwrap();
+    let path = with("P1M");
+    let e = load_err(&path, Some("Body"));
+    assert!(
+        e.contains("FT_VehicleStatus_Body") && e.contains("\"P1M\""),
+        "{e}"
+    );
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn xs_durations() {
+    use std::time::Duration;
+    let ok = |s: &str| xs_duration(s).unwrap_or_else(|| panic!("{s}"));
+    assert_eq!(ok("PT0.01S"), Duration::from_millis(10));
+    assert_eq!(ok("PT0.0005S"), Duration::from_micros(500));
+    assert_eq!(ok("PT1.000000001S"), Duration::from_nanos(1_000_000_001));
+    assert_eq!(ok("PT10S"), Duration::from_secs(10));
+    assert_eq!(ok("PT0S"), Duration::ZERO);
+    assert_eq!(ok("PT1M30S"), Duration::from_secs(90));
+    assert_eq!(ok("PT2H"), Duration::from_secs(7200));
+    assert_eq!(ok("P1DT1S"), Duration::from_secs(86_401));
+    assert_eq!(ok("P1D"), Duration::from_secs(86_400));
+    for bad in [
+        "", "P", "PT", "0.01", "PT0.01", "-PT1S", "P1Y", "P1M", "PT1S1M", "PT1.5M", "PT.5S",
+        "PT1..5S", "PTS", "P1DT", "PT1S2S", "pt1s",
+    ] {
+        assert_eq!(xs_duration(bad), None, "{bad}");
     }
 }
 

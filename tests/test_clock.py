@@ -45,6 +45,35 @@ def test_periodic_messages_follow_the_clock(mem: str, vehicle_dbc: str) -> None:
         assert speed.running and not steer.running
 
 
+def test_every_without_a_period_uses_the_dbc_cycle_time(mem: str, vehicle_dbc: str) -> None:
+    clock = hilspy.Clock(start=0.0)
+    with (
+        hilspy.open(mem, vehicle_dbc, clock=clock, strict=False) as ecu,
+        hilspy.open(mem, vehicle_dbc, clock=clock) as rx,
+    ):
+        # GenMsgCycleTime: VehicleSpeed 10 ms, SteeringCmd 20 ms.
+        speed = ecu.every(None, "VehicleSpeed", {"Speed": 1.0, "Gear": "D"})
+        steer = ecu.every(None, "SteeringCmd", {"SteeringAngle": 2.0})
+        assert (speed.period, steer.period) == pytest.approx((0.01, 0.02))
+        assert clock.next_due == pytest.approx(0.01)
+        clock.advance(0.1)
+        assert (speed.sent_count, steer.sent_count) == (11, 6)
+        names = [m.name for m in drain(rx)]
+        assert (names.count("VehicleSpeed"), names.count("SteeringCmd")) == (11, 6)
+        # The period can still be changed afterwards.
+        speed.period = 0.05
+        clock.advance(0.1)
+        assert speed.sent_count == 13
+        # ImuData has no GenMsgCycleTime: an error naming it, nothing sent.
+        with pytest.raises(hilspy.Error, match='"ImuData" has no cycle time'):
+            ecu.every(None, "ImuData", {"YawRate": 0.0})
+        with pytest.raises(hilspy.Error, match="nameless"):
+            ecu.every(None, hilspy.Message(data=b"x", id=0x7FF))
+        assert all(m.name != "ImuData" for m in drain(rx))
+    with hilspy.open(mem) as raw, pytest.raises(hilspy.Error, match="no cycle time"):
+        raw.every(None, "VehicleSpeed")
+
+
 def test_duration_and_errors(mem: str) -> None:
     clock = hilspy.Clock()
     with hilspy.open(mem, clock=clock) as ch:

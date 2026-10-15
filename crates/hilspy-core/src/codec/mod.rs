@@ -27,6 +27,7 @@ mod ubx;
 
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock, RwLock};
+use std::time::Duration;
 
 use crate::error::{Error, Result};
 use crate::message::{Message, Packet};
@@ -46,6 +47,12 @@ pub trait Codec: Send {
     /// than at once.
     fn paced(&self) -> bool {
         false
+    }
+    /// How often the network description says `message` is sent (a DBC
+    /// `GenMsgCycleTime`, a FIBEX `CYCLIC-TIMING`): the period
+    /// [`Channel::every`](crate::Channel::every) uses when given none.
+    fn cycle_time(&self, _message: &Message) -> Option<Duration> {
+        None
     }
 }
 

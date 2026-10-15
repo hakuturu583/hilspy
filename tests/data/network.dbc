@@ -2,7 +2,10 @@ VERSION ""
 
 NS_ :
 	CM_
+	BA_DEF_
+	BA_
 	VAL_
+	BA_DEF_DEF_
 
 BS_:
 
@@ -26,6 +29,10 @@ BO_ 512 RadarObjects: 16 Vector__XXX
 
 CM_ BO_ 256 "Speed, gear and brake";
 CM_ SG_ 256 Speed "Vehicle speed";
+BA_DEF_ BO_  "GenMsgCycleTime" INT 0 10000;
+BA_DEF_DEF_  "GenMsgCycleTime" 0;
+BA_ "GenMsgCycleTime" BO_ 256 10;
+BA_ "GenMsgCycleTime" BO_ 512 50;
 VAL_ 256 Gear 0 "P" 1 "R" 2 "N" 3 "D" ;
 VAL_ 2566853172 Torque 127 "Invalid" ;
 VAL_ 512 RadarStatus 0 "Ok" 1 "Degraded" 2 "Blocked" ;

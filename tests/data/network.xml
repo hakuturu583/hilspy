@@ -50,6 +50,12 @@
             <fx:FRAME-REF ID-REF="F_SteeringCmd"/>
           </fx:FRAME-TRIGGERING>
           <fx:FRAME-TRIGGERING ID="FT_RadarObjects" xsi:type="can:FRAME-TRIGGERING-TYPE">
+            <fx:TIMINGS>
+              <fx:CYCLIC-TIMING>
+                <fx:STARTING-TIME-RANGE><fx:VALUE>PT0S</fx:VALUE></fx:STARTING-TIME-RANGE>
+                <fx:REPEATING-TIME-RANGE><fx:VALUE>PT0.05S</fx:VALUE></fx:REPEATING-TIME-RANGE>
+              </fx:CYCLIC-TIMING>
+            </fx:TIMINGS>
             <fx:IDENTIFIER><fx:IDENTIFIER-VALUE>512</fx:IDENTIFIER-VALUE></fx:IDENTIFIER>
             <fx:FRAME-REF ID-REF="F_RadarObjects"/>
             <can:CAN-FRAME-TX-BEHAVIOR>CAN-FD</can:CAN-FRAME-TX-BEHAVIOR>

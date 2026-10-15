@@ -7,7 +7,8 @@
 //! `decode_choices` and `e2e` (see [`super::dbc`]). Messages are named by
 //! frame; their fields are the signals of all the frame's PDUs, as
 //! `PDU.Signal` where two PDUs have a signal of the same name. Frames whose
-//! identifier the channel lacks decode as nameless messages.
+//! identifier the channel lacks decode as nameless messages. A frame
+//! triggering's `CYCLIC-TIMING` is the message's [`Codec::cycle_time`](super::Codec::cycle_time).
 
 use super::dbc::{Dbc, SignalOptions};
 use crate::error::{Error, Result};

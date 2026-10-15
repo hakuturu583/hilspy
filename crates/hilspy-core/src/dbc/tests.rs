@@ -19,7 +19,7 @@ fn loads_attributes_and_comments() {
     assert_eq!(db.nodes, vec!["VCU", "ADAS", "GNSS"]);
     let m = db.message_by_name("VehicleSpeed").unwrap();
     assert_eq!((m.id, m.extended, m.size), (0x100, false, 8));
-    assert_eq!(m.cycle_time_ms, Some(10));
+    assert_eq!(m.cycle_time, Some(std::time::Duration::from_millis(10)));
     assert_eq!(m.comment.as_deref(), Some("Vehicle speed from the VCU"));
     let gear = m.signal("Gear").unwrap();
     assert_eq!(gear.choices[3], (3, "D".to_string()));
@@ -277,7 +277,7 @@ fn single(kind: ValueKind, size: u32) -> Message {
         transmitter: None,
         signals: vec![signal],
         comment: None,
-        cycle_time_ms: None,
+        cycle_time: None,
         fd: false,
     }
 }

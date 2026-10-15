@@ -157,6 +157,30 @@ def test_every_on_a_clock(mem: str) -> None:
         assert [m["Gear"] for m in got] == ["R"]
 
 
+def test_every_without_a_period_uses_the_cyclic_timing(mem: str) -> None:
+    clock = hilspy.Clock(start=0.0)
+    with (
+        hilspy.open(mem, FIBEX, clock=clock, **BODY) as ecu,
+        hilspy.open(mem, DBC) as rx,
+    ):
+        # CYCLIC-TIMING: VehicleStatus PT0.01S, RadarObjects PT0.05S.
+        status = ecu.every(None, "VehicleStatus", VALUES["VehicleStatus"])
+        radar = ecu.every(None, "RadarObjects", VALUES["RadarObjects"])
+        assert (status.period, radar.period) == pytest.approx((0.01, 0.05))
+        clock.advance(0.1)
+        assert (status.sent_count, radar.sent_count) == (11, 3)
+        names = [m.name for m in drain(rx)]
+        assert (names.count("VehicleStatus"), names.count("RadarObjects")) == (11, 3)
+        with pytest.raises(hilspy.Error, match='"SteeringCmd" has no cycle time'):
+            ecu.every(None, "SteeringCmd", VALUES["SteeringCmd"])
+    # The timing is the Body channel's triggering's, not the frame's.
+    with (
+        hilspy.open(mem, FIBEX, channel="Chassis") as chassis,
+        pytest.raises(hilspy.Error, match='"VehicleStatus" has no cycle time'),
+    ):
+        chassis.every(None, "VehicleStatus", VALUES["VehicleStatus"])
+
+
 FEATURES = f"fibex:{DATA / 'fibex_features.xml'}"
 
 

@@ -69,7 +69,7 @@ The whole public API:
 | `hilspy.open(url, codec="raw", *, clock=None, **codec_options) -> Channel` | open a channel (on a virtual clock with `clock=`) |
 | `Channel.send(message)` / `send(name, fields)` | encode and send |
 | `Channel.recv(timeout=None) -> Message \| None` | next message (iterate the channel for all) |
-| `Channel.every(period, message_or_name, fields=None, *, duration=None) -> Periodic` | cyclic send from a Rust thread; `update()`, `stop()`, `period`, `sent_count` |
+| `Channel.every(period, message_or_name, fields=None, *, duration=None) -> Periodic` | cyclic send from a Rust thread; `update()`, `stop()`, `period`, `sent_count`. `period=None`: the message's cycle time from the DBC / FIBEX (see [Cycle times](#cycle-times)) |
 | `Channel.close()` | also via `with` / `async with` |
 | `await Channel.asend(...)`, `await Channel.arecv(timeout=None)`, `async for msg in channel` | asyncio |
 | `hilspy.merge(*channels)` | `(channel, message)` from several buses as they arrive (`for` / `async for`) |
@@ -77,6 +77,20 @@ The whole public API:
 | `hilspy.Clock(start=0.0)` | simulated time: `advance(dt)`, `advance_to(t)`, `now`, `next_due` |
 | `hilspy.register_transport(scheme, factory)` / `register_codec(name, factory)` | plugins |
 | `hilspy.Error` | bad URL/codec/option, encode/decode failure, closed channel |
+
+### Cycle times
+
+`every(None, ...)` sends a message at the period its network description
+gives it: a DBC's `GenMsgCycleTime` (milliseconds) or, for `fibex:`, the
+`REPEATING-TIME-RANGE` of the frame triggering's `CYCLIC-TIMING` (an
+`xs:duration` such as `PT0.01S`, so per channel). A message without one (or
+with a cycle time of 0) raises `hilspy.Error` naming it; other codecs have
+no cycle times. The `Periodic`'s `period` can still be changed afterwards.
+
+```python
+with hilspy.open("can://can0", "dbc:vehicle.dbc") as ecu:
+    speed = ecu.every(None, "VehicleSpeed", {"Speed": 0.0, "Gear": "D"})  # every 10 ms
+```
 
 ### FIBEX networks
 
