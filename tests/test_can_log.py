@@ -42,7 +42,9 @@ def drain(ch: hilspy.Channel) -> list[hilspy.Message]:
 
 
 @pytest.mark.parametrize(("name", "query", "writer", "reader"), FORMATS)
-def test_written_logs_read_in_python_can(tmp_path: Path, name: str, query: str, writer: Any, reader: Any) -> None:
+def test_written_logs_read_in_python_can(
+    tmp_path: Path, name: str, query: str, writer: Any, reader: Any
+) -> None:
     path = tmp_path / name
     with hilspy.open(f"file://{path}?write{query}") as log:
         for can_id, ext, fd, data in FRAMES:
@@ -52,12 +54,20 @@ def test_written_logs_read_in_python_can(tmp_path: Path, name: str, query: str, 
 
 
 @pytest.mark.parametrize(("name", "query", "writer", "reader"), FORMATS)
-def test_python_can_logs_replay(tmp_path: Path, name: str, query: str, writer: Any, reader: Any) -> None:
+def test_python_can_logs_replay(
+    tmp_path: Path, name: str, query: str, writer: Any, reader: Any
+) -> None:
     path = tmp_path / name
     w = writer(str(path))
     for i, (can_id, ext, fd, data) in enumerate(FRAMES):
         w.on_message_received(
-            can.Message(timestamp=1_700_000_000 + i * 0.01, arbitration_id=can_id, is_extended_id=ext, is_fd=fd, data=data)
+            can.Message(
+                timestamp=1_700_000_000 + i * 0.01,
+                arbitration_id=can_id,
+                is_extended_id=ext,
+                is_fd=fd,
+                data=data,
+            )
         )
     w.stop()
     with hilspy.open(f"file://{path}?realtime{query}") as log:
