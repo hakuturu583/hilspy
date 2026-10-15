@@ -21,15 +21,19 @@ HILSPY_TEST_VCAN=vcan0 uv run pytest tests/test_socketcan.py   # needs vcan0 (CI
 ## Rules
 
 - Behaviour lives in `hilspy-core`; `hilspy-python` only converts types,
-  releases the GIL around blocking work and maps errors to the exception
-  classes in `errors.rs`. `hilspy-core` must not depend on PyO3.
+  releases the GIL around every core call that can reach a transport or codec,
+  and wraps Python plugins as Rust traits. `hilspy-core` must not depend on PyO3.
+- The Python API is deliberately tiny: `open`, `Channel`, `Message`,
+  `Periodic`, `Error`, `register_transport`, `register_codec`
+  (`tests/test_api.py` pins it). New I/O goes behind a transport (URL scheme),
+  new formats behind a codec (name), configured by URL query / codec options;
+  do not add public Python classes or functions per format or transport.
 - Use existing Rust crates for formats and I/O (`can-dbc`, `libsbf`,
   `socketcan`); do not hand-write a parser a maintained crate provides.
-- Every Python-visible API change updates `python/hilspy/_hilspy.pyi` and the
-  re-exports in `python/hilspy/{can,dbc,sbf}.py`; mypy runs in strict mode
-  over the package, tests and examples.
+- Every Python-visible change updates `python/hilspy/_hilspy.pyi`; mypy runs
+  in strict mode over the package, tests and examples.
 - `socketcan` is Linux-only: keep it behind `cfg(target_os = "linux")` so the
-  core builds elsewhere with the virtual bus.
+  core builds elsewhere (`can://` then reports that it needs Linux).
 - New behaviour gets a Rust unit test in the core and a Python test; DBC
   bit-layout changes must keep `tests/test_dbc.py::test_matches_cantools` green.
 - The Python package supports 3.10+ (abi3 wheel); write 3.10-compatible code.

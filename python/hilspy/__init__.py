@@ -1,13 +1,38 @@
 """hilspy: HILS I/O on a Rust core.
 
-* :mod:`hilspy.can` -- CAN / CAN FD frames and buses (Linux SocketCAN incl.
-  ``vcan``, or an in-process virtual bus) with periodic transmission.
-* :mod:`hilspy.dbc` -- DBC databases: encode and decode signals.
-* :mod:`hilspy.sbf` -- Septentrio Binary Format: stream decoder and encoders
-  for a simulated receiver.
+One call opens a channel: a transport (how packets travel) and a codec (what
+they mean)::
+
+    import hilspy
+
+    with hilspy.open("can://vcan0", "dbc:vehicle.dbc") as ecu:
+        ecu.send("VehicleSpeed", {"Speed": 12.5, "Gear": "D"})
+        for msg in ecu:
+            print(msg.name, msg.fields)
+
+Transports: ``can://`` (SocketCAN), ``udp://``, ``tcp://``, ``mem://``
+(in-process). Codecs: ``raw``, ``dbc:FILE``, ``sbf``. Add more with
+:func:`register_transport` and :func:`register_codec`.
 """
 
-from hilspy import can, dbc, sbf
-from hilspy._hilspy import HilspyError, __version__
+from hilspy._hilspy import (
+    Channel,
+    Error,
+    Message,
+    Periodic,
+    __version__,
+    open,
+    register_codec,
+    register_transport,
+)
 
-__all__ = ["HilspyError", "__version__", "can", "dbc", "sbf"]
+__all__ = [
+    "Channel",
+    "Error",
+    "Message",
+    "Periodic",
+    "__version__",
+    "open",
+    "register_codec",
+    "register_transport",
+]

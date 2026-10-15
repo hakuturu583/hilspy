@@ -26,8 +26,8 @@ the `Labels` workflow; checked by `PR Check`):
 | Label | Version change | For |
 | --- | --- | --- |
 | `bump patch` | 0.1.0 → 0.1.1 | bug fixes, docs, small changes |
-| `bump minor` | 0.1.0 → 0.2.0 | new features (backwards compatible) |
-| `bump major` | 0.1.0 → 1.0.0 | breaking API changes |
+| `bump minor` | 0.1.0 → 0.2.0 | new features; before 1.0 also breaking changes |
+| `bump major` | 1.2.0 → 2.0.0 | breaking API changes (from 1.0; before 1.0, semver puts breaking changes in `bump minor`) |
 | `no release` | none | CI, tests, nothing shipped |
 
 ## What a labelled merge does (`.github/workflows/release.yml`)

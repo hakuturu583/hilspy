@@ -3,78 +3,95 @@
 ## Layers
 
 ```
-Python API          python/hilspy/{can,dbc,sbf}.py   re-exports, small helpers (gps_time, read_file)
-                    python/hilspy/_hilspy.pyi        type stubs of the extension
-PyO3 bindings       crates/hilspy-python             conversions, GIL release, exceptions
-Rust core           crates/hilspy-core               all behaviour; no Python dependency
-Parsers / I/O       can-dbc, libsbf, socketcan
+Python API     python/hilspy/__init__.py      open, Channel, Message, Periodic, Error, register_*
+PyO3 layer     crates/hilspy-python           conversions, GIL release, Python plugins as Rust traits
+Rust core      crates/hilspy-core             Channel = Transport + Codec; registries; formats
+Crates         socketcan, can-dbc, libsbf     I/O and parsing
 ```
 
-The core is usable from Rust on its own, so a future Rust-side scenario
-runner, or a real-time process, can reuse it without Python.
+The core has no Python dependency, so a Rust-side scenario runner or a
+real-time process can use it directly.
 
-## CAN
+## Channel = Transport + Codec
 
-* `Bus` wraps an `Arc<dyn BusBackend>`; every method takes `&self`, so one bus
-  is shared by a receive loop and any number of periodic senders. Backends:
-  * `socketcan` (Linux): a raw `CanSocket` or, with `fd=True`, a `CanFdSocket`.
-    Receive waits with `poll(2)` in 100 ms slices so `shutdown()` wakes a
-    receiver blocked without a timeout. Filters are kernel filters (the
-    identifier kind is matched through the `CAN_EFF_FLAG` bit).
-  * `virtual`: a process-wide registry of hubs by channel name; each endpoint
-    has its own queue (bounded, oldest dropped), filters, and FD capability (a
-    classic endpoint does not see FD frames, like a classic controller).
-* `Frame` constructors validate identifier range and (FD) length, so an
-  invalid frame never reaches a backend.
-* `PeriodicTask` runs one thread per task with absolute deadlines (no drift);
-  a deadline missed by more than a period is skipped, not burst. Send errors
-  are recorded (`last_error`) without stopping the task. It is the place to
-  add per-cycle payload updates (alive counters, CRCs) in Rust later.
-* Python: `recv` releases the GIL in 50 ms slices and calls
-  `PyErr_CheckSignals` between them, so Ctrl-C works during a blocking wait.
+```
+           send(Message)                               recv() -> Message
+               |                                              ^
+         name? |-- no --> its Packet                          | (pending queue)
+               |                                              |
+           Codec::encode -> [Packet]                  Codec::decode(Packet) -> [Message]
+               |                                              ^
+           Transport::send(Packet)                    Transport::recv(timeout) -> Packet
+```
 
-## DBC
+* **Packet**: bytes, an optional CAN header (`id`, `extended`, `fd`, `brs`)
+  and a reception timestamp. It is what a transport moves: a CAN frame, a
+  UDP datagram, a TCP chunk, a file chunk.
+* **Message**: an optional name, named fields (`Value`: null, bool, int,
+  float, str, map) and the packet it came from or goes out as. A nameless
+  message bypasses the codec in both directions.
+* **Transport** (`send`, `recv(timeout)`, `close`; `&self`, `Send + Sync`): one
+  transport serves a receiving thread and periodic senders at once.
+* **Codec** (`encode(&mut, &Message)`, `decode(&mut, Packet)`; `Send`): may keep
+  state across packets (the SBF decoder reassembles blocks across TCP chunks).
+  The channel holds it behind a mutex.
+* **Periodic**: one thread per cyclic message with absolute deadlines (no
+  drift; a deadline missed by more than a period is skipped). The message is
+  encoded on every tick, so time-stamping codecs (`sbf` fills `tow`/`wnc`)
+  stamp each send; it is encoded once up front so a bad message fails at
+  `every()`, not silently on the thread.
 
-`can-dbc` parses the file into an AST; `Database::from_dbc` resolves it into
-messages and signals with value tables, comments, `GenMsgCycleTime`,
-`GenSigStartValue`, `VFrameFormat`, `SIG_VALTYPE_` floats and multiplexing
-(simple `M`/`mN`, and extended `SG_MUL_VAL_` ranges), rejecting signals that
-do not fit in their message.
+## Pluggability
 
-Bit layout (`dbc/bits.rs`): Intel signals occupy `start..start+size`; Motorola
-signals are `size` consecutive bits from the start bit's position in
-most-significant-first numbering. The test suite checks payloads against
-`cantools` for random values of every signal kind.
+`transport::register(scheme, factory)` and `codec::register(name, factory)`
+hold `Arc<dyn Fn(...)>` factories in process-wide registries that the built-in
+ones also live in; `Channel::open(url, codec, options)` looks both up.
+Options are typed `Value`s; URL query values are strings that readers parse
+(`?fd`, `?fd=1`, `?fd=true`), and `Options::finish` rejects any option a
+transport or codec did not consume, so a typo fails loudly.
 
-Encoding uses exact integer arithmetic where the scaling is integral (64-bit
-raw values exceed `f64`), rounds otherwise, and always rejects raw values that
-do not fit. Decoding returns `int` when scaling is integral, `float` otherwise,
-and value-table names when `decode_choices`.
+The Python layer registers Python objects through the same registries:
+`PyTransport` and `PyCodec` implement the Rust traits by calling the object's
+methods with the GIL attached. Every core call that can reach a codec or
+transport (open, send, recv, every, update) runs with the GIL released, so a
+Rust thread (a periodic sender) can call into a Python plugin without
+deadlocking. A Python exception raised in a plugin travels through the core as
+`Error::External` and is re-raised unchanged.
 
-## SBF
+## Transports
 
-`sbf::Decoder` does its own framing so that every block, known or not, comes
-out with its raw bytes, number, revision, TOW and WNc: find `$@`, check the
-length (a multiple of 4, at least 8), wait for the block, check
-CRC-16/XMODEM, and on a bad CRC resync one byte later. The body of a complete
-block goes to `libsbf::parse_datagram`, and `sbf/fields.rs` maps the parsed
-structs of common navigation blocks to name/value fields (do-not-use values
-become `None`).
+* `can://`: raw `CanSocket` or, with `?fd`, `CanFdSocket`; kernel filters
+  (`?filter=ID:MASK`, the identifier kind matched through `CAN_EFF_FLAG`);
+  receive polls in 100 ms slices so `close()` wakes a blocked receiver. Remote
+  and error frames are not delivered.
+* `mem://`: a registry of hubs by name; each endpoint has a bounded queue
+  (oldest dropped) and software filters.
+* `udp://`: one datagram per packet; a listener replies to the last sender.
+* `tcp://`: reader threads push chunks into a queue; a server broadcasts sends
+  to every connected client and drops broken ones. A client channel ends when
+  the connection does.
+* `file://`: replay in 64 KiB chunks (ends at EOF, or `?follow`), or record
+  packet bytes (`?write`, `?append`).
 
-`sbf::encode` writes blocks in the layout of the SBF reference guide
-(PVTGeodetic rev 2, AttEuler rev 1); the tests parse them back with `libsbf`.
+## Codecs
+
+* `dbc`: `can-dbc` parses; `Database::from_dbc` resolves value tables,
+  comments, `GenMsgCycleTime`, `GenSigStartValue`, `VFrameFormat`,
+  `SIG_VALTYPE_` floats and multiplexing (`M`/`mN` and `SG_MUL_VAL_` ranges).
+  Bit layout: Intel signals occupy `start..start+size`; Motorola signals are
+  `size` bits from the start bit's position in most-significant-first order.
+  The tests cross-check payloads against `cantools`.
+* `sbf`: own framing (`$@`, length a multiple of 4, CRC-16/XMODEM, resync one
+  byte after a bad CRC) so every block keeps its raw bytes; bodies go to
+  `libsbf::parse_datagram` and `sbf/fields.rs` maps common navigation blocks to
+  fields. Encoders follow the SBF reference layouts (PVTGeodetic rev 2,
+  AttEuler rev 1).
 
 ## Toward the scenario library
 
-The planned integration is a scenario-side "HIL bridge" that, each simulation
-step, turns ground truth (ego pose and velocity from CARLA) into sensor and
-ECU traffic (SBF over TCP/serial, cyclic CAN messages from a DBC) and decodes
-the device under test's CAN output back into scenario observations. The
-pieces this library adds for that, in order:
-
-1. CAN (SocketCAN/vcan + virtual), DBC codec, SBF decode/encode -- this release.
-2. Transports for SBF and other byte streams (TCP server/client, serial ports).
-3. Rust-side cyclic messages with per-cycle callbacks (counters, E2E CRCs) and
-   timestamped logging/replay (candump/BLF).
-4. More formats behind the same pattern (e.g. NMEA, UBX, RTCM) via existing
-   Rust crates.
+A scenario-side "HIL bridge" opens one channel per device: each simulation
+step turns ground truth (CARLA ego pose and velocity) into device traffic
+(`tcp://...?listen` + `sbf` for a GNSS receiver, `can://` + `dbc:` cyclic
+messages via `every()`), and decodes the device under test's output back into
+observations. Next: serial transport, E2E counters/CRCs in cyclic messages,
+candump/BLF logs, more formats (NMEA, UBX, RTCM) behind the same traits.
