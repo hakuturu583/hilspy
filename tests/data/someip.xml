@@ -30,6 +30,7 @@
                 <fx:ARRAY-DECLARATION>
                   <fx:ARRAY-DIMENSION>
                     <fx:DIMENSION>1</fx:DIMENSION>
+                    <fx:MINIMUM-SIZE>1</fx:MINIMUM-SIZE>
                     <fx:MAXIMUM-SIZE>8</fx:MAXIMUM-SIZE>
                   </fx:ARRAY-DIMENSION>
                 </fx:ARRAY-DECLARATION>

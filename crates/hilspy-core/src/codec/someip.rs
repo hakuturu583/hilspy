@@ -20,16 +20,20 @@
 //! Encoding takes the same shape: header fields are optional
 //! (`message_type` defaults to `REQUEST` for methods and accessors and to
 //! `NOTIFICATION` for events and notifiers, `return_code` to `E_OK`,
-//! `client_id` to the option `client_id` (default 0), `session_id` to a
+//! `client_id` to the option `client_id` (default 0; 0 for notifications,
+//! PRS_SOMEIP_00925), `session_id` to a
 //! counter per method that starts at 1 and skips 0); `length` is computed.
 //! `message_type` and `return_code` take names or numbers.
 //!
 //! Framing: a datagram may carry several messages, and a stream (TCP) is cut
-//! by the length field, with one buffer per packet source. Messages of
+//! by the length field, with one buffer per packet source. Packets with a
+//! source (a TCP connection) are a stream, others whole datagrams, whose
+//! incomplete remainder is an error rather than joined to the next datagram;
+//! the option `stream` overrides that (`stream=True` for a `file://` replay). Messages of
 //! services, methods or interface versions the file lacks, SOME/IP-TP
 //! segments and SOME/IP-SD decode as nameless messages carrying their bytes.
-//! A message whose payload does not decode is an error; the messages that
-//! came with it are delivered by the next decode.
+//! A message whose payload does not decode is an error; the other messages
+//! that came with it are delivered by the next decode.
 
 mod payload;
 
@@ -122,6 +126,10 @@ pub(crate) struct Someip {
     by_id: HashMap<(u16, u8, u16), usize>,
     client_id: u16,
     decode_choices: bool,
+    /// Whether packets are chunks of a byte stream (TCP, a file) whose
+    /// messages may span packets, rather than whole datagrams; `None`
+    /// decides by packet: a stream if it has a source (a TCP connection).
+    stream: Option<bool>,
     sessions: HashMap<(u16, u16), u16>,
     buffers: HashMap<Option<u64>, Vec<u8>>,
     /// Messages decoded before a payload that failed, for the next decode.
@@ -157,6 +165,14 @@ impl Someip {
         let mut o = spec.options;
         let client_id = take_u16(&mut o, "client_id")?.unwrap_or(0);
         let decode_choices = o.take_bool("decode_choices", true)?;
+        let stream = match o.take("stream") {
+            None => None,
+            Some(v) => {
+                let mut one = Options::new();
+                one.insert("stream", v);
+                Some(one.take_bool("stream", false)?)
+            }
+        };
         o.finish("the someip codec")?;
         let mut fd = FibexData::new();
         fd.load_fibex_file(Path::new(&path))
@@ -168,6 +184,7 @@ impl Someip {
             by_id: HashMap::new(),
             client_id,
             decode_choices,
+            stream,
             sessions: HashMap::new(),
             buffers: HashMap::new(),
             ready: Vec::new(),
@@ -424,8 +441,15 @@ impl Codec for Someip {
                 )));
             }
         }
+        // Notifications come from the server: client ID 0x0000
+        // (PRS_SOMEIP_00925) unless the message gives one.
+        let default_client = if message_type == NOTIFICATION {
+            0
+        } else {
+            self.client_id
+        };
         let client_id =
-            header_value(message, "client_id", 0xFFFF, &[])?.map_or(self.client_id, |v| v as u16);
+            header_value(message, "client_id", 0xFFFF, &[])?.map_or(default_client, |v| v as u16);
         let session_id = header_value(message, "session_id", 0xFFFF, &[])?.map(|v| v as u16);
 
         let mut body = Vec::new();
@@ -504,17 +528,27 @@ impl Codec for Someip {
             }
             let frame = &rest[..8 + length];
             used += 8 + length;
+            // A payload that does not decode still has a valid frame
+            // boundary: report it, and keep decoding the frames after it.
             match self.decode_frame(frame, packet.timestamp, packet.source) {
                 Ok(m) => out.push(m),
                 Err(e) => {
-                    failed = Some(e);
-                    break;
+                    failed.get_or_insert(e);
                 }
             }
         }
         buf.drain(..used);
-        if !buf.is_empty() {
-            self.buffers.insert(packet.source, buf);
+        if self.stream.unwrap_or(packet.source.is_some()) {
+            if !buf.is_empty() {
+                self.buffers.insert(packet.source, buf);
+            }
+        } else if !buf.is_empty() && failed.is_none() {
+            // A datagram holds whole messages: a remainder is malformed and
+            // must not be glued to the next datagram.
+            failed = Some(Error::decode(format!(
+                "SOME/IP datagram ends inside a message: {} bytes dropped",
+                buf.len()
+            )));
         }
         match failed {
             None => Ok(out),
@@ -926,6 +960,88 @@ mod tests {
     }
 
     #[test]
+    fn notifications_have_client_id_zero() {
+        let mut c = open(&[("client_id", Value::Int(0x10))]).unwrap();
+        assert_eq!(&encode(&mut c, &set_route())[8..10], [0, 0x10]);
+        // PRS_SOMEIP_00925: an event comes from the server.
+        assert_eq!(&encode(&mut c, &status())[8..10], [0, 0]);
+        // Unless the message says otherwise.
+        let mut m = status();
+        m.fields.push(("client_id".into(), Value::Int(7)));
+        assert_eq!(&encode(&mut c, &m)[8..10], [0, 7]);
+    }
+
+    #[test]
+    fn a_truncated_datagram_is_not_glued_to_the_next() {
+        let mut c = codec();
+        let mut bad = encode(&mut c, &status());
+        bad.extend_from_slice(&encode(&mut c, &set_route())[..20]);
+        let e = c.decode(Packet::bytes(bad)).unwrap_err();
+        assert!(
+            e.to_string().contains("datagram ends inside a message"),
+            "{e}"
+        );
+        assert!(c.buffers.is_empty());
+        // The status decoded before the remainder is delivered with the
+        // next datagram, which decodes on its own.
+        let next = encode(&mut c, &status());
+        let out = c.decode(Packet::bytes(next)).unwrap();
+        let names: Vec<_> = out.iter().map(|m| m.name.as_deref()).collect();
+        assert_eq!(names, [Some("VehicleService.Status"); 2]);
+
+        // A byte stream without a source (a file replay) with stream=True.
+        let mut s = open(&[("stream", Value::Bool(true))]).unwrap();
+        let bytes = encode(&mut s, &set_route());
+        let mut out = Vec::new();
+        for chunk in bytes.chunks(9) {
+            out.extend(s.decode(Packet::bytes(chunk.to_vec())).unwrap());
+        }
+        assert_eq!(out.len(), 1);
+        assert!(open(&[("stream", Value::Str("maybe".into()))]).is_err());
+    }
+
+    #[test]
+    fn dynamic_arrays_respect_their_minimum_size() {
+        let mut c = codec();
+        let mut m = set_route();
+        for (k, v) in &mut m.fields {
+            if k == "waypoints" {
+                *v = Value::List(vec![]);
+            }
+        }
+        let e = c.encode(&m).unwrap_err().to_string();
+        assert!(e.contains("fewer than the minimum 1"), "{e}");
+    }
+
+    #[test]
+    fn unsigned_64_bit_values_keep_their_precision() {
+        let mut c = codec();
+        for t in [u64::MAX, (1u64 << 63) + 1, 1_700_000_000_123] {
+            let mut m = status();
+            for (k, v) in &mut m.fields {
+                if k == "timestamp" {
+                    *v = if let Ok(i) = i64::try_from(t) {
+                        Value::Int(i)
+                    } else {
+                        Value::UInt(t)
+                    };
+                }
+            }
+            let bytes = encode(&mut c, &m);
+            let d = decode_one(&mut c, &bytes);
+            assert_eq!(
+                d.field("timestamp").and_then(|v| match v {
+                    Value::Int(i) => u64::try_from(*i).ok(),
+                    Value::UInt(u) => Some(*u),
+                    _ => None,
+                }),
+                Some(t)
+            );
+            assert_eq!(encode(&mut c, &d)[16..], bytes[16..]);
+        }
+    }
+
+    #[test]
     fn error_messages_carry_their_payload() {
         let mut c = codec();
         let m = Message::new(
@@ -970,7 +1086,8 @@ mod tests {
             e.contains("VehicleService.SetRoute.name") && e.contains("truncated"),
             "{e}"
         );
-        // The message after it arrives with the next packet.
+        // The message after it is decoded too, and arrives with the next
+        // packet (this one returned the error).
         let next = encode(&mut c, &status());
         let out = c.decode(Packet::bytes(next)).unwrap();
         assert_eq!(out.len(), 2);

@@ -190,3 +190,15 @@ def test_tcp_stream(free_port: int) -> None:
             server.send("VehicleService.changed_Mode_field", {"Mode": "NONE"})
             assert time.monotonic() < deadline, "no event received"
         assert m.name == "VehicleService.changed_Mode_field" and m["Mode"] == "NONE"
+
+
+def test_unsigned_64_bit_and_notification_client_id(mem: str) -> None:
+    with hilspy.open(mem, SOMEIP, client_id=0x42) as tx, hilspy.open(mem, SOMEIP) as rx:
+        tx.send("VehicleService.Status", {**STATUS, "timestamp": 2**64 - 1})
+        m = rx.recv(timeout=1)
+        assert m is not None
+        # Values above 2**63 stay exact Python ints; events carry client ID 0.
+        assert m["timestamp"] == 2**64 - 1 and m["client_id"] == 0
+        tx.send(m)
+        again = rx.recv(timeout=1)
+        assert again is not None and again.data == m.data

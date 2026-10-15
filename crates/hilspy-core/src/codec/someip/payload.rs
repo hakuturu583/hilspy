@@ -254,9 +254,14 @@ fn pack(kind: Numeric, values: Vec<Value>) -> Value {
     array.map_or(Value::List(values), Value::Array)
 }
 
-/// A decoded integer as a value: `Int`, or `Float` beyond `i64`.
+/// A decoded integer as a value: `Int`, or `UInt` above `i64::MAX` (the
+/// codec's widest integers are 64-bit, so every one fits one of them).
 fn int_value(n: i128) -> Value {
-    i64::try_from(n).map_or(Value::Float(n as f64), Value::Int)
+    match (i64::try_from(n), u64::try_from(n)) {
+        (Ok(i), _) => Value::Int(i),
+        (Err(_), Ok(u)) => Value::UInt(u),
+        _ => Value::Float(n as f64),
+    }
 }
 
 impl<'a> Serializer<'a> {
@@ -420,6 +425,14 @@ impl<'a> Serializer<'a> {
             if items.len() != n as usize {
                 return Err(Error::encode(format!(
                     "{path}: the array has {n} elements, not {}",
+                    items.len()
+                )));
+            }
+        }
+        if let (None, Some(min)) = (fixed, dim.minimum_size) {
+            if items.len() < min as usize {
+                return Err(Error::encode(format!(
+                    "{path}: {} elements, fewer than the minimum {min}",
                     items.len()
                 )));
             }
@@ -938,6 +951,7 @@ fn utf16(encoding: Option<&Encoding>, path: &str) -> Result<bool> {
 fn integer(value: &Value, enums: Option<&[Enum]>, path: &str) -> Result<i128> {
     match value {
         Value::Int(i) => Ok((*i).into()),
+        Value::UInt(u) => Ok((*u).into()),
         Value::Bool(b) => Ok((*b).into()),
         Value::Float(x) if x.fract() == 0.0 && x.abs() < 1.9e19 => Ok(*x as i128),
         Value::Str(s) => {
@@ -1144,6 +1158,11 @@ mod tests {
             pack(Numeric::I32, vec![Value::Int(-1)]),
             Value::Array(Array::I32(vec![-1]))
         );
-        assert_eq!(int_value(u64::MAX.into()), Value::Float(u64::MAX as f64));
+        assert_eq!(int_value(u64::MAX.into()), Value::UInt(u64::MAX));
+        assert_eq!(int_value(i64::MAX.into()), Value::Int(i64::MAX));
+        assert_eq!(
+            integer(&Value::UInt(u64::MAX), None, "x").unwrap(),
+            u64::MAX.into()
+        );
     }
 }

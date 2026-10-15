@@ -12,6 +12,9 @@ pub enum Value {
     Null,
     Bool(bool),
     Int(i64),
+    /// An unsigned integer beyond `i64` (an `A_UINT64` above `i64::MAX`);
+    /// smaller ones are `Int`.
+    UInt(u64),
     Float(f64),
     Str(String),
     /// A group of named fields (an optional SBF sub-block, ...).
@@ -85,6 +88,7 @@ impl Value {
     pub fn as_f64(&self) -> Option<f64> {
         match self {
             Value::Int(i) => Some(*i as f64),
+            Value::UInt(u) => Some(*u as f64),
             Value::Float(f) => Some(*f),
             Value::Bool(b) => Some(f64::from(u8::from(*b))),
             _ => None,
@@ -102,6 +106,7 @@ impl Value {
     pub fn as_i64(&self) -> Option<i64> {
         match self {
             Value::Int(i) => Some(*i),
+            Value::UInt(u) => i64::try_from(*u).ok(),
             Value::Bool(b) => Some(i64::from(*b)),
             Value::Float(f) if f.fract() == 0.0 && f.is_finite() => Some(*f as i64),
             _ => None,
@@ -115,6 +120,7 @@ impl fmt::Display for Value {
             Value::Null => write!(f, "null"),
             Value::Bool(b) => write!(f, "{b}"),
             Value::Int(i) => write!(f, "{i}"),
+            Value::UInt(u) => write!(f, "{u}"),
             Value::Float(x) => write!(f, "{x:?}"),
             Value::Str(s) => write!(f, "{s:?}"),
             Value::Map(m) => {
@@ -240,9 +246,10 @@ pub(crate) fn from_json(v: serde_json::Value) -> Value {
     match v {
         J::Null => Value::Null,
         J::Bool(b) => Value::Bool(b),
-        J::Number(n) => match n.as_i64() {
-            Some(i) => Value::Int(i),
-            None => Value::Float(n.as_f64().unwrap_or(f64::NAN)),
+        J::Number(n) => match (n.as_i64(), n.as_u64()) {
+            (Some(i), _) => Value::Int(i),
+            (None, Some(u)) => Value::UInt(u),
+            _ => Value::Float(n.as_f64().unwrap_or(f64::NAN)),
         },
         J::String(s) => Value::Str(s),
         J::Array(items) if !items.is_empty() && items.iter().all(|i| i.is_i64()) => Value::Array(
@@ -266,6 +273,7 @@ pub(crate) fn to_json(v: &Value) -> serde_json::Value {
         Value::Null => J::Null,
         Value::Bool(b) => J::Bool(*b),
         Value::Int(i) => J::from(*i),
+        Value::UInt(u) => J::from(*u),
         Value::Float(x) if x.fract() == 0.0 && x.abs() < 9.0e15 => {
             // An integral float may fill an integer field (Python 5.0).
             J::from(*x as i64)

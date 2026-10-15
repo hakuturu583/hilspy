@@ -31,7 +31,7 @@ with hilspy.open("can://vcan0", "dbc:vehicle.dbc") as ecu:
 | `raw` (default) | none: messages carry `data` (and `id` for CAN) |
 | `dbc:FILE` | CAN frames <-> DBC messages, via [`can-dbc`](https://crates.io/crates/can-dbc) (options `strict`, `scaling`, `decode_choices`, `e2e`) |
 | `fibex:FILE` | CAN / CAN FD frames <-> the frames of an ASAM FIBEX channel, via [`afibex`](https://crates.io/crates/afibex) (option `channel`, and the `dbc:` options); see [FIBEX](#fibex-networks) |
-| `someip:FILE` | SOME/IP messages <-> the methods, events and fields of ASAM FIBEX 4 services, parsed by [`afibex`](https://crates.io/crates/afibex) and checked against [`asomeip`](https://crates.io/crates/asomeip) (options `client_id`, `decode_choices`); see [SOME/IP](#someip-services) |
+| `someip:FILE` | SOME/IP messages <-> the methods, events and fields of ASAM FIBEX 4 services, parsed by [`afibex`](https://crates.io/crates/afibex) and checked against [`asomeip`](https://crates.io/crates/asomeip) (options `client_id`, `decode_choices`, `stream`); see [SOME/IP](#someip-services) |
 | `sbf` | Septentrio Binary Format stream <-> blocks, via [`libsbf`](https://crates.io/crates/libsbf); encodes `PVTGeodetic` and `AttEuler` |
 | `nmea` | NMEA 0183 sentences <-> messages via [`nmea`](https://crates.io/crates/nmea) (`GGA`, `RMC`, `GSV`, ...); encodes `GGA`, `RMC`, `VTG`, `HDT`, `ZDA` |
 | `ubx` | u-blox UBX frames <-> messages via [`ublox`](https://crates.io/crates/ublox) (`NAV-PVT`, `NAV-ATT`, `MON-VER`, ...); encodes `NAV-PVT` |
@@ -133,7 +133,8 @@ with hilspy.open("udp://192.168.0.20:30490", "someip:services.xml", client_id=0x
   `array.array`s, enums their names (`decode_choices=False` for numbers).
 * Sending fills the header: `message_type` `REQUEST` (methods, accessors) or
   `NOTIFICATION` (events, notifiers), `return_code` `E_OK`, `client_id` from
-  the option (default 0), `session_id` counting per method from 1. Pass any
+  the option (default 0; notifications 0, as PRS_SOMEIP_00925 requires),
+  `session_id` counting per method from 1. Pass any
   of them to override (a response echoes the request's `client_id` and
   `session_id`). A received message sends back as the same bytes.
 * Serialization follows the FIBEX attributes: byte order, bit lengths,
@@ -141,7 +142,10 @@ with hilspy.open("udp://192.168.0.20:30490", "someip:services.xml", client_id=0x
   (`LENGTH-FIELD-SIZE`, `ARRAY-LENGTH-FIELD-SIZE`, `TYPE-FIELD-SIZE`), fixed
   arrays, UTF-8/UTF-16 and fixed-length strings.
 * A datagram may carry several messages; a TCP stream is cut by the length
-  field. Unknown services or methods, SOME/IP-TP segments and SOME/IP-SD
+  field (a datagram's incomplete remainder is an error, never joined to the
+  next one; `stream=True` treats source-less packets such as a `file://`
+  replay as a stream). Unsigned 64-bit values above 2^63 are Python ints
+  too. Unknown services or methods, SOME/IP-TP segments and SOME/IP-SD
   (service discovery) arrive as nameless messages with their bytes.
 
 ### AUTOSAR E2E (alive counter + CRC)
