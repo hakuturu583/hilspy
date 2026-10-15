@@ -146,3 +146,56 @@ def test_lin_schedule_cycle_times_on_a_clock(mem: str) -> None:
         assert req.period == pytest.approx(0.02)
         with pytest.raises(hilspy.Error, match='"LightCmd" has no cycle time'):
             diag.every(None, "LightCmd", LIGHT_CMD)
+
+
+BRAKE = {"BrakeTorque": 100.0, "Counter": 1}
+YAW = {"YawRate": 1.5, "Valid": 1}
+
+
+def test_flexray_round_trip_over_mem(mem: str) -> None:
+    with (
+        hilspy.open(mem, FIBEX, channel="FlexRayA") as a,
+        hilspy.open(mem, FIBEX, channel="FlexRayA", ecu="Esc") as esc,
+        hilspy.open(mem, FIBEX, channel="FlexRayB") as b,
+        hilspy.open(mem) as raw,
+    ):
+        a.send("YawFr", YAW)
+        frame = raw.recv(timeout=1)
+        assert frame is not None
+        assert (frame.bus, frame.id, frame.channel) == ("flexray", 7, "A")
+        assert frame.cycle is not None and frame.cycle % 4 == 1
+        got = esc.recv(timeout=1)
+        assert got is not None and got.name == "YawFr" and got.fields == YAW
+        assert (got.id, got.cycle) == (7, frame.cycle)
+        # Channel B decodes nothing sent on A only.
+        unknown = b.recv(timeout=1)
+        assert unknown is not None and unknown.name is None and unknown.channel == "A"
+
+
+def test_flexray_wrong_cycle_does_not_match(mem: str) -> None:
+    with hilspy.open(mem, FIBEX, channel="FlexRayA") as rx, hilspy.open(mem) as tx:
+        payload = bytes([150, 0, 1, 0])
+        for cycle in (5, 7, 6):  # YawFr (base 1), DiagFr (base 3), neither
+            tx.send(Message(data=payload, id=7, cycle=cycle, channel="A"))
+        names = [m.name for m in drain(rx)]
+        assert names == ["YawFr", "DiagFr", None]
+        tx.send(Message(data=payload, id=7, cycle=1, channel="AB"))
+        both = rx.recv(timeout=1)
+        assert both is not None and both.name == "YawFr" and both["YawRate"] == 1.5
+
+
+def test_flexray_cycle_times_on_a_clock(mem: str) -> None:
+    clock = hilspy.Clock()
+    with (
+        hilspy.open(mem, FIBEX, channel="FlexRayA", clock=clock) as tx,
+        hilspy.open(mem, FIBEX, channel="FlexRayA") as rx,
+    ):
+        # Cycle 5 ms: BrakeFr every cycle, YawFr every 4th from cycle 1.
+        brake = tx.every(None, "BrakeFr", BRAKE)
+        yaw = tx.every(None, "YawFr", YAW)
+        assert (brake.period, yaw.period) == pytest.approx((0.005, 0.02))
+        clock.advance(0.04)
+        assert (brake.sent_count, yaw.sent_count) == (9, 3)
+        got = drain(rx)
+        assert [m.cycle for m in got if m.name == "BrakeFr"] == list(range(9))
+        assert [m.cycle for m in got if m.name == "YawFr"] == [1, 5, 9]

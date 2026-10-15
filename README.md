@@ -30,7 +30,7 @@ with hilspy.open("can://vcan0", "dbc:vehicle.dbc") as ecu:
 | --- | --- |
 | `raw` (default) | none: messages carry `data` (and `id` for CAN) |
 | `dbc:FILE` | CAN frames <-> DBC messages, via [`can-dbc`](https://crates.io/crates/can-dbc) (options `strict`, `scaling`, `decode_choices`, `e2e`, `ecu`) |
-| `fibex:FILE` | CAN / CAN FD and LIN frames <-> the frames of an ASAM FIBEX channel, via [`afibex`](https://crates.io/crates/afibex) (options `channel`, `schedule`, and the `dbc:` options); see [FIBEX](#fibex-networks) |
+| `fibex:FILE` | CAN / CAN FD, LIN and FlexRay frames <-> the frames of an ASAM FIBEX channel, via [`afibex`](https://crates.io/crates/afibex) (options `channel`, `schedule`, and the `dbc:` options); see [FIBEX](#fibex-networks) |
 | `someip:FILE` | SOME/IP messages <-> the methods, events and fields of ASAM FIBEX 4 services, parsed by [`afibex`](https://crates.io/crates/afibex) and checked against [`asomeip`](https://crates.io/crates/asomeip) (options `client_id`, `decode_choices`, `stream`); see [SOME/IP](#someip-services) |
 | `sbf` | Septentrio Binary Format stream <-> blocks, via [`libsbf`](https://crates.io/crates/libsbf); encodes `PVTGeodetic` and `AttEuler` |
 | `nmea` | NMEA 0183 sentences <-> messages via [`nmea`](https://crates.io/crates/nmea) (`GGA`, `RMC`, `GSV`, ...); encodes `GGA`, `RMC`, `VTG`, `HDT`, `ZDA` |
@@ -81,7 +81,8 @@ The whole public API:
 ### CAN, LIN and FlexRay frames
 
 A raw message's packet may be a frame of one of three buses; its header is
-part of the `Message`:
+part of the `Message` (a `fibex:` codec on a [LIN](#lin-channels) or
+[FlexRay](#flexray-channels) channel fills and checks them):
 
 | `bus` | `id` | Header |
 | --- | --- | --- |
@@ -101,8 +102,9 @@ hilspy.Message(data=bytes(4), id=7, cycle=1, channel="A")  # FlexRay (bus="flexr
 are its data bytes; the checksum is computed under its model unless given
 (diagnostic frames `0x3C` / `0x3D` are always classic). A FlexRay payload is an
 even number of bytes, up to 254. `mem://` carries every header as is (a bad
-LIN checksum arrives bad); there is no LIN or FlexRay hardware transport yet,
-and CAN logs, `udp://` and `tcp://` carry the bytes only.
+LIN checksum arrives bad); there is no LIN or FlexRay hardware transport yet.
+`can://` and CAN logs refuse LIN and FlexRay frames, and the byte transports
+(`udp://`, `tcp://`, `serial://`, raw `file://`) carry the bytes only.
 
 ### Cycle times
 
@@ -110,7 +112,8 @@ and CAN logs, `udp://` and `tcp://` carry the bytes only.
 gives it: a DBC's `GenMsgCycleTime` (milliseconds) or, for `fibex:`, the
 `REPEATING-TIME-RANGE` of the frame triggering's `CYCLIC-TIMING` (an
 `xs:duration` such as `PT0.01S`, so per channel); on a LIN channel, its
-schedule table (see [LIN channels](#lin-channels)). A message without one (or
+schedule table (see [LIN channels](#lin-channels)); on a FlexRay channel, the
+cycle length times the cycle repetition (see [FlexRay channels](#flexray-channels)). A message without one (or
 with a cycle time of 0) raises `hilspy.Error` naming it; other codecs have
 no cycle times. The `Periodic`'s `period` can still be changed afterwards.
 
@@ -146,7 +149,7 @@ with hilspy.open("can://can0", "dbc:vehicle.dbc", ecu="VCU") as vcu:
 
 ### FIBEX networks
 
-`fibex:FILE` sends and receives the CAN, CAN FD and LIN frames of one channel of an
+`fibex:FILE` sends and receives the CAN, CAN FD, LIN and FlexRay frames of one channel of an
 ASAM FIBEX (MCD-2 NET) file, like `dbc:` does a DBC's:
 
 ```python
@@ -232,6 +235,40 @@ msg = lamp.recv()  # msg.bus == "lin", msg.id == 0x10, msg.checksum == 0x49
 * Not covered: the master/slave header-response split (a sender sends the
   whole frame), event-triggered and sporadic frame collision resolution, and
   LDF files.
+
+#### FlexRay channels
+
+A channel of a cluster whose `PROTOCOL` is `FlexRay` sends and receives
+FlexRay frames (again on `mem://` or a plugin transport: there is no FlexRay
+hardware transport):
+
+```python
+clock = hilspy.Clock()
+esc = hilspy.open("mem://chassis-fr", "fibex:network.xml", channel="FlexRayA", clock=clock)
+yaw = esc.every(None, "YawFr", {"YawRate": 1.5, "Valid": 1})  # 4 cycles of 5 ms
+clock.advance(0.04)  # YawFr in cycles 1, 5 and 9: msg.id == 7 (slot), msg.cycle, msg.channel == "A"
+```
+
+* A frame triggering's `ABSOLUTELY-SCHEDULED-TIMING`s give its `SLOT-ID`,
+  `BASE-CYCLE` (default 0) and `CYCLE-REPETITION` (a power of two up to 64,
+  default 1): the frame is sent in that slot of every cycle whose counter
+  modulo the repetition is the base cycle. Frames may share a slot in
+  different cycles (slot multiplexing).
+* The channel's `FLEXRAY-CHANNEL-NAME` (`A` or `B`; both when absent) is the
+  frames' channel. Receiving decodes a frame seen on that channel (`AB`
+  matches both) whose slot and cycle counter match one of the channel's
+  frames; others (another slot, or the right slot in a cycle the frame is not
+  sent in) arrive nameless.
+* Sending pads the payload to whole two-byte words and picks the cycle
+  counter from the message's time (the channel's clock, else the wall clock):
+  the first cycle at or after `floor(time / cycle length) % 64` in which the
+  frame is sent.
+* The cycle length is the cluster's `CYCLE` (microseconds), else
+  `MACRO-PER-CYCLE` times `MACROTICK`; a frame's cycle time is the cycle
+  length times its (first timing's) repetition.
+* Static and dynamic slots are treated alike: a dynamic-segment frame is
+  decoded and encoded by its slot, without minislot arbitration. Startup,
+  sync frames, null frames and the header CRC are not modelled.
 
 ### SOME/IP services
 

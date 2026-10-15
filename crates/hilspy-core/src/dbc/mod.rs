@@ -728,6 +728,26 @@ impl Database {
     /// A database from already-built messages (names and identifiers must be
     /// unique).
     pub fn new(version: String, nodes: Vec<String>, messages: Vec<Message>) -> Result<Self> {
+        Self::build(version, nodes, messages, true)
+    }
+
+    /// A database of messages whose identifiers need not be unique and are
+    /// not looked up ([`Database::message_by_id`] finds nothing): the frames
+    /// of a FlexRay channel, which share slots across cycles.
+    pub fn without_identifiers(
+        version: String,
+        nodes: Vec<String>,
+        messages: Vec<Message>,
+    ) -> Result<Self> {
+        Self::build(version, nodes, messages, false)
+    }
+
+    fn build(
+        version: String,
+        nodes: Vec<String>,
+        messages: Vec<Message>,
+        index_ids: bool,
+    ) -> Result<Self> {
         let mut by_name = HashMap::new();
         let mut by_id = HashMap::new();
         for (i, m) in messages.iter().enumerate() {
@@ -737,7 +757,7 @@ impl Database {
                     m.name
                 )));
             }
-            if by_id.insert((m.id, m.extended), i).is_some() {
+            if index_ids && by_id.insert((m.id, m.extended), i).is_some() {
                 return Err(Error::DbcParse(format!(
                     "duplicate message identifier 0x{:X} ({})",
                     m.id, m.name

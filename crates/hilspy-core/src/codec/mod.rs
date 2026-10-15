@@ -4,7 +4,7 @@
 //! | --- | --- |
 //! | `raw` | none: every packet is a nameless message carrying its data |
 //! | `dbc:FILE` | CAN frames <-> DBC messages (options `strict`, `scaling`, `decode_choices`, `e2e`, `ecu`) |
-//! | `fibex:FILE` | CAN or LIN frames <-> the frames of a FIBEX channel (options `channel`, `schedule`, and the `dbc` options) |
+//! | `fibex:FILE` | CAN, LIN or FlexRay frames <-> the frames of a FIBEX channel (options `channel`, `schedule`, and the `dbc` options) |
 //! | `sbf` | a Septentrio Binary Format byte stream <-> SBF blocks |
 //! | `nmea` | NMEA 0183 sentences <-> messages (`GGA`, `RMC`, ...) |
 //! | `ubx` | u-blox UBX frames <-> messages (`NAV-PVT`, ...) |

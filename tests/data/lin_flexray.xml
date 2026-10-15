@@ -5,7 +5,11 @@
      CLASSIC), MasterReq 0x3C (diagnostic: always classic). Schedule tables:
      Normal = LightCmd 10 ms, LightStatus 20 ms, LightCmd 10 ms (period 40 ms,
      so LightCmd every 20 ms, LightStatus every 40 ms); Diagnostic =
-     MasterReq 10 ms, a free-format entry 10 ms (period 20 ms). -->
+     MasterReq 10 ms, a free-format entry 10 ms (period 20 ms).
+     FlexRay (cycle 5000 us): channel A carries BrakeFr (slot 3, every
+     cycle), YawFr (slot 7, base cycle 1, repetition 4) and DiagFr (slot 7,
+     base cycle 3, repetition 4: slot multiplexing; 3 bytes, padded to 4);
+     channel B BrakeFr only. -->
 <fx:FIBEX xmlns:fx="http://www.asam.net/xml/fbx" xmlns:ho="http://www.asam.net/xml" xmlns:lin="http://www.asam.net/xml/fbx/lin" xmlns:flexray="http://www.asam.net/xml/fbx/flexray" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" VERSION="4.1.2">
   <fx:PROJECT ID="PRJ_LIN_FLEXRAY">
     <ho:SHORT-NAME>HilspyLinFlexRay</ho:SHORT-NAME>
@@ -23,6 +27,26 @@
           <fx:CHANNEL-REF ID-REF="CH_LIN"/>
         </fx:CHANNEL-REFS>
         <fx:MEDIUM>ELECTRICAL</fx:MEDIUM>
+      </fx:CLUSTER>
+      <fx:CLUSTER ID="CL_FR" xsi:type="flexray:CLUSTER-TYPE">
+        <ho:SHORT-NAME>ChassisFlexRay</ho:SHORT-NAME>
+        <fx:SPEED>10000000</fx:SPEED>
+        <fx:IS-HIGH-LOW-BIT-ORDER>true</fx:IS-HIGH-LOW-BIT-ORDER>
+        <fx:BIT-COUNTING-POLICY>SAWTOOTH</fx:BIT-COUNTING-POLICY>
+        <fx:PROTOCOL>FlexRay</fx:PROTOCOL>
+        <fx:PROTOCOL-VERSION>2.1</fx:PROTOCOL-VERSION>
+        <fx:CHANNEL-REFS>
+          <fx:CHANNEL-REF ID-REF="CH_FR_A"/>
+          <fx:CHANNEL-REF ID-REF="CH_FR_B"/>
+        </fx:CHANNEL-REFS>
+        <fx:MEDIUM>ELECTRICAL</fx:MEDIUM>
+        <flexray:COLD-START-ATTEMPTS>8</flexray:COLD-START-ATTEMPTS>
+        <flexray:MACROTICK>1</flexray:MACROTICK>
+        <flexray:MACRO-PER-CYCLE>5000</flexray:MACRO-PER-CYCLE>
+        <flexray:NUMBER-OF-STATIC-SLOTS>60</flexray:NUMBER-OF-STATIC-SLOTS>
+        <flexray:STATIC-SLOT>50</flexray:STATIC-SLOT>
+        <flexray:PAYLOAD-LENGTH-STATIC>2</flexray:PAYLOAD-LENGTH-STATIC>
+        <flexray:CYCLE>5000</flexray:CYCLE>
       </fx:CLUSTER>
     </fx:CLUSTERS>
     <fx:CHANNELS>
@@ -75,6 +99,58 @@
           </lin:SCHEDULE-TABLE>
         </lin:SCHEDULE-TABLES>
       </fx:CHANNEL>
+      <fx:CHANNEL ID="CH_FR_A" xsi:type="flexray:CHANNEL-TYPE">
+        <ho:SHORT-NAME>FlexRayA</ho:SHORT-NAME>
+        <fx:FRAME-TRIGGERINGS>
+          <fx:FRAME-TRIGGERING ID="FT_BrakeFr_A" xsi:type="flexray:FRAME-TRIGGERING-TYPE">
+            <fx:TIMINGS>
+              <fx:ABSOLUTELY-SCHEDULED-TIMING>
+                <fx:SLOT-ID>3</fx:SLOT-ID>
+                <fx:BASE-CYCLE>0</fx:BASE-CYCLE>
+                <fx:CYCLE-REPETITION>1</fx:CYCLE-REPETITION>
+              </fx:ABSOLUTELY-SCHEDULED-TIMING>
+            </fx:TIMINGS>
+            <fx:FRAME-REF ID-REF="F_BrakeFr"/>
+          </fx:FRAME-TRIGGERING>
+          <fx:FRAME-TRIGGERING ID="FT_YawFr" xsi:type="flexray:FRAME-TRIGGERING-TYPE">
+            <fx:TIMINGS>
+              <fx:ABSOLUTELY-SCHEDULED-TIMING>
+                <fx:SLOT-ID>7</fx:SLOT-ID>
+                <fx:BASE-CYCLE>1</fx:BASE-CYCLE>
+                <fx:CYCLE-REPETITION>4</fx:CYCLE-REPETITION>
+              </fx:ABSOLUTELY-SCHEDULED-TIMING>
+            </fx:TIMINGS>
+            <fx:FRAME-REF ID-REF="F_YawFr"/>
+          </fx:FRAME-TRIGGERING>
+          <fx:FRAME-TRIGGERING ID="FT_DiagFr" xsi:type="flexray:FRAME-TRIGGERING-TYPE">
+            <fx:TIMINGS>
+              <fx:ABSOLUTELY-SCHEDULED-TIMING>
+                <fx:SLOT-ID>7</fx:SLOT-ID>
+                <fx:BASE-CYCLE>3</fx:BASE-CYCLE>
+                <fx:CYCLE-REPETITION>4</fx:CYCLE-REPETITION>
+              </fx:ABSOLUTELY-SCHEDULED-TIMING>
+            </fx:TIMINGS>
+            <fx:FRAME-REF ID-REF="F_DiagFr"/>
+          </fx:FRAME-TRIGGERING>
+        </fx:FRAME-TRIGGERINGS>
+        <flexray:FLEXRAY-CHANNEL-NAME>A</flexray:FLEXRAY-CHANNEL-NAME>
+      </fx:CHANNEL>
+      <fx:CHANNEL ID="CH_FR_B" xsi:type="flexray:CHANNEL-TYPE">
+        <ho:SHORT-NAME>FlexRayB</ho:SHORT-NAME>
+        <fx:FRAME-TRIGGERINGS>
+          <fx:FRAME-TRIGGERING ID="FT_BrakeFr_B" xsi:type="flexray:FRAME-TRIGGERING-TYPE">
+            <fx:TIMINGS>
+              <fx:ABSOLUTELY-SCHEDULED-TIMING>
+                <fx:SLOT-ID>3</fx:SLOT-ID>
+                <fx:BASE-CYCLE>0</fx:BASE-CYCLE>
+                <fx:CYCLE-REPETITION>1</fx:CYCLE-REPETITION>
+              </fx:ABSOLUTELY-SCHEDULED-TIMING>
+            </fx:TIMINGS>
+            <fx:FRAME-REF ID-REF="F_BrakeFr"/>
+          </fx:FRAME-TRIGGERING>
+        </fx:FRAME-TRIGGERINGS>
+        <flexray:FLEXRAY-CHANNEL-NAME>B</flexray:FLEXRAY-CHANNEL-NAME>
+      </fx:CHANNEL>
     </fx:CHANNELS>
     <fx:ECUS>
       <fx:ECU ID="ECU_BCM">
@@ -85,6 +161,11 @@
             <fx:INPUTS><fx:INPUT-PORT ID="IP_CON_Bcm_Lin_FT_LightStatus"><fx:FRAME-TRIGGERING-REF ID-REF="FT_LightStatus"/></fx:INPUT-PORT></fx:INPUTS>
             <fx:OUTPUTS><fx:OUTPUT-PORT ID="OP_CON_Bcm_Lin_FT_LightCmd"><fx:FRAME-TRIGGERING-REF ID-REF="FT_LightCmd"/></fx:OUTPUT-PORT><fx:OUTPUT-PORT ID="OP_CON_Bcm_Lin_FT_MasterReq"><fx:FRAME-TRIGGERING-REF ID-REF="FT_MasterReq"/></fx:OUTPUT-PORT></fx:OUTPUTS>
           </fx:CONNECTOR>
+          <fx:CONNECTOR ID="CON_Bcm_FrA">
+            <fx:CHANNEL-REF ID-REF="CH_FR_A"/>
+            <fx:INPUTS><fx:INPUT-PORT ID="IP_CON_Bcm_FrA_FT_BrakeFr_A"><fx:FRAME-TRIGGERING-REF ID-REF="FT_BrakeFr_A"/></fx:INPUT-PORT></fx:INPUTS>
+            <fx:OUTPUTS><fx:OUTPUT-PORT ID="OP_CON_Bcm_FrA_FT_YawFr"><fx:FRAME-TRIGGERING-REF ID-REF="FT_YawFr"/></fx:OUTPUT-PORT><fx:OUTPUT-PORT ID="OP_CON_Bcm_FrA_FT_DiagFr"><fx:FRAME-TRIGGERING-REF ID-REF="FT_DiagFr"/></fx:OUTPUT-PORT></fx:OUTPUTS>
+          </fx:CONNECTOR>
         </fx:CONNECTORS>
       </fx:ECU>
       <fx:ECU ID="ECU_LAMP">
@@ -94,6 +175,21 @@
             <fx:CHANNEL-REF ID-REF="CH_LIN"/>
             <fx:INPUTS><fx:INPUT-PORT ID="IP_CON_Lamp_Lin_FT_LightCmd"><fx:FRAME-TRIGGERING-REF ID-REF="FT_LightCmd"/></fx:INPUT-PORT><fx:INPUT-PORT ID="IP_CON_Lamp_Lin_FT_MasterReq"><fx:FRAME-TRIGGERING-REF ID-REF="FT_MasterReq"/></fx:INPUT-PORT></fx:INPUTS>
             <fx:OUTPUTS><fx:OUTPUT-PORT ID="OP_CON_Lamp_Lin_FT_LightStatus"><fx:FRAME-TRIGGERING-REF ID-REF="FT_LightStatus"/></fx:OUTPUT-PORT></fx:OUTPUTS>
+          </fx:CONNECTOR>
+        </fx:CONNECTORS>
+      </fx:ECU>
+      <fx:ECU ID="ECU_ESC">
+        <ho:SHORT-NAME>Esc</ho:SHORT-NAME>
+        <fx:CONNECTORS>
+          <fx:CONNECTOR ID="CON_Esc_FrA">
+            <fx:CHANNEL-REF ID-REF="CH_FR_A"/>
+            <fx:INPUTS><fx:INPUT-PORT ID="IP_CON_Esc_FrA_FT_YawFr"><fx:FRAME-TRIGGERING-REF ID-REF="FT_YawFr"/></fx:INPUT-PORT><fx:INPUT-PORT ID="IP_CON_Esc_FrA_FT_DiagFr"><fx:FRAME-TRIGGERING-REF ID-REF="FT_DiagFr"/></fx:INPUT-PORT></fx:INPUTS>
+            <fx:OUTPUTS><fx:OUTPUT-PORT ID="OP_CON_Esc_FrA_FT_BrakeFr_A"><fx:FRAME-TRIGGERING-REF ID-REF="FT_BrakeFr_A"/></fx:OUTPUT-PORT></fx:OUTPUTS>
+          </fx:CONNECTOR>
+          <fx:CONNECTOR ID="CON_Esc_FrB">
+            <fx:CHANNEL-REF ID-REF="CH_FR_B"/>
+            <fx:INPUTS></fx:INPUTS>
+            <fx:OUTPUTS><fx:OUTPUT-PORT ID="OP_CON_Esc_FrB_FT_BrakeFr_B"><fx:FRAME-TRIGGERING-REF ID-REF="FT_BrakeFr_B"/></fx:OUTPUT-PORT></fx:OUTPUTS>
           </fx:CONNECTOR>
         </fx:CONNECTORS>
       </fx:ECU>
@@ -155,6 +251,57 @@
           </fx:SIGNAL-INSTANCE>
         </fx:SIGNAL-INSTANCES>
       </fx:PDU>
+      <fx:PDU ID="P_BrakeFr">
+        <ho:SHORT-NAME>BrakeFrPdu</ho:SHORT-NAME>
+        <fx:BYTE-LENGTH>4</fx:BYTE-LENGTH>
+        <fx:PDU-TYPE>APPLICATION</fx:PDU-TYPE>
+        <fx:SIGNAL-INSTANCES>
+          <fx:SIGNAL-INSTANCE ID="SI_BrakeTorque">
+            <fx:BIT-POSITION>0</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+            <fx:SIGNAL-REF ID-REF="S_BrakeTorque"/>
+          </fx:SIGNAL-INSTANCE>
+          <fx:SIGNAL-INSTANCE ID="SI_BrakeCounter">
+            <fx:BIT-POSITION>16</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+            <fx:SIGNAL-REF ID-REF="S_BrakeCounter"/>
+          </fx:SIGNAL-INSTANCE>
+        </fx:SIGNAL-INSTANCES>
+      </fx:PDU>
+      <fx:PDU ID="P_YawFr">
+        <ho:SHORT-NAME>YawFrPdu</ho:SHORT-NAME>
+        <fx:BYTE-LENGTH>4</fx:BYTE-LENGTH>
+        <fx:PDU-TYPE>APPLICATION</fx:PDU-TYPE>
+        <fx:SIGNAL-INSTANCES>
+          <fx:SIGNAL-INSTANCE ID="SI_YawRate">
+            <fx:BIT-POSITION>0</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+            <fx:SIGNAL-REF ID-REF="S_YawRate"/>
+          </fx:SIGNAL-INSTANCE>
+          <fx:SIGNAL-INSTANCE ID="SI_YawValid">
+            <fx:BIT-POSITION>16</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+            <fx:SIGNAL-REF ID-REF="S_YawValid"/>
+          </fx:SIGNAL-INSTANCE>
+        </fx:SIGNAL-INSTANCES>
+      </fx:PDU>
+      <fx:PDU ID="P_DiagFr">
+        <ho:SHORT-NAME>DiagFrPdu</ho:SHORT-NAME>
+        <fx:BYTE-LENGTH>3</fx:BYTE-LENGTH>
+        <fx:PDU-TYPE>APPLICATION</fx:PDU-TYPE>
+        <fx:SIGNAL-INSTANCES>
+          <fx:SIGNAL-INSTANCE ID="SI_DiagCode">
+            <fx:BIT-POSITION>0</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+            <fx:SIGNAL-REF ID-REF="S_DiagCode"/>
+          </fx:SIGNAL-INSTANCE>
+          <fx:SIGNAL-INSTANCE ID="SI_DiagState">
+            <fx:BIT-POSITION>8</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+            <fx:SIGNAL-REF ID-REF="S_DiagState"/>
+          </fx:SIGNAL-INSTANCE>
+        </fx:SIGNAL-INSTANCES>
+      </fx:PDU>
     </fx:PDUS>
     <fx:FRAMES>
       <fx:FRAME ID="F_LightCmd">
@@ -193,6 +340,42 @@
           </fx:PDU-INSTANCE>
         </fx:PDU-INSTANCES>
       </fx:FRAME>
+      <fx:FRAME ID="F_BrakeFr">
+        <ho:SHORT-NAME>BrakeFr</ho:SHORT-NAME>
+        <fx:BYTE-LENGTH>4</fx:BYTE-LENGTH>
+        <fx:FRAME-TYPE>APPLICATION</fx:FRAME-TYPE>
+        <fx:PDU-INSTANCES>
+          <fx:PDU-INSTANCE ID="PI_BrakeFr">
+            <fx:PDU-REF ID-REF="P_BrakeFr"/>
+            <fx:BIT-POSITION>0</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+          </fx:PDU-INSTANCE>
+        </fx:PDU-INSTANCES>
+      </fx:FRAME>
+      <fx:FRAME ID="F_YawFr">
+        <ho:SHORT-NAME>YawFr</ho:SHORT-NAME>
+        <fx:BYTE-LENGTH>4</fx:BYTE-LENGTH>
+        <fx:FRAME-TYPE>APPLICATION</fx:FRAME-TYPE>
+        <fx:PDU-INSTANCES>
+          <fx:PDU-INSTANCE ID="PI_YawFr">
+            <fx:PDU-REF ID-REF="P_YawFr"/>
+            <fx:BIT-POSITION>0</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+          </fx:PDU-INSTANCE>
+        </fx:PDU-INSTANCES>
+      </fx:FRAME>
+      <fx:FRAME ID="F_DiagFr">
+        <ho:SHORT-NAME>DiagFr</ho:SHORT-NAME>
+        <fx:BYTE-LENGTH>3</fx:BYTE-LENGTH>
+        <fx:FRAME-TYPE>APPLICATION</fx:FRAME-TYPE>
+        <fx:PDU-INSTANCES>
+          <fx:PDU-INSTANCE ID="PI_DiagFr">
+            <fx:PDU-REF ID-REF="P_DiagFr"/>
+            <fx:BIT-POSITION>0</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+          </fx:PDU-INSTANCE>
+        </fx:PDU-INSTANCES>
+      </fx:FRAME>
     </fx:FRAMES>
     <fx:SIGNALS>
       <fx:SIGNAL ID="S_Brightness">
@@ -223,6 +406,30 @@
         <ho:SHORT-NAME>Sid</ho:SHORT-NAME>
         <fx:CODING-REF ID-REF="C_Byte"/>
       </fx:SIGNAL>
+      <fx:SIGNAL ID="S_BrakeTorque">
+        <ho:SHORT-NAME>BrakeTorque</ho:SHORT-NAME>
+        <fx:CODING-REF ID-REF="C_Torque"/>
+      </fx:SIGNAL>
+      <fx:SIGNAL ID="S_BrakeCounter">
+        <ho:SHORT-NAME>Counter</ho:SHORT-NAME>
+        <fx:CODING-REF ID-REF="C_Byte"/>
+      </fx:SIGNAL>
+      <fx:SIGNAL ID="S_YawRate">
+        <ho:SHORT-NAME>YawRate</ho:SHORT-NAME>
+        <fx:CODING-REF ID-REF="C_Yaw"/>
+      </fx:SIGNAL>
+      <fx:SIGNAL ID="S_YawValid">
+        <ho:SHORT-NAME>Valid</ho:SHORT-NAME>
+        <fx:CODING-REF ID-REF="C_Byte"/>
+      </fx:SIGNAL>
+      <fx:SIGNAL ID="S_DiagCode">
+        <ho:SHORT-NAME>Code</ho:SHORT-NAME>
+        <fx:CODING-REF ID-REF="C_Byte"/>
+      </fx:SIGNAL>
+      <fx:SIGNAL ID="S_DiagState">
+        <ho:SHORT-NAME>State</ho:SHORT-NAME>
+        <fx:CODING-REF ID-REF="C_Byte"/>
+      </fx:SIGNAL>
     </fx:SIGNALS>
   </fx:ELEMENTS>
   <fx:PROCESSING-INFORMATION>
@@ -230,6 +437,8 @@
       <ho:UNITS>
         <ho:UNIT ID="U_PCT"><ho:SHORT-NAME>PCT</ho:SHORT-NAME><ho:DISPLAY-NAME>%</ho:DISPLAY-NAME></ho:UNIT>
         <ho:UNIT ID="U_A"><ho:SHORT-NAME>A</ho:SHORT-NAME><ho:DISPLAY-NAME>A</ho:DISPLAY-NAME></ho:UNIT>
+        <ho:UNIT ID="U_NM"><ho:SHORT-NAME>NM</ho:SHORT-NAME><ho:DISPLAY-NAME>Nm</ho:DISPLAY-NAME></ho:UNIT>
+        <ho:UNIT ID="U_DPS"><ho:SHORT-NAME>DPS</ho:SHORT-NAME><ho:DISPLAY-NAME>deg/s</ho:DISPLAY-NAME></ho:UNIT>
       </ho:UNITS>
     </ho:UNIT-SPEC>
     <fx:CODINGS>
@@ -324,6 +533,52 @@
           <ho:COMPU-METHOD>
             <ho:SHORT-NAME>Byte</ho:SHORT-NAME>
             <ho:CATEGORY>IDENTICAL</ho:CATEGORY>
+          </ho:COMPU-METHOD>
+        </ho:COMPU-METHODS>
+      </fx:CODING>
+      <fx:CODING ID="C_Torque">
+        <ho:SHORT-NAME>Torque</ho:SHORT-NAME>
+        <ho:CODED-TYPE ho:BASE-DATA-TYPE="A_UINT16" CATEGORY="STANDARD-LENGTH-TYPE" ENCODING="UNSIGNED">
+          <ho:BIT-LENGTH>16</ho:BIT-LENGTH>
+        </ho:CODED-TYPE>
+        <ho:COMPU-METHODS>
+          <ho:COMPU-METHOD>
+            <ho:SHORT-NAME>Torque</ho:SHORT-NAME>
+            <ho:CATEGORY>LINEAR</ho:CATEGORY>
+            <ho:UNIT-REF ID-REF="U_NM"/>
+            <ho:COMPU-INTERNAL-TO-PHYS>
+              <ho:COMPU-SCALES>
+                <ho:COMPU-SCALE>
+                  <ho:COMPU-RATIONAL-COEFFS>
+                    <ho:COMPU-NUMERATOR><ho:V>0</ho:V><ho:V>0.5</ho:V></ho:COMPU-NUMERATOR>
+                    <ho:COMPU-DENOMINATOR><ho:V>1</ho:V></ho:COMPU-DENOMINATOR>
+                  </ho:COMPU-RATIONAL-COEFFS>
+                </ho:COMPU-SCALE>
+              </ho:COMPU-SCALES>
+            </ho:COMPU-INTERNAL-TO-PHYS>
+          </ho:COMPU-METHOD>
+        </ho:COMPU-METHODS>
+      </fx:CODING>
+      <fx:CODING ID="C_Yaw">
+        <ho:SHORT-NAME>Yaw</ho:SHORT-NAME>
+        <ho:CODED-TYPE ho:BASE-DATA-TYPE="A_UINT16" CATEGORY="STANDARD-LENGTH-TYPE" ENCODING="UNSIGNED">
+          <ho:BIT-LENGTH>16</ho:BIT-LENGTH>
+        </ho:CODED-TYPE>
+        <ho:COMPU-METHODS>
+          <ho:COMPU-METHOD>
+            <ho:SHORT-NAME>Yaw</ho:SHORT-NAME>
+            <ho:CATEGORY>LINEAR</ho:CATEGORY>
+            <ho:UNIT-REF ID-REF="U_DPS"/>
+            <ho:COMPU-INTERNAL-TO-PHYS>
+              <ho:COMPU-SCALES>
+                <ho:COMPU-SCALE>
+                  <ho:COMPU-RATIONAL-COEFFS>
+                    <ho:COMPU-NUMERATOR><ho:V>0</ho:V><ho:V>0.01</ho:V></ho:COMPU-NUMERATOR>
+                    <ho:COMPU-DENOMINATOR><ho:V>1</ho:V></ho:COMPU-DENOMINATOR>
+                  </ho:COMPU-RATIONAL-COEFFS>
+                </ho:COMPU-SCALE>
+              </ho:COMPU-SCALES>
+            </ho:COMPU-INTERNAL-TO-PHYS>
           </ho:COMPU-METHOD>
         </ho:COMPU-METHODS>
       </fx:CODING>

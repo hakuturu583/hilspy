@@ -1,5 +1,5 @@
-//! `fibex:FILE`: CAN / CAN FD and LIN frames <-> the frames of one channel of
-//! an ASAM FIBEX network description (see [`crate::fibex`]).
+//! `fibex:FILE`: CAN / CAN FD, LIN and FlexRay frames <-> the frames of one
+//! channel of an ASAM FIBEX network description (see [`crate::fibex`]).
 //!
 //! Option `channel` selects the channel by short name or ID (optional when
 //! the file has a single channel). The frames become a DBC database, so the
@@ -22,6 +22,19 @@
 //! an intact payload and becomes the `e2e` field), it yields no message;
 //! `recv` raises and the next frame decodes as usual. The schedule tables give
 //! cycle times (option `schedule` picks the table, see [`crate::fibex`]).
+//!
+//! On a FlexRay channel packets are FlexRay frames on the channel's channel
+//! (`A`, `B`, or `AB` when the file names none). Decoding takes a frame seen
+//! on that channel (`AB` overlaps both) and finds the frame sent in its slot
+//! in its cycle (`cycle % repetition == base cycle`); any other frame,
+//! including one in the right slot of a cycle the frame is not sent in, is
+//! nameless. Encoding pads the payload to whole two-byte words and picks the
+//! cycle counter from the message's time (the channel's clock, else the wall
+//! clock): the first cycle at or after `floor(time / cycle length)` modulo 64
+//! in which the frame is sent (the frame's first base cycle when the cluster
+//! has no cycle length). The cycle time is the cycle length times the
+//! repetition, so `every(None, ...)` on a clock sends each frame in its own
+//! cycles.
 
 use std::collections::HashMap;
 use std::time::Duration;
@@ -29,8 +42,8 @@ use std::time::Duration;
 use super::dbc::{Dbc, SignalOptions};
 use super::Codec;
 use crate::error::{Error, Result};
-use crate::fibex::{Bus, LinFrame};
-use crate::message::{Message, Packet};
+use crate::fibex::{Bus, FlexRayFrame, LinFrame};
+use crate::message::{now_timestamp, FlexRayChannel, Message, Packet};
 use crate::url::CodecSpec;
 
 pub(crate) fn open(spec: CodecSpec) -> Result<Box<dyn Codec>> {
@@ -54,6 +67,12 @@ pub(crate) fn open(spec: CodecSpec) -> Result<Box<dyn Codec>> {
                 .map(|f| (f.name.clone(), f.clone()))
                 .collect(),
             by_id: lin.frames.into_iter().map(|f| (f.id, f)).collect(),
+        }),
+        Bus::FlexRay(fr) => Box::new(FlexRayCodec {
+            dbc,
+            cycle: fr.cycle,
+            channel: fr.channel,
+            frames: fr.frames,
         }),
     })
 }
@@ -107,11 +126,77 @@ impl Codec for LinCodec {
     }
 }
 
+/// The `dbc` codec over a FlexRay channel's frames, with FlexRay framing.
+struct FlexRayCodec {
+    dbc: Dbc,
+    cycle: Option<Duration>,
+    channel: FlexRayChannel,
+    frames: Vec<FlexRayFrame>,
+}
+
+impl FlexRayCodec {
+    /// The slot and cycle counter to send `frame` in at `time` (seconds).
+    fn schedule(&self, frame: &FlexRayFrame, time: f64) -> (u16, u8) {
+        let first = frame.timings[0];
+        let Some(cycle) = self.cycle else {
+            return (first.slot, first.base_cycle);
+        };
+        // A tolerance for times at a cycle boundary computed in floats.
+        let now = (time / cycle.as_secs_f64() + 1e-6).floor().max(0.0) as u64;
+        (0..64u64)
+            .find_map(|k| {
+                let c = ((now + k) % 64) as u8;
+                frame
+                    .timings
+                    .iter()
+                    .find(|t| c % t.repetition == t.base_cycle)
+                    .map(|t| (t.slot, c))
+            })
+            .unwrap_or((first.slot, first.base_cycle))
+    }
+}
+
+impl Codec for FlexRayCodec {
+    fn encode(&mut self, message: &Message) -> Result<Vec<Packet>> {
+        let mut data = self.dbc.payload(message)?;
+        if data.len() % 2 == 1 {
+            data.push(0);
+        }
+        let name = message.name.as_deref().unwrap_or_default();
+        let f = self
+            .frames
+            .iter()
+            .find(|f| f.name == name)
+            .ok_or_else(|| Error::NotFound(format!("no message named {name:?}")))?;
+        let time = message.timestamp().unwrap_or_else(now_timestamp);
+        let (slot, cycle) = self.schedule(f, time);
+        Ok(vec![Packet::flexray(slot, cycle, self.channel, data)])
+    }
+
+    fn decode(&mut self, packet: Packet) -> Result<Vec<Message>> {
+        let frame = packet.flexray.and_then(|h| {
+            if !h.channel.overlaps(self.channel) {
+                return None;
+            }
+            self.frames.iter().find(|f| f.matches(h.slot, h.cycle))
+        });
+        let Some(f) = frame else {
+            return Ok(vec![Message::raw(packet)]);
+        };
+        let name = f.name.clone();
+        Ok(vec![self.dbc.decode_as(&name, packet, |_| Ok(()))?])
+    }
+
+    fn cycle_time(&self, message: &Message) -> Option<Duration> {
+        self.dbc.cycle_time(message)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::codec::Codec;
-    use crate::message::{CanHeader, LinChecksum, Message, Packet};
+    use crate::message::{CanHeader, FlexRayChannel, LinChecksum, Message, Packet};
     use crate::value::{Options, Value};
 
     const NETWORK: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/data/network.xml");
@@ -539,5 +624,104 @@ mod tests {
         .err()
         .unwrap();
         assert!(e.to_string().contains("not a LIN channel"), "{e}");
+    }
+
+    fn at(name: &str, kv: &[(&str, Value)], time: f64) -> Message {
+        let mut m = Message::new(name, fields(kv));
+        m.packet = Some(Packet {
+            timestamp: Some(time),
+            ..Packet::default()
+        });
+        m
+    }
+
+    #[test]
+    fn flexray_frames_carry_slot_cycle_and_channel() {
+        let mut a = lin_flexray("FlexRayA", &[]).unwrap();
+        let brake = [
+            ("BrakeTorque", Value::Float(100.0)),
+            ("Counter", Value::Int(1)),
+        ];
+        let yaw = [("YawRate", Value::Float(1.5)), ("Valid", Value::Int(1))];
+        let diag = [("Code", Value::Int(0x42)), ("State", Value::Int(2))];
+        let header = |c: &mut Box<dyn Codec>, m: Message| {
+            let p = c.encode(&m).unwrap().remove(0);
+            let h = p.flexray.unwrap();
+            (h.slot, h.cycle, h.channel, p)
+        };
+        // Cycle length 5 ms: the cycle counter is the time's cycle, or the
+        // next one the frame is sent in.
+        let (slot, cycle, channel, p) = header(&mut a, at("BrakeFr", &brake, 0.012));
+        assert_eq!((slot, cycle, channel), (3, 2, FlexRayChannel::A));
+        assert_eq!(p.data, [200, 0, 1, 0]);
+        assert!(p.can.is_none() && p.lin.is_none());
+        let cycles: Vec<_> = [0.0, 0.005, 0.0051, 0.02, 0.3, 0.32]
+            .iter()
+            .map(|&t| header(&mut a, at("YawFr", &yaw, t)).1)
+            .collect();
+        // Base 1, repetition 4; 0.3 s is cycle 60, 0.32 s cycle 64 = 0.
+        assert_eq!(cycles, [1, 1, 1, 5, 61, 1]);
+        let (slot, cycle, _, p) = header(&mut a, at("DiagFr", &diag, 0.0));
+        assert_eq!((slot, cycle), (7, 3));
+        assert_eq!(p.data, [0x42, 2, 0, 0], "3 bytes padded to a word");
+        // Decoding by slot and cycle.
+        let name = |c: &mut Box<dyn Codec>, p: Packet| c.decode(p).unwrap().remove(0).name;
+        let payload = vec![150, 0, 1, 0];
+        let fr = |slot, cycle, channel| Packet::flexray(slot, cycle, channel, payload.clone());
+        assert_eq!(
+            name(&mut a, fr(7, 5, FlexRayChannel::A)).as_deref(),
+            Some("YawFr")
+        );
+        assert_eq!(
+            name(&mut a, fr(7, 7, FlexRayChannel::A)).as_deref(),
+            Some("DiagFr")
+        );
+        assert_eq!(
+            name(&mut a, fr(7, 2, FlexRayChannel::A)),
+            None,
+            "wrong cycle"
+        );
+        assert_eq!(
+            name(&mut a, fr(8, 1, FlexRayChannel::A)),
+            None,
+            "unknown slot"
+        );
+        assert_eq!(
+            name(&mut a, fr(7, 1, FlexRayChannel::B)),
+            None,
+            "other channel"
+        );
+        assert_eq!(
+            name(&mut a, fr(7, 1, FlexRayChannel::AB)).as_deref(),
+            Some("YawFr")
+        );
+        let m = a.decode(fr(7, 1, FlexRayChannel::A)).unwrap().remove(0);
+        assert_eq!(m.field("YawRate"), Some(&Value::Float(1.5)));
+        assert_eq!(name(&mut a, Packet::can(7, payload.clone())), None);
+        let mut b = lin_flexray("FlexRayB", &[]).unwrap();
+        assert_eq!(name(&mut b, fr(3, 9, FlexRayChannel::A)), None);
+        assert_eq!(
+            name(&mut b, fr(3, 9, FlexRayChannel::B)).as_deref(),
+            Some("BrakeFr")
+        );
+        let (_, _, channel, _) = header(&mut b, at("BrakeFr", &brake, 0.0));
+        assert_eq!(channel, FlexRayChannel::B);
+        // Cycle times: cycle length times repetition.
+        let cycle = |c: &dyn Codec, n: &str| c.cycle_time(&Message::new(n, vec![]));
+        assert_eq!(cycle(a.as_ref(), "BrakeFr"), Some(Duration::from_millis(5)));
+        assert_eq!(cycle(a.as_ref(), "YawFr"), Some(Duration::from_millis(20)));
+        // The ecu option applies as on CAN.
+        let mut esc = lin_flexray("FlexRayA", &[("ecu", Value::Str("Esc".into()))]).unwrap();
+        let e = esc.encode(&at("YawFr", &yaw, 0.0)).unwrap_err();
+        assert!(e.to_string().contains("sent by Bcm, not Esc"), "{e}");
+        assert_eq!(
+            name(&mut esc, fr(7, 1, FlexRayChannel::A)).as_deref(),
+            Some("YawFr")
+        );
+        assert_eq!(
+            name(&mut esc, fr(3, 1, FlexRayChannel::A)),
+            None,
+            "its own frame"
+        );
     }
 }

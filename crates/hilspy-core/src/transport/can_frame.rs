@@ -38,6 +38,16 @@ pub fn fd_padded_len(len: usize) -> Option<usize> {
 /// Check that a packet is a valid CAN frame for a bus with or without CAN
 /// FD, and return its header (FD set when the payload needs it).
 pub(crate) fn check(packet: &Packet, fd_bus: bool) -> Result<CanHeader> {
+    if packet.lin.is_some() || packet.flexray.is_some() {
+        return Err(Error::InvalidPacket(format!(
+            "a CAN transport cannot send a {} frame",
+            if packet.lin.is_some() {
+                "LIN"
+            } else {
+                "FlexRay"
+            }
+        )));
+    }
     let mut h = packet
         .can
         .ok_or_else(|| Error::InvalidPacket("a CAN transport needs a message with an id".into()))?;
@@ -132,6 +142,9 @@ mod tests {
 
     #[test]
     fn checks_frames() {
+        let lin = Packet::lin(1, crate::message::LinChecksum::Classic, vec![]);
+        let e = check(&lin, true).unwrap_err().to_string();
+        assert!(e.contains("cannot send a LIN frame"), "{e}");
         assert!(check(&Packet::can(0x7FF, vec![]), false).is_ok());
         let mut p = Packet::can(0x800, vec![]);
         p.can.as_mut().unwrap().extended = false;

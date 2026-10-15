@@ -174,7 +174,15 @@ deadlocking. A Python exception raised in a plugin travels through the core as
   checksum; decoding verifies the checksum under the frame's model after the
   `ecu` filter and before E2E, and a mismatch is `Error::Decode` (a
   link-layer check like the CAN CRC: no message, the stream continues),
-  unlike E2E's status field. Compu methods that one factor
+  unlike E2E's status field. On a FlexRay channel the triggerings'
+  `ABSOLUTELY-SCHEDULED-TIMING`s (slot, base cycle, repetition) place the
+  frames; frames share slots across cycles, so the database is built
+  `without_identifiers`. Decoding matches channel (A/B/AB overlap), slot and
+  `cycle % repetition == base`; encoding picks the first matching cycle
+  counter at or after the message time's cycle (`floor(t / cycle) % 64`),
+  so frames sent on a virtual clock land in their own cycles. Cycle times
+  are the cluster `CYCLE` (or macroticks) times the repetition. No hardware
+  transport exists for either bus; `mem://` carries both. Compu methods that one factor
   and offset plus exact value table entries cannot express become a
   per-signal `dbc::Coding` (texttable ranges, piecewise linear and rational
   scales; `dbc/coding.rs`) that `Signal` encoding and decoding consult

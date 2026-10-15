@@ -1,11 +1,12 @@
-//! ASAM FIBEX (MCD-2 NET) network descriptions: the CAN / CAN FD or LIN
-//! frames of one channel, converted to a DBC [`Database`] so the `dbc`
-//! encoding, decoding and E2E protection apply unchanged, plus what the
+//! ASAM FIBEX (MCD-2 NET) network descriptions: the CAN / CAN FD, LIN or
+//! FlexRay frames of one channel, converted to a DBC [`Database`] so the
+//! `dbc` encoding, decoding and E2E protection apply unchanged, plus what the
 //! channel's bus adds ([`Bus`]: LIN identifiers, checksum models and schedule
-//! tables).
+//! tables; FlexRay slots, cycles and channel).
 //!
 //! The bus is the `PROTOCOL` of the cluster whose `CHANNEL-REFS` name the
-//! channel: `LIN` makes a LIN channel, anything else (or no cluster) CAN.
+//! channel: `LIN` makes a LIN channel, `FlexRay` a FlexRay one, anything else
+//! (or no cluster) CAN.
 //!
 //! LIN: a frame triggering's `IDENTIFIER-VALUE` is the frame identifier
 //! (0..=63). Its checksum model is the triggering's `CHECKSUM-TYPE` (or
@@ -20,6 +21,18 @@
 //! evenly spaced, the mean interval otherwise), from the table chosen with
 //! `schedule`, else the first table (in document order) that sends the
 //! frame, else its triggering's `CYCLIC-TIMING`.
+//!
+//! FlexRay: a frame triggering's `ABSOLUTELY-SCHEDULED-TIMING`s (`SLOT-ID`,
+//! `BASE-CYCLE`, default 0, and `CYCLE-REPETITION`, a power of two up to 64,
+//! default 1) say where the frame is sent: in its slot in every cycle whose
+//! counter modulo the repetition is the base cycle. Several frames may share
+//! a slot in different cycles, so the database is built
+//! [without identifiers](Database::without_identifiers) (a message's `id` is
+//! its first slot). The channel's `FLEXRAY-CHANNEL-NAME` (`A` or `B`; both
+//! when absent) is the frames' channel. The cluster's `CYCLE` (microseconds;
+//! else `MACRO-PER-CYCLE` times `MACROTICK`, in microseconds) is the cycle
+//! length, and a frame's cycle time is the cycle length times its first
+//! timing's repetition. Static and dynamic slots are treated alike.
 //!
 //! The `afibex` crate parses the file: channels, frames with their PDU
 //! instances, PDUs with their signal instances, signals and the coded types
@@ -82,7 +95,7 @@ use crate::dbc::{
     bits, ByteOrder, Coding, Conversion, Database, Message, Multiplexing, Scale, Signal, ValueKind,
 };
 use crate::error::{Error, Result};
-use crate::message::LinChecksum;
+use crate::message::{FlexRayChannel, LinChecksum};
 
 fn bad(msg: impl Into<String>) -> Error {
     Error::FibexParse(msg.into())
@@ -109,6 +122,54 @@ pub enum Bus {
     Can,
     /// LIN: the database's `id` is the frame identifier.
     Lin(Lin),
+    /// FlexRay: frames by slot and cycle.
+    FlexRay(FlexRay),
+}
+
+/// The FlexRay side of a channel.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FlexRay {
+    /// The cluster's cycle length, if it gives one.
+    pub cycle: Option<Duration>,
+    /// The channel's name: `A`, `B`, or both when the file does not say.
+    pub channel: FlexRayChannel,
+    /// The channel's frames, in triggering order.
+    pub frames: Vec<FlexRayFrame>,
+}
+
+/// A FlexRay frame of a channel.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FlexRayFrame {
+    /// The database message's name.
+    pub name: String,
+    /// Where it is sent (at least one).
+    pub timings: Vec<SlotTiming>,
+}
+
+/// An absolutely scheduled timing: a slot in every `repetition`-th cycle
+/// from `base_cycle`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SlotTiming {
+    /// 1..=2047.
+    pub slot: u16,
+    /// Less than the repetition.
+    pub base_cycle: u8,
+    /// A power of two, 1..=64.
+    pub repetition: u8,
+}
+
+impl SlotTiming {
+    /// Whether the frame is sent in `slot` of cycle `cycle`.
+    pub fn matches(&self, slot: u16, cycle: u8) -> bool {
+        slot == self.slot && cycle % self.repetition == self.base_cycle
+    }
+}
+
+impl FlexRayFrame {
+    /// Whether the frame is sent in `slot` of cycle `cycle`.
+    pub fn matches(&self, slot: u16, cycle: u8) -> bool {
+        self.timings.iter().any(|t| t.matches(slot, cycle))
+    }
 }
 
 /// The LIN side of a channel.
@@ -449,6 +510,7 @@ struct Network<'d, 'a, 'i> {
 enum BusKind {
     Can,
     Lin,
+    FlexRay,
 }
 
 impl BusKind {
@@ -457,6 +519,7 @@ impl BusKind {
         match self {
             Self::Can => 64,
             Self::Lin => 8,
+            Self::FlexRay => 254,
         }
     }
 }
@@ -476,6 +539,8 @@ impl Network<'_, '_, '_> {
             .unwrap_or_default();
         let kind = if protocol.contains("LIN") {
             BusKind::Lin
+        } else if protocol.contains("FLEXRAY") {
+            BusKind::FlexRay
         } else {
             BusKind::Can
         };
@@ -552,12 +617,50 @@ impl Network<'_, '_, '_> {
                     schedule_tables: tables.into_iter().map(|(_, t)| t).collect(),
                 })
             }
+            BusKind::FlexRay => {
+                let cycle = cluster.map(flexray_cycle).transpose()?.flatten();
+                let channel_name = child(node, "FLEXRAY-CHANNEL-NAME")
+                    .map(|n| {
+                        FlexRayChannel::parse(text(n)).ok_or_else(|| {
+                            bad(format!(
+                                "channel {channel}: FLEXRAY-CHANNEL-NAME {:?} is not A or B",
+                                text(n)
+                            ))
+                        })
+                    })
+                    .transpose()?
+                    .unwrap_or(FlexRayChannel::AB);
+                let mut frames = Vec::new();
+                for t in triggerings {
+                    let Some((t, timings)) = flexray_triggering(t)? else {
+                        continue;
+                    };
+                    let mut m = self.message(&t, kind)?;
+                    if let Some(cycle) = cycle {
+                        m.cycle_time = Some(cycle * u32::from(timings[0].repetition));
+                    }
+                    frames.push(FlexRayFrame {
+                        name: m.name.clone(),
+                        timings,
+                    });
+                    messages.push(m);
+                }
+                Bus::FlexRay(FlexRay {
+                    cycle,
+                    channel: channel_name,
+                    frames,
+                })
+            }
         };
-        let database =
-            Database::new(String::new(), self.ecus.clone(), messages).map_err(|e| match e {
-                Error::DbcParse(m) => bad(format!("channel {channel}: {m}")),
-                e => e,
-            })?;
+        let build = if kind == BusKind::FlexRay {
+            Database::without_identifiers
+        } else {
+            Database::new
+        };
+        let database = build(String::new(), self.ecus.clone(), messages).map_err(|e| match e {
+            Error::DbcParse(m) => bad(format!("channel {channel}: {m}")),
+            e => e,
+        })?;
         Ok(ChannelDescription { database, bus })
     }
 
@@ -629,6 +732,9 @@ impl Network<'_, '_, '_> {
             return Err(bad(match kind {
                 BusKind::Can => format!("frame {name} is {size} bytes (at most 64)"),
                 BusKind::Lin => format!("LIN frame {name} is {size} bytes (at most 8)"),
+                BusKind::FlexRay => {
+                    format!("FlexRay frame {name} is {size} bytes (at most 254)")
+                }
             }));
         }
         // (PDU name, signal name, signal) for every signal of every PDU.
@@ -1261,6 +1367,95 @@ fn lin_triggering(t: Node<'_, '_>, classic: bool) -> Result<Option<(Triggering, 
         id,
         model,
     )))
+}
+
+/// A FlexRay frame triggering and its `ABSOLUTELY-SCHEDULED-TIMING`s;
+/// `None` for one without any.
+fn flexray_triggering(t: Node<'_, '_>) -> Result<Option<(Triggering, Vec<SlotTiming>)>> {
+    let tid = attr(t, "ID").unwrap_or_default();
+    let mut timings = Vec::new();
+    for timing in children(t, "TIMINGS").flat_map(|n| children(n, "ABSOLUTELY-SCHEDULED-TIMING")) {
+        let field = |name: &str, default: Option<u64>| -> Result<u64> {
+            match child(timing, name) {
+                Some(n) => integer(text(n)).ok_or_else(|| {
+                    bad(format!(
+                        "frame triggering {tid}: {name} {:?} is not a number",
+                        text(n)
+                    ))
+                }),
+                None => default
+                    .ok_or_else(|| bad(format!("frame triggering {tid}: a timing has no {name}"))),
+            }
+        };
+        let slot = field("SLOT-ID", None)?;
+        let base = field("BASE-CYCLE", Some(0))?;
+        let repetition = field("CYCLE-REPETITION", Some(1))?;
+        if !(1..=2047).contains(&slot) {
+            return Err(bad(format!(
+                "frame triggering {tid}: slot {slot} is not in 1..=2047"
+            )));
+        }
+        if !(1..=64).contains(&repetition) || !repetition.is_power_of_two() {
+            return Err(bad(format!(
+                "frame triggering {tid}: cycle repetition {repetition} is not a power of two \
+                 up to 64"
+            )));
+        }
+        if base >= repetition {
+            return Err(bad(format!(
+                "frame triggering {tid}: base cycle {base} is not below the cycle repetition \
+                 {repetition}"
+            )));
+        }
+        timings.push(SlotTiming {
+            slot: slot as u16,
+            base_cycle: base as u8,
+            repetition: repetition as u8,
+        });
+    }
+    if timings.is_empty() {
+        return Ok(None);
+    }
+    let frame = child(t, "FRAME-REF")
+        .and_then(|f| attr(f, "ID-REF"))
+        .ok_or_else(|| bad(format!("frame triggering {tid} has no FRAME-REF")))?;
+    Ok(Some((
+        Triggering {
+            tid: tid.to_owned(),
+            id: u32::from(timings[0].slot),
+            extended: false,
+            fd: false,
+            frame: frame.to_owned(),
+            cycle_time: None,
+        },
+        timings,
+    )))
+}
+
+/// A FlexRay cluster's cycle length: `CYCLE` (microseconds), else
+/// `MACRO-PER-CYCLE` times `MACROTICK` (microseconds); `None` without them.
+fn flexray_cycle(cluster: Node<'_, '_>) -> Result<Option<Duration>> {
+    let us = |name: &str| -> Result<Option<f64>> {
+        child(cluster, name)
+            .map(|n| number(n, &format!("FlexRay cluster {name}")))
+            .transpose()
+    };
+    let micros = match us("CYCLE")? {
+        Some(c) => Some(c),
+        None => match (us("MACRO-PER-CYCLE")?, us("MACROTICK")?) {
+            (Some(n), Some(t)) => Some(n * t),
+            _ => None,
+        },
+    };
+    match micros {
+        Some(m) if m.is_finite() && m > 0.0 => {
+            Ok(Some(Duration::from_nanos((m * 1e3).round() as u64)))
+        }
+        Some(m) => Err(bad(format!(
+            "FlexRay cluster: cycle length {m} us is not positive"
+        ))),
+        None => Ok(None),
+    }
 }
 
 /// The `SCHEDULE-TABLE`s of a LIN channel and its cluster, with their IDs.
