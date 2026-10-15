@@ -120,6 +120,7 @@ fn packet<F: EmbeddedFrame>(f: &F, fd: bool, brs: bool) -> Packet {
         data: f.data().to_vec(),
         can: Some(header(f, fd, brs)),
         timestamp: Some(now_timestamp()),
+        source: None,
     }
 }
 

@@ -101,3 +101,43 @@ def test_dropping_a_periodic_with_a_python_codec_does_not_hang() -> None:
         assert ch.recv(timeout=5) is not None
         del task
         gc.collect()
+
+
+class SlowCodec(JsonCodec):
+    """Encoding releases and re-takes the GIL (as Python code does)."""
+
+    def encode(self, message: Message) -> list[Message]:
+        import time
+
+        time.sleep(0.02)
+        return super().encode(message)
+
+
+hilspy.register_codec("slowjson", SlowCodec)
+
+
+def test_stop_while_another_thread_queries_the_task() -> None:
+    # Regression: stop() held a lock while joining a sender thread that was
+    # waiting for the GIL, and a second thread blocked on that lock with the
+    # GIL held.
+    import threading
+    import time
+
+    with hilspy.open("loop://f", "slowjson") as ch:
+        task = ch.every(0.001, "Tick", {"n": 1})
+        done = threading.Event()
+
+        def poll() -> None:
+            while not done.is_set():
+                _ = task.running, task.period, task.sent_count, repr(task)
+
+        poller = threading.Thread(target=poll)
+        poller.start()
+        time.sleep(0.05)
+        stopper = threading.Thread(target=task.stop)
+        stopper.start()
+        stopper.join(timeout=10)
+        done.set()
+        poller.join(timeout=10)
+        assert not stopper.is_alive() and not poller.is_alive(), "deadlock"
+        assert not task.running

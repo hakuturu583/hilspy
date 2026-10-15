@@ -36,8 +36,12 @@ fn resolve(addr: &str) -> Result<SocketAddr> {
         .ok_or_else(|| Error::Config(format!("{addr:?} resolves to no address")))
 }
 
-/// Read chunks from one stream into the queue until it ends.
+/// Read chunks from one stream into the queue until it ends. Each
+/// connection gets its own `source`, so stream codecs do not interleave
+/// bytes from different clients.
 fn spawn_reader(shared: Arc<Shared>, mut stream: TcpStream, server: bool) {
+    static NEXT_SOURCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    let source = NEXT_SOURCE.fetch_add(1, Ordering::Relaxed);
     std::thread::Builder::new()
         .name("hilspy-tcp-read".into())
         .spawn(move || {
@@ -48,6 +52,7 @@ fn spawn_reader(shared: Arc<Shared>, mut stream: TcpStream, server: bool) {
                     Ok(n) => {
                         let mut p = Packet::bytes(buf[..n].to_vec());
                         p.timestamp = Some(now_timestamp());
+                        p.source = Some(source);
                         shared.queue.push(p);
                     }
                 }

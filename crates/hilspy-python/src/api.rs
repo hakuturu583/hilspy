@@ -1,6 +1,5 @@
 //! `open`, `Channel` and `Periodic`.
 
-use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use hilspy_core::{Channel as CoreChannel, Error as CoreError, Periodic as CorePeriodic};
@@ -110,9 +109,7 @@ impl Channel {
         let task = py
             .detach(|| self.inner.every(period, message, total))
             .py()?;
-        Ok(Periodic {
-            inner: Mutex::new(task),
-        })
+        Ok(Periodic { inner: task })
     }
 
     /// Close the channel; blocked receivers stop, iteration ends.
@@ -165,22 +162,19 @@ impl Channel {
 }
 
 /// A message sent periodically by `Channel.every`.
+///
+/// No method holds a lock across a GIL-dependent wait: the sender thread may
+/// need the GIL (a Python codec or transport) while `stop()` joins it.
 #[pyclass(module = "hilspy", name = "Periodic", frozen)]
 pub(crate) struct Periodic {
-    inner: Mutex<CorePeriodic>,
-}
-
-impl Periodic {
-    fn task(&self) -> std::sync::MutexGuard<'_, CorePeriodic> {
-        self.inner.lock().unwrap()
-    }
+    inner: CorePeriodic,
 }
 
 impl Drop for Periodic {
     /// Stop without the GIL: the sender thread may be waiting for it inside
     /// a Python codec or transport.
     fn drop(&mut self) {
-        let task = self.inner.get_mut().unwrap_or_else(|e| e.into_inner());
+        let task = &self.inner;
         Python::attach(|py| py.detach(|| task.stop()));
     }
 }
@@ -196,43 +190,40 @@ impl Periodic {
         fields: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<()> {
         let message = message_arg(message, fields)?;
-        let task = self.task();
-        py.detach(|| task.update(message));
+        py.detach(|| self.inner.update(message));
         Ok(())
     }
 
     /// Stop sending and wait for the sender thread (idempotent).
     fn stop(&self, py: Python<'_>) {
-        let mut guard = self.task();
-        let task: &mut CorePeriodic = &mut guard;
-        py.detach(|| task.stop());
+        py.detach(|| self.inner.stop());
     }
 
     /// Period in seconds.
     #[getter]
     fn get_period(&self) -> f64 {
-        self.task().period().as_secs_f64()
+        self.inner.period().as_secs_f64()
     }
 
     #[setter]
     fn set_period(&self, period: f64) -> PyResult<()> {
-        self.task().set_period(duration(period, "period")?).py()
+        self.inner.set_period(duration(period, "period")?).py()
     }
 
     #[getter]
     fn sent_count(&self) -> u64 {
-        self.task().sent_count()
+        self.inner.sent_count()
     }
 
     /// The last send error (sending continues after one).
     #[getter]
     fn last_error(&self) -> Option<String> {
-        self.task().last_error()
+        self.inner.last_error()
     }
 
     #[getter]
     fn running(&self) -> bool {
-        self.task().is_running()
+        self.inner.is_running()
     }
 
     fn __enter__(slf: Py<Self>) -> Py<Self> {
@@ -245,7 +236,7 @@ impl Periodic {
     }
 
     fn __repr__(&self) -> String {
-        let t = self.task();
+        let t = &self.inner;
         format!(
             "Periodic(period={}, sent_count={}, running={})",
             t.period().as_secs_f64(),

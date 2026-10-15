@@ -170,6 +170,7 @@ impl Message {
                     brs: fd,
                 }),
                 timestamp: None,
+                source: None,
             })
         } else {
             None

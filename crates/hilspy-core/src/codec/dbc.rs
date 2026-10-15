@@ -87,6 +87,7 @@ impl Codec for Dbc {
                 brs: m.fd,
             }),
             timestamp: None,
+            source: None,
         }])
     }
 

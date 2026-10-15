@@ -66,8 +66,9 @@ fn att_euler_round_trip() {
     assert_eq!(b.name, Some("AttEuler"));
     assert_eq!(b.field("heading"), Some(&Field::Float(90.25)));
     assert_eq!(b.field("heading_dot"), Some(&Field::Null));
+    assert_eq!(b.field("mode"), Some(&Field::Int(4)));
     assert_eq!(
-        b.field("mode"),
+        b.field("mode_name"),
         Some(&Field::Str("HeadingPitchRollFixed".into()))
     );
 }

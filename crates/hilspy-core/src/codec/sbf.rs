@@ -9,6 +9,8 @@
 //! Encoding takes `PVTGeodetic` and `AttEuler` messages (the fields of
 //! [`crate::sbf::encode`]); `tow`/`wnc` default to the current GPS time.
 
+use std::collections::HashMap;
+
 use super::Codec;
 use crate::error::{Error, Result};
 use crate::message::{now_timestamp, Message, Packet};
@@ -32,7 +34,8 @@ pub(crate) fn gps_time(unix: f64) -> (u16, u32) {
 }
 
 pub(crate) struct Sbf {
-    decoder: Decoder,
+    /// One stream per packet source (TCP connection).
+    decoders: HashMap<Option<u64>, Decoder>,
 }
 
 impl Sbf {
@@ -42,7 +45,7 @@ impl Sbf {
         }
         spec.options.finish("the sbf codec")?;
         Ok(Self {
-            decoder: Decoder::new(),
+            decoders: HashMap::new(),
         })
     }
 }
@@ -71,6 +74,7 @@ fn message(block: Block, timestamp: Option<f64>) -> Message {
             data: block.raw,
             can: None,
             timestamp,
+            source: None,
         }),
     }
 }
@@ -106,6 +110,13 @@ impl Fields {
         }
     }
 
+    /// Drop the fields decoding adds that encoding derives itself, so a
+    /// received message can be sent on unchanged.
+    fn ignore_decoded(&mut self) {
+        self.0
+            .retain(|(n, _)| !matches!(n.as_str(), "revision" | "mode_name"));
+    }
+
     fn finish(self, block: &str) -> Result<()> {
         match self.0.first() {
             None => Ok(()),
@@ -115,11 +126,22 @@ impl Fields {
 }
 
 fn encode_pvt_geodetic(mut f: Fields, wnc: u16, tow: u32) -> Result<Vec<u8>> {
+    f.ignore_decoded();
     let d = PvtGeodetic::default();
+    // Decoding splits the mode byte into `mode` (bits 0-3) and `mode_2d` (bit 7).
+    let mode_2d = match f.take("mode_2d") {
+        None | Some(Value::Null) => false,
+        Some(Value::Bool(b)) => b,
+        Some(v) => {
+            return Err(Error::encode(format!(
+                "field mode_2d: {v} is not a boolean"
+            )))
+        }
+    };
     let block = PvtGeodetic {
         tow: f.int("tow")?.or(Some(tow)),
         wnc: f.int("wnc")?.or(Some(wnc)),
-        mode: f.int("mode")?.unwrap_or(d.mode),
+        mode: f.int::<u8>("mode")?.unwrap_or(d.mode) | if mode_2d { 0x80 } else { 0 },
         error: f.int("error")?.unwrap_or(d.error),
         latitude: f.f64("latitude")?,
         longitude: f.f64("longitude")?,
@@ -151,6 +173,7 @@ fn encode_pvt_geodetic(mut f: Fields, wnc: u16, tow: u32) -> Result<Vec<u8>> {
 }
 
 fn encode_att_euler(mut f: Fields, wnc: u16, tow: u32) -> Result<Vec<u8>> {
+    f.ignore_decoded();
     let block = AttEuler {
         tow: f.int("tow")?.or(Some(tow)),
         wnc: f.int("wnc")?.or(Some(wnc)),
@@ -188,7 +211,9 @@ impl Codec for Sbf {
     fn decode(&mut self, packet: Packet) -> Result<Vec<Message>> {
         let ts = packet.timestamp;
         Ok(self
-            .decoder
+            .decoders
+            .entry(packet.source)
+            .or_default()
             .feed(&packet.data)
             .into_iter()
             .map(|b| message(b, ts))

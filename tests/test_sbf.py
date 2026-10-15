@@ -91,3 +91,51 @@ def test_udp(free_port: int) -> None:
         server.send("AttEuler", {"roll": 1.5})  # replies to the last sender
         r = client.recv(timeout=2)
         assert r is not None and r["roll"] == 1.5
+
+
+def test_received_messages_can_be_sent_on(mem: str) -> None:
+    with hilspy.open(mem, "sbf") as tx, hilspy.open(mem, "sbf") as rx:
+        tx.send("PVTGeodetic", {**PVT, "mode_2d": True})
+        tx.send("AttEuler", {"heading": 1.0, "mode": 3})
+        pvt, att = rx.recv(timeout=1), rx.recv(timeout=1)
+        assert pvt is not None and pvt["mode_2d"] is True and pvt["mode"] == 4
+        assert att is not None and (att["mode"], att["mode_name"]) == (3, "HeadingPitchRollFloat")
+        # Forward them unchanged: the same bytes go out again.
+        rx.send(pvt)
+        rx.send(att)
+        again = [tx.recv(timeout=1), tx.recv(timeout=1)]
+        assert [m.data for m in again if m is not None] == [pvt.data, att.data]
+
+
+def test_close_drops_pending_messages(mem: str) -> None:
+    with hilspy.open(mem, "sbf") as enc, hilspy.open(mem) as raw:
+        enc.send("AttEuler", {"heading": 1.0})
+        enc.send("AttEuler", {"heading": 2.0})
+        both = b"".join(m.data or b"" for m in (raw.recv(timeout=1), raw.recv(timeout=1)) if m)
+    with hilspy.open(mem) as tx, hilspy.open(mem, "sbf") as rx:
+        tx.send(Message(data=both))  # one packet, two blocks
+        assert rx.recv(timeout=1) is not None
+        rx.close()
+        with pytest.raises(hilspy.Error, match="closed"):
+            rx.recv(timeout=0)
+        assert list(rx) == []
+
+
+def test_tcp_server_keeps_client_streams_apart(free_port: int, mem: str) -> None:
+    with hilspy.open(mem, "sbf") as enc, hilspy.open(mem) as raw:
+        enc.send("AttEuler", {"heading": 1.0})
+        enc.send("AttEuler", {"heading": 2.0})
+        a, b = (m.data or b"" for m in (raw.recv(timeout=1), raw.recv(timeout=1)) if m)
+    with (
+        hilspy.open(f"tcp://127.0.0.1:{free_port}?listen", "sbf") as server,
+        hilspy.open(f"tcp://127.0.0.1:{free_port}") as client_a,
+        hilspy.open(f"tcp://127.0.0.1:{free_port}") as client_b,
+    ):
+        # Interleave on the server: half of A, all of B, rest of A.
+        client_a.send(Message(data=a[:20]))
+        time.sleep(0.1)
+        client_b.send(Message(data=b))
+        time.sleep(0.1)
+        client_a.send(Message(data=a[20:]))
+        got = sorted(m["heading"] for m in (server.recv(timeout=2), server.recv(timeout=2)) if m)
+        assert got == [1.0, 2.0]

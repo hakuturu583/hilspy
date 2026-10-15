@@ -73,6 +73,9 @@ impl Channel {
     /// The next decoded message, or `None` once `timeout` passes.
     pub fn recv(&self, timeout: Option<Duration>) -> Result<Option<Message>> {
         let inner = &self.inner;
+        if inner.closed.load(Ordering::Acquire) {
+            return Err(Error::Closed);
+        }
         if let Some(m) = inner.pending.lock().unwrap().pop_front() {
             return Ok(Some(m));
         }
@@ -141,7 +144,8 @@ struct Shared {
 /// Dropping it stops it.
 pub struct Periodic {
     shared: Arc<Shared>,
-    thread: Option<JoinHandle<()>>,
+    /// Taken by the first `stop`, which joins it outside the lock.
+    thread: Mutex<Option<JoinHandle<()>>>,
 }
 
 impl Periodic {
@@ -174,7 +178,7 @@ impl Periodic {
             .spawn(move || run(inner, worker, duration))?;
         Ok(Self {
             shared,
-            thread: Some(thread),
+            thread: Mutex::new(Some(thread)),
         })
     }
 
@@ -211,14 +215,21 @@ impl Periodic {
 
     pub fn is_running(&self) -> bool {
         !self.shared.state.lock().unwrap().stopped
-            && self.thread.as_ref().is_some_and(|t| !t.is_finished())
+            && self
+                .thread
+                .lock()
+                .unwrap()
+                .as_ref()
+                .is_some_and(|t| !t.is_finished())
     }
 
-    /// Stop and wait for the sender thread (idempotent).
-    pub fn stop(&mut self) {
+    /// Stop and wait for the sender thread (idempotent). No lock is held
+    /// while joining, so other threads can query the task meanwhile.
+    pub fn stop(&self) {
         self.shared.state.lock().unwrap().stopped = true;
         self.shared.wake.notify_all();
-        if let Some(t) = self.thread.take() {
+        let thread = self.thread.lock().unwrap().take();
+        if let Some(t) = thread {
             let _ = t.join();
         }
     }
@@ -326,7 +337,7 @@ mod tests {
     fn periodic_follows_updates() {
         let tx = Channel::open("mem://t-ch-periodic", "raw", Options::new()).unwrap();
         let rx = Channel::open("mem://t-ch-periodic", "raw", Options::new()).unwrap();
-        let mut task = tx
+        let task = tx
             .every(
                 Duration::from_millis(10),
                 Message::raw(Packet::bytes(vec![1])),

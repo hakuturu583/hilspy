@@ -25,6 +25,9 @@ pub struct Packet {
     pub can: Option<CanHeader>,
     /// Reception time, seconds since the Unix epoch.
     pub timestamp: Option<f64>,
+    /// The connection a packet arrived on, for transports with several
+    /// (a TCP server): stream codecs keep one decoder per source.
+    pub source: Option<u64>,
 }
 
 impl Packet {
@@ -45,6 +48,7 @@ impl Packet {
                 brs: false,
             }),
             timestamp: None,
+            source: None,
         }
     }
 }
