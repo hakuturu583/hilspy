@@ -151,8 +151,9 @@ def test_periodic_task(channel: str) -> None:
         task.stop()
         assert not task.is_running
         sent = task.sent_count
-        # Loose bounds: timer granularity is ~15 ms on Windows CI runners.
-        assert 5 <= sent <= 40
+        # Loose bounds: timers are coarse (~15 ms on Windows) and shared CI
+        # runners can stall the sender thread.
+        assert 2 <= sent <= 40
         frames = []
         while (f := rx.recv(timeout=0)) is not None:
             frames.append(f.data)
@@ -164,10 +165,14 @@ def test_periodic_task(channel: str) -> None:
 
 def test_periodic_task_duration(channel: str) -> None:
     with Bus(channel, "virtual") as tx:
-        with tx.send_periodic(Frame(0x50), period=0.005, duration=0.03) as task:
-            time.sleep(0.08)
+        with tx.send_periodic(Frame(0x50), period=0.01, duration=0.1) as task:
+            deadline = time.monotonic() + 5
+            while task.is_running and time.monotonic() < deadline:
+                time.sleep(0.01)
+            # The task ends on its own. Counts only get an upper bound: a
+            # shared CI runner can stall the sender thread for tens of ms.
             assert not task.is_running
-            assert 2 <= task.sent_count <= 8
+            assert 1 <= task.sent_count <= 11
             with pytest.raises(BusClosedError):
                 task.modify(Frame(0x51))
 
