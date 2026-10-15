@@ -20,18 +20,25 @@ Ctrl-C.
 
 ## Install
 
-Linux, Python 3.10+. One abi3 wheel serves every Python version.
+Python 3.10+. One abi3 wheel per platform serves every Python version; wheels
+are built for Linux (x86_64, aarch64), macOS (arm64, x86_64) and Windows x64.
+SocketCAN is Linux-only; the virtual bus, DBC and SBF work everywhere.
 
 ```sh
-uv add hilspy                       # or: pip install hilspy
+pip install hilspy
+uv add hilspy
+pip install git+https://github.com/hakuturu583/hilspy   # from source (needs Rust)
 ```
 
-From a checkout (needs a Rust toolchain):
+From a checkout:
 
 ```sh
 uv sync                             # builds the extension with maturin
 uv run pytest
 ```
+
+Versions follow semver and are released by labelling the PR (`bump patch` /
+`bump minor` / `bump major`); see [`docs/releasing.md`](docs/releasing.md).
 
 ## CAN
 

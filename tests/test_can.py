@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 import threading
 import time
 
@@ -150,7 +151,8 @@ def test_periodic_task(channel: str) -> None:
         task.stop()
         assert not task.is_running
         sent = task.sent_count
-        assert 12 <= sent <= 30
+        # Loose bounds: timer granularity is ~15 ms on Windows CI runners.
+        assert 5 <= sent <= 40
         frames = []
         while (f := rx.recv(timeout=0)) is not None:
             frames.append(f.data)
@@ -165,7 +167,7 @@ def test_periodic_task_duration(channel: str) -> None:
         with tx.send_periodic(Frame(0x50), period=0.005, duration=0.03) as task:
             time.sleep(0.08)
             assert not task.is_running
-            assert 5 <= task.sent_count <= 8
+            assert 2 <= task.sent_count <= 8
             with pytest.raises(BusClosedError):
                 task.modify(Frame(0x51))
 
@@ -176,5 +178,6 @@ def test_unknown_interface() -> None:
 
 
 def test_missing_socketcan_interface() -> None:
-    with pytest.raises(OSError):
+    expected = OSError if sys.platform == "linux" else UnsupportedInterfaceError
+    with pytest.raises(expected):
         Bus("hilspy-no-such-if0", "socketcan")

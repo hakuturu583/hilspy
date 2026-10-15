@@ -1,0 +1,75 @@
+name: Build distributions
+
+# The wheels (one abi3 wheel per platform, Python 3.10+) and the sdist, each
+# installed with pip and tested. Called by CI (every PR) and by the release.
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: "Commit to build (default: the triggering commit)"
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  wheels:
+    name: wheel (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: linux-x86_64, os: ubuntu-latest, target: x86_64, test: true }
+          # Cross-built in the manylinux container; not runnable on the host.
+          - { name: linux-aarch64, os: ubuntu-latest, target: aarch64, test: false }
+          - { name: macos-arm64, os: macos-14, target: aarch64, test: true }
+          - { name: macos-x86_64, os: macos-14, target: x86_64, test: false }
+          - { name: windows-x64, os: windows-latest, target: x64, test: true }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: PyO3/maturin-action@v1
+        with:
+          command: build
+          target: ${{ matrix.target }}
+          manylinux: auto
+          args: --release --out dist
+      - uses: actions/setup-python@v5
+        if: matrix.test
+        with:
+          python-version: "3.10"
+      - name: pip install the wheel and run the tests against it
+        if: matrix.test
+        shell: bash
+        run: |
+          python -m pip install dist/*.whl pytest cantools tomli
+          cd tests && python -m pytest -q -p no:cacheprovider .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.name }}
+          path: dist/*.whl
+
+  sdist:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: PyO3/maturin-action@v1
+        with:
+          command: sdist
+          args: --out dist
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: pip install the sdist (builds from source) and test it
+        run: |
+          python -m pip install dist/*.tar.gz pytest cantools
+          cd tests && python -m pytest -q -p no:cacheprovider .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-sdist
+          path: dist/*.tar.gz

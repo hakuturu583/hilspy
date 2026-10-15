@@ -1,0 +1,43 @@
+name: PR Check
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  pull-requests: read
+
+jobs:
+  check-version-bump-label:
+    # Merging a PR releases the version its label asks for (release.yml), so
+    # every PR states one: exactly one of bump patch / minor / major, or
+    # "no release".
+    name: Check Version Bump Label
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: pr } = await github.rest.pulls.get({
+              ...context.repo,
+              pull_number: context.issue.number,
+            });
+            const allowed = ['bump patch', 'bump minor', 'bump major', 'no release'];
+            const found = pr.labels.map(l => l.name).filter(n => allowed.includes(n));
+            core.info(`Release labels: ${found.join(', ') || '(none)'}`);
+            if (found.length !== 1) {
+              core.setFailed(
+                `A PR needs exactly one of these labels, found ${found.length}:\n` +
+                allowed.map(n => `  - ${n}`).join('\n') +
+                '\n\nbump patch: fixes and docs, bump minor: new features, ' +
+                'bump major: breaking changes, no release: nothing shipped changes.'
+              );
+            }
+
+  actionlint:
+    name: Lint workflows
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uvx --from actionlint-py actionlint .github/workflows/*.yml

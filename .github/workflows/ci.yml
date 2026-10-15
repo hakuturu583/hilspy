@@ -70,17 +70,5 @@ jobs:
           uv run pytest -v -rs tests/test_socketcan.py | tee result.txt
           ! grep -qi skipped result.txt
 
-  wheel:
-    name: build the abi3 wheel
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: PyO3/maturin-action@v1
-        with:
-          command: build
-          args: --release --out dist
-          manylinux: auto
-      - uses: actions/upload-artifact@v4
-        with:
-          name: wheel
-          path: dist/*.whl
+  dist:
+    uses: ./.github/workflows/build-dist.yml

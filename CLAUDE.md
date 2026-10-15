@@ -33,4 +33,10 @@ HILSPY_TEST_VCAN=vcan0 uv run pytest tests/test_socketcan.py   # needs vcan0 (CI
 - New behaviour gets a Rust unit test in the core and a Python test; DBC
   bit-layout changes must keep `tests/test_dbc.py::test_matches_cantools` green.
 - The Python package supports 3.10+ (abi3 wheel); write 3.10-compatible code.
+- Versions: never edit them by hand. `tools/bump_version.py` keeps
+  `pyproject.toml`, `Cargo.toml`, `uv.lock` and `Cargo.lock` in step
+  (`tests/test_version.py`); the release workflow runs it on merge.
+- Every PR gets exactly one label: `bump patch` / `bump minor` / `bump major`
+  / `no release` (`docs/releasing.md`). Merging a bump label tags `vX`,
+  builds wheels + sdist (`build-dist.yml`) and publishes to PyPI.
 - All repository content is in English.
