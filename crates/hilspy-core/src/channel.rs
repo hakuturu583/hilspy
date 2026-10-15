@@ -16,6 +16,9 @@ use crate::value::Options;
 struct Inner {
     transport: Arc<dyn Transport>,
     codec: Mutex<Box<dyn Codec>>,
+    /// Held for a whole send (encode and every packet), so the packets of
+    /// concurrent sends do not interleave; decoding does not take it.
+    sending: Mutex<()>,
     pending: Mutex<VecDeque<Message>>,
     closed: AtomicBool,
 }
@@ -25,19 +28,48 @@ impl Inner {
         if self.closed.load(Ordering::Acquire) {
             return Err(Error::Closed);
         }
-        let packets = match (&message.name, &message.packet) {
-            (None, Some(p)) => vec![p.clone()],
+        let _sending = self.sending.lock().unwrap();
+        let (packets, paced) = match (&message.name, &message.packet) {
+            (None, Some(p)) => (vec![p.clone()], false),
             (None, None) => {
                 return Err(Error::encode("a message needs a name or data"));
             }
-            (Some(_), _) => self.codec.lock().unwrap().encode(message)?,
+            (Some(_), _) => {
+                let mut codec = self.codec.lock().unwrap();
+                (codec.encode(message)?, codec.paced())
+            }
         };
+        let start = Instant::now();
+        let first = packets.first().and_then(|p| p.timestamp);
         for p in &packets {
+            if let (true, Some(t0), Some(t)) = (paced, first, p.timestamp) {
+                let delay = t - t0;
+                if delay.is_finite() {
+                    self.wait_until(start + Duration::from_secs_f64(delay.clamp(0.0, 3600.0)))?;
+                }
+            }
             self.transport.send(p)?;
         }
         Ok(())
     }
+
+    /// Sleep until `deadline`, returning early with `Closed` on close.
+    fn wait_until(&self, deadline: Instant) -> Result<()> {
+        loop {
+            if self.closed.load(Ordering::Acquire) {
+                return Err(Error::Closed);
+            }
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return Ok(());
+            }
+            std::thread::sleep(left.min(PACE_POLL));
+        }
+    }
 }
+
+/// How often a paced send checks for close.
+const PACE_POLL: Duration = Duration::from_millis(20);
 
 /// A transport and a codec composed. Cloning shares the channel.
 #[derive(Clone)]
@@ -59,6 +91,7 @@ impl Channel {
             inner: Arc::new(Inner {
                 transport,
                 codec: Mutex::new(codec),
+                sending: Mutex::new(()),
                 pending: Mutex::new(VecDeque::new()),
                 closed: AtomicBool::new(false),
             }),
@@ -399,6 +432,70 @@ mod tests {
             "dbc:{}/../../tests/data/vehicle.dbc",
             env!("CARGO_MANIFEST_DIR")
         )
+    }
+
+    #[test]
+    fn paced_codecs_spread_a_message_over_its_packet_times() {
+        use crate::value::{Array, Value};
+        let scan = Message::new(
+            "scan",
+            ["x", "y", "z"]
+                .iter()
+                .map(|k| ((*k).to_owned(), Value::Array(Array::F64(vec![10.0]))))
+                .collect(),
+        );
+        let paced = Channel::open("mem://t-ch-pace", "lidar:vlp16", Options::new()).unwrap();
+        let rx = Channel::open("mem://t-ch-pace", "raw", Options::new()).unwrap();
+        let start = Instant::now();
+        paced.send(&scan).unwrap();
+        // 75 packets of 24 firings, 55.296 us apart: the last leaves 74 x
+        // 1.327 ms after the first.
+        assert!(
+            start.elapsed() >= Duration::from_millis(95),
+            "{:?}",
+            start.elapsed()
+        );
+        let mut fast = Options::new();
+        fast.insert("pace", Value::Bool(false));
+        let burst = Channel::open("mem://t-ch-pace", "lidar:vlp16", fast).unwrap();
+        let start = Instant::now();
+        burst.send(&scan).unwrap();
+        assert!(start.elapsed() < Duration::from_millis(80));
+        let mut n = 0;
+        while rx.recv(Some(Duration::from_millis(50))).unwrap().is_some() {
+            n += 1;
+        }
+        assert_eq!(n, 150);
+    }
+
+    #[test]
+    fn concurrent_paced_sends_do_not_interleave() {
+        use crate::value::{Array, Value};
+        let scan = Message::new(
+            "scan",
+            ["x", "y", "z"]
+                .iter()
+                .map(|k| ((*k).to_owned(), Value::Array(Array::F64(vec![10.0]))))
+                .collect(),
+        );
+        let tx = Channel::open("mem://t-ch-serial", "lidar:pandar_xt32", Options::new()).unwrap();
+        let rx = Channel::open("mem://t-ch-serial", "raw", Options::new()).unwrap();
+        let threads: Vec<_> = (0..2)
+            .map(|_| {
+                let (tx, scan) = (tx.clone(), scan.clone());
+                std::thread::spawn(move || tx.send(&scan).unwrap())
+            })
+            .collect();
+        for t in threads {
+            t.join().unwrap();
+        }
+        // The UDP sequence number (u32 at 1076) counts packets in send order.
+        let mut sequence = Vec::new();
+        while let Some(m) = rx.recv(Some(Duration::from_millis(50))).unwrap() {
+            let d = &m.packet.unwrap().data;
+            sequence.push(u32::from_le_bytes([d[1076], d[1077], d[1078], d[1079]]));
+        }
+        assert_eq!(sequence, (0..500).collect::<Vec<_>>());
     }
 
     #[test]

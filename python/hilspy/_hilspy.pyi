@@ -1,6 +1,7 @@
 """Type stubs of the hilspy._hilspy extension module (Rust, PyO3)."""
 
 import sys
+from array import array
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from types import TracebackType
 from typing import Any, Protocol, TypeAlias
@@ -14,8 +15,12 @@ __version__: str
 
 class Error(Exception): ...
 
-#: A field value: decoded values, and what ``send`` accepts.
-Value: TypeAlias = None | bool | int | float | str | Mapping[str, Any]
+#: A field value: decoded values, and what ``send`` accepts. Numeric arrays
+#: decode as ``array.array``; ``send`` also takes lists, tuples and numpy
+#: arrays of numbers.
+Value: TypeAlias = (
+    None | bool | int | float | str | Mapping[str, Any] | array[Any] | Sequence[float]
+)
 BytesLike: TypeAlias = bytes | bytearray | memoryview | Sequence[int]
 
 class Message:

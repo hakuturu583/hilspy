@@ -16,6 +16,10 @@ libsbf = "0.18.0"
 socketcan = { version = "4.0.0", default-features = false }
 thiserror = "2"
 pyo3 = "0.29"
+prost = "0.14"
+prost-build = "0.14"
+prost-reflect = { version = "0.16", features = ["text-format"] }
+protox = "0.10"
 
 [profile.release]
 lto = "thin"

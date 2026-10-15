@@ -5,10 +5,12 @@
 //! | `raw` | none: every packet is a nameless message carrying its data |
 //! | `dbc:FILE` | CAN frames <-> DBC messages (options `strict`, `scaling`, `decode_choices`) |
 //! | `sbf` | a Septentrio Binary Format byte stream <-> SBF blocks |
+//! | `lidar:MODEL` | LiDAR data packets <-> point clouds (Hesai, Velodyne, or a profile file) |
 //!
 //! Other codecs are added with [`register`].
 
 mod dbc;
+mod lidar;
 mod raw;
 mod sbf;
 
@@ -28,6 +30,12 @@ pub trait Codec: Send {
     fn encode(&mut self, message: &Message) -> Result<Vec<Packet>>;
     /// The messages a received packet completes (none, one or several).
     fn decode(&mut self, packet: Packet) -> Result<Vec<Message>>;
+    /// Whether the channel sends the packets of one message spaced as their
+    /// timestamps are (a LiDAR revolution streamed over its duration) rather
+    /// than at once.
+    fn paced(&self) -> bool {
+        false
+    }
 }
 
 /// Creates a codec from a parsed specification.
@@ -44,6 +52,10 @@ fn registry() -> &'static RwLock<HashMap<String, Factory>> {
         m.insert(
             "dbc".into(),
             Arc::new(|s| Ok(Box::new(dbc::Dbc::open(s)?) as Box<dyn Codec>)),
+        );
+        m.insert(
+            "lidar".into(),
+            Arc::new(|s| Ok(Box::new(lidar::Lidar::open(s)?) as Box<dyn Codec>)),
         );
         m.insert(
             "sbf".into(),

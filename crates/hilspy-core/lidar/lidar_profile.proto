@@ -1,0 +1,140 @@
+// LiDAR profiles: how a sensor's UDP data packets are laid out and how its
+// channels are aimed. hilspy embeds `profiles.binpb` (a serialized
+// ProfileSet, compiled from `profiles/*.txtpb`) as its default profiles;
+// the `lidar` codec loads more from any file in this format
+// (`profiles=PATH`).
+//
+// Model of a data packet:
+//
+//   packet := bytes[packet_size]
+//     constants         fixed bytes (start of packet, header fields, ...)
+//     block[block_count] at blocks_offset, block_size bytes each:
+//       u16 LE flag       optional (block_flags), e.g. 0xEEFF
+//       u16 LE azimuth    at azimuth_offset, (+ u8 fine azimuth)
+//       unit[units_per_block] at units_offset, unit_size bytes each:
+//         u16 LE distance, u8 intensity (, u8 confidence)
+//     tail fields       return mode, motor speed, timestamp, sequence
+//
+// A firing aims every channel once. Its units come from blocks_per_firing
+// consecutive blocks (banks) holding units_per_block / firings_per_block
+// channels each; one block may carry firings_per_block firings in a row
+// (VLP-16). In multi-return modes the returns of one firing follow each
+// other, bank by bank. All multi-byte values are little-endian.
+//
+// Coordinates: x forward, y left, z up (metres). Azimuth is in degrees,
+// clockwise seen from above, 0 = forward; elevation is up from the
+// horizontal plane.
+
+syntax = "proto3";
+
+package hilspy.lidar;
+
+message ProfileSet {
+  repeated Profile profiles = 1;
+}
+
+message Profile {
+  // Codec name: `lidar:<name>` (case, `-` and `_` do not matter).
+  string name = 1;
+  string vendor = 2;
+  string model = 3;
+  repeated string aliases = 4;
+  Layout layout = 5;
+  // In packet order: channel i is unit i of a firing.
+  repeated Channel channels = 6;
+  repeated ReturnMode return_modes = 7;
+  Timing timing = 8;
+  // Valid distances, metres; others are dropped on decode and encode.
+  double min_range = 9;
+  double max_range = 10;
+  // Default rotation speed (revolutions per minute) for encoding.
+  double rpm = 11;
+  // Default UDP port of data packets.
+  uint32 port = 12;
+  // Azimuths the sensor reports, degrees [start, end); start == end is a
+  // full turn.
+  double azimuth_start = 13;
+  double azimuth_end = 14;
+}
+
+message Channel {
+  // Degrees.
+  double elevation = 1;
+  // Added to the block azimuth (degrees).
+  double azimuth_offset = 2;
+  // Firing time within a firing, nanoseconds.
+  int32 firing_offset_ns = 3;
+}
+
+message ReturnMode {
+  // Value of the return mode byte.
+  uint32 code = 1;
+  string name = 2;
+  // Names of the returns in block order; their count is the number of
+  // returns.
+  repeated string returns = 3;
+}
+
+message Constant {
+  uint32 offset = 1;
+  bytes value = 2;
+  // Packets whose bytes differ are rejected on decode.
+  bool verify = 3;
+}
+
+message Layout {
+  uint32 packet_size = 1;
+  repeated Constant constants = 2;
+  uint32 blocks_offset = 3;
+  uint32 block_count = 4;
+  uint32 block_size = 5;
+  // u16 at the start of block b is block_flags[b % blocks_per_firing]
+  // (none when empty).
+  repeated uint32 block_flags = 6;
+  uint32 azimuth_offset = 7;
+  // u8 after which the azimuth is (u16 << 8 | u8).
+  optional uint32 fine_azimuth_offset = 8;
+  // Raw azimuth per degree (100, or 25600 with a fine azimuth).
+  double azimuth_scale = 9;
+  uint32 units_offset = 10;
+  uint32 unit_size = 11;
+  uint32 units_per_block = 12;
+  uint32 blocks_per_firing = 13;
+  uint32 firings_per_block = 14;
+  // Metres per raw distance unit.
+  double distance_unit = 15;
+  optional uint32 return_mode_offset = 16;
+  // u16 revolutions per minute.
+  optional uint32 motor_speed_offset = 17;
+  Timestamp timestamp = 18;
+  // u32 packet counter.
+  optional uint32 sequence_offset = 19;
+}
+
+message Timestamp {
+  enum Kind {
+    // No timestamp: the reception time is used.
+    NONE = 0;
+    // u8 year - year_base, month, day, hour, minute, second (UTC) at
+    // seconds_offset; u32 microseconds at micros_offset.
+    DATE_TIME = 1;
+    // u8 zero, u40 big-endian Unix seconds at seconds_offset; u32
+    // microseconds at micros_offset.
+    UNIX_SECONDS = 2;
+    // u32 microseconds since the top of the (UTC) hour at micros_offset;
+    // the hour comes from the reception time.
+    TOP_OF_HOUR = 3;
+  }
+  Kind kind = 1;
+  uint32 seconds_offset = 2;
+  uint32 year_base = 3;
+  uint32 micros_offset = 4;
+}
+
+message Timing {
+  // A packet's firings are firing_period_ns apart. The first fires
+  // offset_ns after the packet timestamp, or, with from_end, the last does.
+  int64 firing_period_ns = 1;
+  int64 offset_ns = 2;
+  bool from_end = 3;
+}
