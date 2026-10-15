@@ -1,6 +1,6 @@
 [package]
 name = "hilspy-core"
-description = "Rust core of hilspy: CAN buses (SocketCAN / virtual), DBC, FIBEX, Septentrio Binary Format (SBF) and LiDAR (Hesai, Velodyne) codecs for HILS"
+description = "Rust core of hilspy: CAN buses (SocketCAN / virtual), DBC, FIBEX, SOME/IP, Septentrio Binary Format (SBF) and LiDAR (Hesai, Velodyne) codecs for HILS"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -31,6 +31,8 @@ prost-build.workspace = true
 protox.workspace = true
 
 [dev-dependencies]
+# Cross-checks the someip codec's payloads.
+asomeip.workspace = true
 rand.workspace = true
 # Random valid RTCM messages for round-trip tests.
 rtcm-rs = { workspace = true, features = ["test_gen"] }

@@ -9,6 +9,7 @@
 //! | `nmea` | NMEA 0183 sentences <-> messages (`GGA`, `RMC`, ...) |
 //! | `ubx` | u-blox UBX frames <-> messages (`NAV-PVT`, ...) |
 //! | `rtcm` | RTCM 3 frames <-> messages (`1005`, `1077`, ...) |
+//! | `someip:FILE` | SOME/IP messages <-> the methods, events and fields of FIBEX services (options `client_id`, `decode_choices`) |
 //! | `lidar:MODEL` | LiDAR data packets <-> point clouds (Hesai, Velodyne, or a profile file) |
 //!
 //! Other codecs are added with [`register`].
@@ -21,6 +22,7 @@ mod nmea;
 mod raw;
 mod rtcm;
 mod sbf;
+mod someip;
 mod ubx;
 
 use std::collections::HashMap;
@@ -73,6 +75,10 @@ fn registry() -> &'static RwLock<HashMap<String, Factory>> {
         m.insert(
             "nmea".into(),
             Arc::new(|s| Ok(Box::new(nmea::Nmea::open(s)?) as Box<dyn Codec>)),
+        );
+        m.insert(
+            "someip".into(),
+            Arc::new(|s| Ok(Box::new(someip::Someip::open(s)?) as Box<dyn Codec>)),
         );
         m.insert(
             "ubx".into(),
