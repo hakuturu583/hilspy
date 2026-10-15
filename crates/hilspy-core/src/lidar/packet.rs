@@ -1,9 +1,10 @@
 //! Decoding data packets into points and encoding points into packets.
 
 use super::proto::ReturnMode;
-use super::{key, time, Model, TimeSpec};
+use super::{key, Model, TimeSpec};
 use crate::error::{Error, Result};
 use crate::message::{now_timestamp, Packet};
+use crate::time;
 
 /// Points as columns.
 #[derive(Clone, Debug, Default, PartialEq)]

@@ -101,6 +101,13 @@ deadlocking. A Python exception raised in a plugin travels through the core as
 * `tcp://`: reader threads push chunks into a queue; a server broadcasts sends
   to every connected client and drops broken ones. A client channel ends when
   the connection does.
+* `file://` CAN logs (`transport/can_log.rs`): BLF and ASC through
+  `blf_asc`, candump through `socketcan::dump` (Linux, like `can://`); each
+  data frame is a packet with its CAN header and recorded time; `?realtime`
+  spaces replayed frames as recorded. Raw files stay byte streams.
+* `serial://`: the `serialport` crate (built without libudev, so wheels need
+  no system library); a reader and a cloned writer handle, reads in 100 ms
+  slices so close is noticed; packets are stream chunks like TCP's.
 * `file://`: replay in 64 KiB chunks (ends at EOF, or `?follow`), or record
   packet bytes (`?write`, `?append`).
 
@@ -112,11 +119,25 @@ deadlocking. A Python exception raised in a plugin travels through the core as
   Bit layout: Intel signals occupy `start..start+size`; Motorola signals are
   `size` bits from the start bit's position in most-significant-first order.
   The tests cross-check payloads against `cantools`.
+* `dbc` + `e2e`: `codec/e2e.rs` maps a per-message configuration (a
+  mapping option) onto an `autosar-e2e` profile; a sender instance protects
+  the packed payload (counter and CRC), a receiver instance checks it and
+  the result becomes the `e2e` field. `every()` sends its first message
+  itself instead of dry-run encoding it, so stateful codecs (E2E counters,
+  sequence numbers) never lose a value.
 * `sbf`: own framing (`$@`, length a multiple of 4, CRC-16/XMODEM, resync one
   byte after a bad CRC) so every block keeps its raw bytes; bodies go to
   `libsbf::parse_datagram` and `sbf/fields.rs` maps common navigation blocks to
   fields. Encoders follow the SBF reference layouts (PVTGeodetic rev 2,
   AttEuler rev 1).
+* `nmea`, `ubx`, `rtcm`: stream framing per packet source (sentences to
+  `\n`; UBX sync, length and Fletcher checksum; RTCM through
+  `rtcm_rs::next_msg_frame`), then the `nmea`, `ublox` and `rtcm-rs` crates
+  parse; their serde representation becomes the fields (`value::from_json`:
+  numeric arrays become typed arrays, other arrays `Value::List`). RTCM
+  encodes through the crate as well (`to_json` -> serde -> `MessageBuilder`);
+  the crates do not write NMEA sentences or NAV-PVT, so those encoders are
+  ours, cross-checked against pynmeagps and pyubx2 in the tests.
 * `lidar:MODEL`: data-driven. A sensor is a **profile**
   (`crates/hilspy-core/lidar/lidar_profile.proto`): the packet layout
   (size, constant/verified bytes, blocks of `azimuth + units`, unit layout,
@@ -148,7 +169,6 @@ A scenario-side "HIL bridge" opens one channel per device: each simulation
 step turns ground truth (CARLA ego pose and velocity) into device traffic
 (`tcp://...?listen` + `sbf` for a GNSS receiver, `can://` + `dbc:` cyclic
 messages via `every()`), and decodes the device under test's output back into
-observations. Next: serial transport, E2E counters/CRCs in cyclic messages,
-candump/BLF logs, more formats (NMEA, UBX, RTCM) behind the same traits.
+observations.
 A simulated LiDAR is `udp://driver:2368` + `lidar:MODEL`, sending the
 raycast point cloud of each revolution.

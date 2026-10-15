@@ -18,6 +18,8 @@ pub enum Value {
     Map(Vec<(String, Value)>),
     /// A homogeneous numeric array (a point cloud column, ...).
     Array(Array),
+    /// A list of other values (the satellites of a GSV sentence, ...).
+    List(Vec<Value>),
 }
 
 /// A typed numeric array; Python sees an `array.array`.
@@ -126,6 +128,16 @@ impl fmt::Display for Value {
                 write!(f, "}}")
             }
             Value::Array(a) => write!(f, "array({:?}, <{} items>)", a.typecode(), a.len()),
+            Value::List(l) => {
+                write!(f, "[")?;
+                for (i, v) in l.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{v}")?;
+                }
+                write!(f, "]")
+            }
         }
     }
 }
@@ -218,5 +230,58 @@ impl FromIterator<(String, Value)> for Options {
         Self {
             values: iter.into_iter().collect(),
         }
+    }
+}
+
+/// A JSON value (from a format's serde representation) as a field value:
+/// arrays of numbers become typed arrays, other arrays lists.
+pub(crate) fn from_json(v: serde_json::Value) -> Value {
+    use serde_json::Value as J;
+    match v {
+        J::Null => Value::Null,
+        J::Bool(b) => Value::Bool(b),
+        J::Number(n) => match n.as_i64() {
+            Some(i) => Value::Int(i),
+            None => Value::Float(n.as_f64().unwrap_or(f64::NAN)),
+        },
+        J::String(s) => Value::Str(s),
+        J::Array(items) if !items.is_empty() && items.iter().all(|i| i.is_i64()) => Value::Array(
+            Array::I64(items.iter().filter_map(serde_json::Value::as_i64).collect()),
+        ),
+        J::Array(items) if !items.is_empty() && items.iter().all(serde_json::Value::is_number) => {
+            Value::Array(Array::F64(
+                items.iter().filter_map(serde_json::Value::as_f64).collect(),
+            ))
+        }
+        J::Array(items) => Value::List(items.into_iter().map(from_json).collect()),
+        J::Object(m) => Value::Map(m.into_iter().map(|(k, v)| (k, from_json(v))).collect()),
+    }
+}
+
+/// A field value as JSON, to build a format's value through serde.
+pub(crate) fn to_json(v: &Value) -> serde_json::Value {
+    use serde_json::Value as J;
+    let float = |x: f64| serde_json::Number::from_f64(x).map_or(J::Null, J::Number);
+    match v {
+        Value::Null => J::Null,
+        Value::Bool(b) => J::Bool(*b),
+        Value::Int(i) => J::from(*i),
+        Value::Float(x) if x.fract() == 0.0 && x.abs() < 9.0e15 => {
+            // An integral float may fill an integer field (Python 5.0).
+            J::from(*x as i64)
+        }
+        Value::Float(x) => float(*x),
+        Value::Str(s) => J::String(s.clone()),
+        Value::Map(m) => J::Object(m.iter().map(|(k, v)| (k.clone(), to_json(v))).collect()),
+        Value::List(l) => J::Array(l.iter().map(to_json).collect()),
+        Value::Array(a) => J::Array(match a {
+            Array::U8(v) => v.iter().map(|x| J::from(*x)).collect(),
+            Array::U16(v) => v.iter().map(|x| J::from(*x)).collect(),
+            Array::U32(v) => v.iter().map(|x| J::from(*x)).collect(),
+            Array::I32(v) => v.iter().map(|x| J::from(*x)).collect(),
+            Array::I64(v) => v.iter().map(|x| J::from(*x)).collect(),
+            Array::F32(v) => v.iter().map(|x| float(f64::from(*x))).collect(),
+            Array::F64(v) => v.iter().map(|x| float(*x)).collect(),
+        }),
     }
 }

@@ -1,4 +1,4 @@
-//! Calendar conversions for packet timestamps (UTC, proleptic Gregorian).
+//! Calendar conversions for timestamps in packets (UTC, proleptic Gregorian).
 
 /// Days since 1970-01-01 of a civil date (Howard Hinnant's algorithm).
 pub(crate) fn days_from_civil(y: i64, m: u32, d: u32) -> i64 {

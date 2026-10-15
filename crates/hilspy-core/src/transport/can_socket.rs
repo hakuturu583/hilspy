@@ -132,11 +132,34 @@ fn from_classic(frame: CanFrame) -> Option<Packet> {
     }
 }
 
-fn from_any(frame: CanAnyFrame) -> Option<Packet> {
+pub(super) fn from_any(frame: CanAnyFrame) -> Option<Packet> {
     match frame {
         CanAnyFrame::Normal(f) => Some(packet(&f, false, false)),
         CanAnyFrame::Fd(f) => Some(packet(&f, true, f.is_brs())),
         CanAnyFrame::Remote(_) | CanAnyFrame::Error(_) => None,
+    }
+}
+
+/// A CAN packet as a SocketCAN frame (classic or FD).
+pub(super) fn to_any(packet: &Packet) -> Result<CanAnyFrame> {
+    let h = packet
+        .can
+        .ok_or_else(|| Error::InvalidPacket("a CAN frame needs an identifier".into()))?;
+    let id = embedded_id(&h)?;
+    let invalid = || Error::InvalidPacket(format!("not a CAN frame: {} bytes", packet.data.len()));
+    if h.fd {
+        let flags = if h.brs {
+            FdFlags::BRS
+        } else {
+            FdFlags::empty()
+        };
+        Ok(CanAnyFrame::Fd(
+            CanFdFrame::with_flags(id, &packet.data, flags).ok_or_else(invalid)?,
+        ))
+    } else {
+        Ok(CanAnyFrame::Normal(
+            CanDataFrame::new(id, &packet.data).ok_or_else(invalid)?,
+        ))
     }
 }
 

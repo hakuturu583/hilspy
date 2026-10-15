@@ -9,14 +9,18 @@
 //! | `tcp://host:port` | TCP client; packets are stream chunks |
 //! | `tcp://addr:port?listen` | TCP server; sends go to every connected client |
 //! | `file://path` | replay a recording (`?follow`), or record one (`?write`, `?append`) |
+//! | `file://x.blf`, `x.asc`, `x.log?format=candump` | CAN logs with identifiers and times (`?realtime` replay, `?write`) |
+//! | `serial://PORT` | a serial port (`?baud=`, `data_bits`, `parity`, `stop_bits`, `flow`); packets are stream chunks |
 //!
 //! Other schemes are added with [`register`].
 
 pub(crate) mod can_frame;
+mod can_log;
 #[cfg(target_os = "linux")]
 mod can_socket;
 mod file;
 mod mem;
+mod serial;
 mod tcp;
 mod udp;
 
@@ -46,10 +50,7 @@ fn registry() -> &'static RwLock<HashMap<String, Factory>> {
     static REGISTRY: OnceLock<RwLock<HashMap<String, Factory>>> = OnceLock::new();
     REGISTRY.get_or_init(|| {
         let mut m: HashMap<String, Factory> = HashMap::new();
-        m.insert(
-            "file".into(),
-            Arc::new(|e| Ok(Arc::new(file::FileTransport::open(e)?) as Arc<dyn Transport>)),
-        );
+        m.insert("file".into(), Arc::new(file::open));
         m.insert(
             "mem".into(),
             Arc::new(|e| Ok(Arc::new(mem::Mem::open(e)?) as Arc<dyn Transport>)),
@@ -57,6 +58,10 @@ fn registry() -> &'static RwLock<HashMap<String, Factory>> {
         m.insert(
             "udp".into(),
             Arc::new(|e| Ok(Arc::new(udp::Udp::open(e)?) as Arc<dyn Transport>)),
+        );
+        m.insert(
+            "serial".into(),
+            Arc::new(|e| Ok(Arc::new(serial::Serial::open(e)?) as Arc<dyn Transport>)),
         );
         m.insert(
             "tcp".into(),

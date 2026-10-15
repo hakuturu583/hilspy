@@ -15,6 +15,20 @@ pub(crate) fn is_valid_fd_len(len: usize) -> bool {
 }
 
 /// The smallest valid CAN FD payload length that holds `len` bytes.
+/// The DLC code of a payload length (classic 0-8, FD 9-15 for 12-64 bytes).
+pub(crate) fn dlc(len: usize) -> u8 {
+    match len {
+        0..=8 => len as u8,
+        9..=12 => 9,
+        13..=16 => 10,
+        17..=20 => 11,
+        21..=24 => 12,
+        25..=32 => 13,
+        33..=48 => 14,
+        _ => 15,
+    }
+}
+
 pub fn fd_padded_len(len: usize) -> Option<usize> {
     [0, 1, 2, 3, 4, 5, 6, 7, 8, 12, 16, 20, 24, 32, 48, 64]
         .into_iter()

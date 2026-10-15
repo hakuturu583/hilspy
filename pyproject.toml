@@ -5,13 +5,13 @@ build-backend = "maturin"
 [project]
 name = "hilspy"
 version = "0.6.0"
-description = "HILS I/O for Python on a Rust core: pluggable transports (SocketCAN, UDP, TCP, in-process, files) and codecs (DBC, Septentrio SBF, Hesai/Velodyne LiDAR) behind one tiny API"
+description = "HILS I/O for Python on a Rust core: pluggable transports (SocketCAN, UDP, TCP, serial, in-process, files) and codecs (DBC, SBF, NMEA, UBX, RTCM, Hesai/Velodyne LiDAR) behind one tiny API"
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
 requires-python = ">=3.10"
 authors = [{ name = "Masaya Kataoka", email = "ms.kataoka@gmail.com" }]
-keywords = ["hils", "can", "socketcan", "vcan", "ethernet", "udp", "tcp", "dbc", "sbf", "septentrio", "gnss", "lidar", "hesai", "velodyne"]
+keywords = ["hils", "can", "socketcan", "vcan", "ethernet", "udp", "tcp", "serial", "dbc", "blf", "candump", "autosar", "e2e", "sbf", "septentrio", "gnss", "nmea", "ublox", "rtcm", "lidar", "hesai", "velodyne"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -36,6 +36,9 @@ dev = [
     "pre-commit>=3.7",
     "tomli>=2; python_version < '3.11'",
     "numpy>=2.2.6",
+    "pynmeagps>=1.1.7",
+    "pyubx2>=1.3.8",
+    "pyrtcm>=1.2.0",
 ]
 
 [tool.maturin]
