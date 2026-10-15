@@ -212,6 +212,11 @@ impl Codec for Lidar {
             Some([t]) => *t,
             Some(_) => return Err(Error::encode("field timestamp: expected one number")),
         };
+        if !timestamp.is_finite() {
+            return Err(Error::encode(format!(
+                "field timestamp: {timestamp} is not a finite time"
+            )));
+        }
         let intensity = numbers(&mut f, "intensity")?;
         let (distance, azimuth, channel) = (
             numbers(&mut f, "distance")?,
@@ -404,6 +409,9 @@ mod tests {
         let mut c = codec("lidar:vlp16", &[("rpm", Value::Str("1200".into()))]);
         assert!(c.encode(&Message::new("cloud", vec![])).is_err());
         assert!(c.encode(&Message::new("scan", vec![])).is_err());
+        let mut m = ring();
+        m.fields.push(("timestamp".into(), Value::Float(f64::NAN)));
+        assert!(c.encode(&m).unwrap_err().to_string().contains("finite"));
         let mut m = ring();
         m.fields.push(("colour".into(), Value::Int(1)));
         assert!(c.encode(&m).unwrap_err().to_string().contains("colour"));

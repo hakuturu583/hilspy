@@ -16,6 +16,9 @@ use crate::value::Options;
 struct Inner {
     transport: Arc<dyn Transport>,
     codec: Mutex<Box<dyn Codec>>,
+    /// Held for a whole send (encode and every packet), so the packets of
+    /// concurrent sends do not interleave; decoding does not take it.
+    sending: Mutex<()>,
     pending: Mutex<VecDeque<Message>>,
     closed: AtomicBool,
 }
@@ -25,6 +28,7 @@ impl Inner {
         if self.closed.load(Ordering::Acquire) {
             return Err(Error::Closed);
         }
+        let _sending = self.sending.lock().unwrap();
         let (packets, paced) = match (&message.name, &message.packet) {
             (None, Some(p)) => (vec![p.clone()], false),
             (None, None) => {
@@ -39,7 +43,10 @@ impl Inner {
         let first = packets.first().and_then(|p| p.timestamp);
         for p in &packets {
             if let (true, Some(t0), Some(t)) = (paced, first, p.timestamp) {
-                self.wait_until(start + Duration::from_secs_f64((t - t0).clamp(0.0, 3600.0)))?;
+                let delay = t - t0;
+                if delay.is_finite() {
+                    self.wait_until(start + Duration::from_secs_f64(delay.clamp(0.0, 3600.0)))?;
+                }
             }
             self.transport.send(p)?;
         }
@@ -84,6 +91,7 @@ impl Channel {
             inner: Arc::new(Inner {
                 transport,
                 codec: Mutex::new(codec),
+                sending: Mutex::new(()),
                 pending: Mutex::new(VecDeque::new()),
                 closed: AtomicBool::new(false),
             }),
@@ -458,6 +466,36 @@ mod tests {
             n += 1;
         }
         assert_eq!(n, 150);
+    }
+
+    #[test]
+    fn concurrent_paced_sends_do_not_interleave() {
+        use crate::value::{Array, Value};
+        let scan = Message::new(
+            "scan",
+            ["x", "y", "z"]
+                .iter()
+                .map(|k| ((*k).to_owned(), Value::Array(Array::F64(vec![10.0]))))
+                .collect(),
+        );
+        let tx = Channel::open("mem://t-ch-serial", "lidar:pandar_xt32", Options::new()).unwrap();
+        let rx = Channel::open("mem://t-ch-serial", "raw", Options::new()).unwrap();
+        let threads: Vec<_> = (0..2)
+            .map(|_| {
+                let (tx, scan) = (tx.clone(), scan.clone());
+                std::thread::spawn(move || tx.send(&scan).unwrap())
+            })
+            .collect();
+        for t in threads {
+            t.join().unwrap();
+        }
+        // The UDP sequence number (u32 at 1076) counts packets in send order.
+        let mut sequence = Vec::new();
+        while let Some(m) = rx.recv(Some(Duration::from_millis(50))).unwrap() {
+            let d = &m.packet.unwrap().data;
+            sequence.push(u32::from_le_bytes([d[1076], d[1077], d[1078], d[1079]]));
+        }
+        assert_eq!(sequence, (0..500).collect::<Vec<_>>());
     }
 
     #[test]

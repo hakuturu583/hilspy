@@ -165,6 +165,8 @@ def test_errors(mem: str, tmp_path: Path) -> None:
     with hilspy.open(mem, "lidar:pandar_xt32") as lidar, hilspy.open(mem) as raw:
         with pytest.raises(hilspy.Error, match="x, y and z"):
             lidar.send("scan", {"x": [1.0]})
+        with pytest.raises(hilspy.Error, match="finite"):
+            lidar.send("scan", {**ring(), "timestamp": float("nan")})
         with pytest.raises(TypeError, match="numbers"):
             lidar.send("scan", {"x": [1.0, "a"], "y": [0.0], "z": [0.0]})
         raw.send(hilspy.Message(data=b"\x00" * 64))

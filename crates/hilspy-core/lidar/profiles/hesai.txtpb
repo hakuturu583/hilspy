@@ -267,7 +267,7 @@ profiles {
   channels { elevation: 30.957 azimuth_offset: -5.64 firing_offset_ns: 123430 }
   channels { elevation: 32.627 azimuth_offset: -5.74 firing_offset_ns: 125490 }
   channels { elevation: 34.328 azimuth_offset: -5.85 firing_offset_ns: 127540 }
-  channels { elevation: 36.064 azimuth_offset: -5.974 firing_offset_ns: 12960 }
+  channels { elevation: 36.064 azimuth_offset: -5.974 firing_offset_ns: 129600 }
   channels { elevation: 37.84 azimuth_offset: -6.113 firing_offset_ns: 132050 }
   channels { elevation: 39.662 azimuth_offset: -6.269 firing_offset_ns: 134110 }
   channels { elevation: 41.537 azimuth_offset: -6.447 firing_offset_ns: 136170 }
