@@ -1,0 +1,332 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Test network for the fibex codec's LIN and FlexRay channels.
+     LIN (protocol 2.1, so enhanced checksums unless a triggering says
+     otherwise): LightCmd 0x10 (enhanced), LightStatus 0x11 (CHECKSUM-TYPE
+     CLASSIC), MasterReq 0x3C (diagnostic: always classic). Schedule tables:
+     Normal = LightCmd 10 ms, LightStatus 20 ms, LightCmd 10 ms (period 40 ms,
+     so LightCmd every 20 ms, LightStatus every 40 ms); Diagnostic =
+     MasterReq 10 ms, a free-format entry 10 ms (period 20 ms). -->
+<fx:FIBEX xmlns:fx="http://www.asam.net/xml/fbx" xmlns:ho="http://www.asam.net/xml" xmlns:lin="http://www.asam.net/xml/fbx/lin" xmlns:flexray="http://www.asam.net/xml/fbx/flexray" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" VERSION="4.1.2">
+  <fx:PROJECT ID="PRJ_LIN_FLEXRAY">
+    <ho:SHORT-NAME>HilspyLinFlexRay</ho:SHORT-NAME>
+  </fx:PROJECT>
+  <fx:ELEMENTS>
+    <fx:CLUSTERS>
+      <fx:CLUSTER ID="CL_LIN" xsi:type="lin:CLUSTER-TYPE">
+        <ho:SHORT-NAME>BodyLin</ho:SHORT-NAME>
+        <fx:SPEED>19200</fx:SPEED>
+        <fx:IS-HIGH-LOW-BIT-ORDER>false</fx:IS-HIGH-LOW-BIT-ORDER>
+        <fx:BIT-COUNTING-POLICY>MONOTONE</fx:BIT-COUNTING-POLICY>
+        <fx:PROTOCOL>LIN</fx:PROTOCOL>
+        <fx:PROTOCOL-VERSION>2.1</fx:PROTOCOL-VERSION>
+        <fx:CHANNEL-REFS>
+          <fx:CHANNEL-REF ID-REF="CH_LIN"/>
+        </fx:CHANNEL-REFS>
+        <fx:MEDIUM>ELECTRICAL</fx:MEDIUM>
+      </fx:CLUSTER>
+    </fx:CLUSTERS>
+    <fx:CHANNELS>
+      <fx:CHANNEL ID="CH_LIN" xsi:type="lin:CHANNEL-TYPE">
+        <ho:SHORT-NAME>Lin</ho:SHORT-NAME>
+        <fx:FRAME-TRIGGERINGS>
+          <fx:FRAME-TRIGGERING ID="FT_LightCmd" xsi:type="lin:FRAME-TRIGGERING-TYPE">
+            <fx:IDENTIFIER><fx:IDENTIFIER-VALUE>16</fx:IDENTIFIER-VALUE></fx:IDENTIFIER>
+            <fx:FRAME-REF ID-REF="F_LightCmd"/>
+          </fx:FRAME-TRIGGERING>
+          <fx:FRAME-TRIGGERING ID="FT_LightStatus" xsi:type="lin:FRAME-TRIGGERING-TYPE">
+            <fx:IDENTIFIER><fx:IDENTIFIER-VALUE>17</fx:IDENTIFIER-VALUE></fx:IDENTIFIER>
+            <fx:FRAME-REF ID-REF="F_LightStatus"/>
+            <lin:CHECKSUM-TYPE>CLASSIC</lin:CHECKSUM-TYPE>
+          </fx:FRAME-TRIGGERING>
+          <fx:FRAME-TRIGGERING ID="FT_MasterReq" xsi:type="lin:FRAME-TRIGGERING-TYPE">
+            <fx:IDENTIFIER><fx:IDENTIFIER-VALUE>60</fx:IDENTIFIER-VALUE></fx:IDENTIFIER>
+            <fx:FRAME-REF ID-REF="F_MasterReq"/>
+          </fx:FRAME-TRIGGERING>
+        </fx:FRAME-TRIGGERINGS>
+        <lin:SCHEDULE-TABLES>
+          <lin:SCHEDULE-TABLE ID="ST_Normal">
+            <ho:SHORT-NAME>Normal</ho:SHORT-NAME>
+            <lin:SCHEDULE-TABLE-ENTRIES>
+              <lin:SCHEDULE-TABLE-ENTRY xsi:type="lin:APPLICATION-ENTRY-TYPE">
+                <lin:DELAY>PT0.01S</lin:DELAY>
+                <fx:FRAME-TRIGGERING-REF ID-REF="FT_LightCmd"/>
+              </lin:SCHEDULE-TABLE-ENTRY>
+              <lin:SCHEDULE-TABLE-ENTRY xsi:type="lin:APPLICATION-ENTRY-TYPE">
+                <lin:DELAY>PT0.02S</lin:DELAY>
+                <fx:FRAME-TRIGGERING-REF ID-REF="FT_LightStatus"/>
+              </lin:SCHEDULE-TABLE-ENTRY>
+              <lin:SCHEDULE-TABLE-ENTRY xsi:type="lin:APPLICATION-ENTRY-TYPE">
+                <lin:DELAY>PT0.01S</lin:DELAY>
+                <fx:FRAME-TRIGGERING-REF ID-REF="FT_LightCmd"/>
+              </lin:SCHEDULE-TABLE-ENTRY>
+            </lin:SCHEDULE-TABLE-ENTRIES>
+          </lin:SCHEDULE-TABLE>
+          <lin:SCHEDULE-TABLE ID="ST_Diagnostic">
+            <ho:SHORT-NAME>Diagnostic</ho:SHORT-NAME>
+            <lin:SCHEDULE-TABLE-ENTRIES>
+              <lin:SCHEDULE-TABLE-ENTRY xsi:type="lin:APPLICATION-ENTRY-TYPE">
+                <lin:DELAY>PT0.01S</lin:DELAY>
+                <fx:FRAME-TRIGGERING-REF ID-REF="FT_MasterReq"/>
+              </lin:SCHEDULE-TABLE-ENTRY>
+              <lin:SCHEDULE-TABLE-ENTRY xsi:type="lin:FREE-FORMAT-TYPE">
+                <lin:DELAY>PT0.01S</lin:DELAY>
+              </lin:SCHEDULE-TABLE-ENTRY>
+            </lin:SCHEDULE-TABLE-ENTRIES>
+          </lin:SCHEDULE-TABLE>
+        </lin:SCHEDULE-TABLES>
+      </fx:CHANNEL>
+    </fx:CHANNELS>
+    <fx:ECUS>
+      <fx:ECU ID="ECU_BCM">
+        <ho:SHORT-NAME>Bcm</ho:SHORT-NAME>
+        <fx:CONNECTORS>
+          <fx:CONNECTOR ID="CON_Bcm_Lin">
+            <fx:CHANNEL-REF ID-REF="CH_LIN"/>
+            <fx:INPUTS><fx:INPUT-PORT ID="IP_CON_Bcm_Lin_FT_LightStatus"><fx:FRAME-TRIGGERING-REF ID-REF="FT_LightStatus"/></fx:INPUT-PORT></fx:INPUTS>
+            <fx:OUTPUTS><fx:OUTPUT-PORT ID="OP_CON_Bcm_Lin_FT_LightCmd"><fx:FRAME-TRIGGERING-REF ID-REF="FT_LightCmd"/></fx:OUTPUT-PORT><fx:OUTPUT-PORT ID="OP_CON_Bcm_Lin_FT_MasterReq"><fx:FRAME-TRIGGERING-REF ID-REF="FT_MasterReq"/></fx:OUTPUT-PORT></fx:OUTPUTS>
+          </fx:CONNECTOR>
+        </fx:CONNECTORS>
+      </fx:ECU>
+      <fx:ECU ID="ECU_LAMP">
+        <ho:SHORT-NAME>Lamp</ho:SHORT-NAME>
+        <fx:CONNECTORS>
+          <fx:CONNECTOR ID="CON_Lamp_Lin">
+            <fx:CHANNEL-REF ID-REF="CH_LIN"/>
+            <fx:INPUTS><fx:INPUT-PORT ID="IP_CON_Lamp_Lin_FT_LightCmd"><fx:FRAME-TRIGGERING-REF ID-REF="FT_LightCmd"/></fx:INPUT-PORT><fx:INPUT-PORT ID="IP_CON_Lamp_Lin_FT_MasterReq"><fx:FRAME-TRIGGERING-REF ID-REF="FT_MasterReq"/></fx:INPUT-PORT></fx:INPUTS>
+            <fx:OUTPUTS><fx:OUTPUT-PORT ID="OP_CON_Lamp_Lin_FT_LightStatus"><fx:FRAME-TRIGGERING-REF ID-REF="FT_LightStatus"/></fx:OUTPUT-PORT></fx:OUTPUTS>
+          </fx:CONNECTOR>
+        </fx:CONNECTORS>
+      </fx:ECU>
+    </fx:ECUS>
+    <fx:PDUS>
+      <fx:PDU ID="P_LightCmd">
+        <ho:SHORT-NAME>LightCmdPdu</ho:SHORT-NAME>
+        <fx:BYTE-LENGTH>2</fx:BYTE-LENGTH>
+        <fx:PDU-TYPE>APPLICATION</fx:PDU-TYPE>
+        <fx:SIGNAL-INSTANCES>
+          <fx:SIGNAL-INSTANCE ID="SI_Brightness">
+            <fx:BIT-POSITION>0</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+            <fx:SIGNAL-REF ID-REF="S_Brightness"/>
+          </fx:SIGNAL-INSTANCE>
+          <fx:SIGNAL-INSTANCE ID="SI_LightMode">
+            <fx:BIT-POSITION>8</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+            <fx:SIGNAL-REF ID-REF="S_LightMode"/>
+          </fx:SIGNAL-INSTANCE>
+        </fx:SIGNAL-INSTANCES>
+      </fx:PDU>
+      <fx:PDU ID="P_LightStatus">
+        <ho:SHORT-NAME>LightStatusPdu</ho:SHORT-NAME>
+        <fx:BYTE-LENGTH>2</fx:BYTE-LENGTH>
+        <fx:PDU-TYPE>APPLICATION</fx:PDU-TYPE>
+        <fx:SIGNAL-INSTANCES>
+          <fx:SIGNAL-INSTANCE ID="SI_LampCurrent">
+            <fx:BIT-POSITION>0</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+            <fx:SIGNAL-REF ID-REF="S_LampCurrent"/>
+          </fx:SIGNAL-INSTANCE>
+          <fx:SIGNAL-INSTANCE ID="SI_LampFault">
+            <fx:BIT-POSITION>8</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+            <fx:SIGNAL-REF ID-REF="S_LampFault"/>
+          </fx:SIGNAL-INSTANCE>
+        </fx:SIGNAL-INSTANCES>
+      </fx:PDU>
+      <fx:PDU ID="P_MasterReq">
+        <ho:SHORT-NAME>MasterReqPdu</ho:SHORT-NAME>
+        <fx:BYTE-LENGTH>8</fx:BYTE-LENGTH>
+        <fx:PDU-TYPE>APPLICATION</fx:PDU-TYPE>
+        <fx:SIGNAL-INSTANCES>
+          <fx:SIGNAL-INSTANCE ID="SI_Nad">
+            <fx:BIT-POSITION>0</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+            <fx:SIGNAL-REF ID-REF="S_Nad"/>
+          </fx:SIGNAL-INSTANCE>
+          <fx:SIGNAL-INSTANCE ID="SI_Pci">
+            <fx:BIT-POSITION>8</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+            <fx:SIGNAL-REF ID-REF="S_Pci"/>
+          </fx:SIGNAL-INSTANCE>
+          <fx:SIGNAL-INSTANCE ID="SI_Sid">
+            <fx:BIT-POSITION>16</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+            <fx:SIGNAL-REF ID-REF="S_Sid"/>
+          </fx:SIGNAL-INSTANCE>
+        </fx:SIGNAL-INSTANCES>
+      </fx:PDU>
+    </fx:PDUS>
+    <fx:FRAMES>
+      <fx:FRAME ID="F_LightCmd">
+        <ho:SHORT-NAME>LightCmd</ho:SHORT-NAME>
+        <fx:BYTE-LENGTH>2</fx:BYTE-LENGTH>
+        <fx:FRAME-TYPE>APPLICATION</fx:FRAME-TYPE>
+        <fx:PDU-INSTANCES>
+          <fx:PDU-INSTANCE ID="PI_LightCmd">
+            <fx:PDU-REF ID-REF="P_LightCmd"/>
+            <fx:BIT-POSITION>0</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+          </fx:PDU-INSTANCE>
+        </fx:PDU-INSTANCES>
+      </fx:FRAME>
+      <fx:FRAME ID="F_LightStatus">
+        <ho:SHORT-NAME>LightStatus</ho:SHORT-NAME>
+        <fx:BYTE-LENGTH>2</fx:BYTE-LENGTH>
+        <fx:FRAME-TYPE>APPLICATION</fx:FRAME-TYPE>
+        <fx:PDU-INSTANCES>
+          <fx:PDU-INSTANCE ID="PI_LightStatus">
+            <fx:PDU-REF ID-REF="P_LightStatus"/>
+            <fx:BIT-POSITION>0</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+          </fx:PDU-INSTANCE>
+        </fx:PDU-INSTANCES>
+      </fx:FRAME>
+      <fx:FRAME ID="F_MasterReq">
+        <ho:SHORT-NAME>MasterReq</ho:SHORT-NAME>
+        <fx:BYTE-LENGTH>8</fx:BYTE-LENGTH>
+        <fx:FRAME-TYPE>APPLICATION</fx:FRAME-TYPE>
+        <fx:PDU-INSTANCES>
+          <fx:PDU-INSTANCE ID="PI_MasterReq">
+            <fx:PDU-REF ID-REF="P_MasterReq"/>
+            <fx:BIT-POSITION>0</fx:BIT-POSITION>
+            <fx:IS-HIGH-LOW-BYTE-ORDER>false</fx:IS-HIGH-LOW-BYTE-ORDER>
+          </fx:PDU-INSTANCE>
+        </fx:PDU-INSTANCES>
+      </fx:FRAME>
+    </fx:FRAMES>
+    <fx:SIGNALS>
+      <fx:SIGNAL ID="S_Brightness">
+        <ho:SHORT-NAME>Brightness</ho:SHORT-NAME>
+        <fx:CODING-REF ID-REF="C_Percent"/>
+      </fx:SIGNAL>
+      <fx:SIGNAL ID="S_LightMode">
+        <ho:SHORT-NAME>Mode</ho:SHORT-NAME>
+        <fx:CODING-REF ID-REF="C_LightMode"/>
+      </fx:SIGNAL>
+      <fx:SIGNAL ID="S_LampCurrent">
+        <ho:SHORT-NAME>Current</ho:SHORT-NAME>
+        <fx:CODING-REF ID-REF="C_Current"/>
+      </fx:SIGNAL>
+      <fx:SIGNAL ID="S_LampFault">
+        <ho:SHORT-NAME>Fault</ho:SHORT-NAME>
+        <fx:CODING-REF ID-REF="C_Byte"/>
+      </fx:SIGNAL>
+      <fx:SIGNAL ID="S_Nad">
+        <ho:SHORT-NAME>Nad</ho:SHORT-NAME>
+        <fx:CODING-REF ID-REF="C_Byte"/>
+      </fx:SIGNAL>
+      <fx:SIGNAL ID="S_Pci">
+        <ho:SHORT-NAME>Pci</ho:SHORT-NAME>
+        <fx:CODING-REF ID-REF="C_Byte"/>
+      </fx:SIGNAL>
+      <fx:SIGNAL ID="S_Sid">
+        <ho:SHORT-NAME>Sid</ho:SHORT-NAME>
+        <fx:CODING-REF ID-REF="C_Byte"/>
+      </fx:SIGNAL>
+    </fx:SIGNALS>
+  </fx:ELEMENTS>
+  <fx:PROCESSING-INFORMATION>
+    <ho:UNIT-SPEC>
+      <ho:UNITS>
+        <ho:UNIT ID="U_PCT"><ho:SHORT-NAME>PCT</ho:SHORT-NAME><ho:DISPLAY-NAME>%</ho:DISPLAY-NAME></ho:UNIT>
+        <ho:UNIT ID="U_A"><ho:SHORT-NAME>A</ho:SHORT-NAME><ho:DISPLAY-NAME>A</ho:DISPLAY-NAME></ho:UNIT>
+      </ho:UNITS>
+    </ho:UNIT-SPEC>
+    <fx:CODINGS>
+      <fx:CODING ID="C_Percent">
+        <ho:SHORT-NAME>Percent</ho:SHORT-NAME>
+        <ho:CODED-TYPE ho:BASE-DATA-TYPE="A_UINT8" CATEGORY="STANDARD-LENGTH-TYPE" ENCODING="UNSIGNED">
+          <ho:BIT-LENGTH>8</ho:BIT-LENGTH>
+        </ho:CODED-TYPE>
+        <ho:COMPU-METHODS>
+          <ho:COMPU-METHOD>
+            <ho:SHORT-NAME>Percent</ho:SHORT-NAME>
+            <ho:CATEGORY>LINEAR</ho:CATEGORY>
+            <ho:UNIT-REF ID-REF="U_PCT"/>
+            <ho:COMPU-INTERNAL-TO-PHYS>
+              <ho:COMPU-SCALES>
+                <ho:COMPU-SCALE>
+                  <ho:COMPU-RATIONAL-COEFFS>
+                    <ho:COMPU-NUMERATOR><ho:V>0</ho:V><ho:V>0.5</ho:V></ho:COMPU-NUMERATOR>
+                    <ho:COMPU-DENOMINATOR><ho:V>1</ho:V></ho:COMPU-DENOMINATOR>
+                  </ho:COMPU-RATIONAL-COEFFS>
+                </ho:COMPU-SCALE>
+              </ho:COMPU-SCALES>
+            </ho:COMPU-INTERNAL-TO-PHYS>
+          </ho:COMPU-METHOD>
+        </ho:COMPU-METHODS>
+      </fx:CODING>
+      <fx:CODING ID="C_LightMode">
+        <ho:SHORT-NAME>LightMode</ho:SHORT-NAME>
+        <ho:CODED-TYPE ho:BASE-DATA-TYPE="A_UINT8" CATEGORY="STANDARD-LENGTH-TYPE" ENCODING="UNSIGNED">
+          <ho:BIT-LENGTH>2</ho:BIT-LENGTH>
+        </ho:CODED-TYPE>
+        <ho:COMPU-METHODS>
+          <ho:COMPU-METHOD>
+            <ho:SHORT-NAME>LightMode</ho:SHORT-NAME>
+            <ho:CATEGORY>TEXTTABLE</ho:CATEGORY>
+            <ho:COMPU-INTERNAL-TO-PHYS>
+              <ho:COMPU-SCALES>
+                <ho:COMPU-SCALE>
+                  <ho:LOWER-LIMIT>0</ho:LOWER-LIMIT>
+                  <ho:UPPER-LIMIT>0</ho:UPPER-LIMIT>
+                  <ho:COMPU-CONST><ho:VT>Off</ho:VT></ho:COMPU-CONST>
+                </ho:COMPU-SCALE>
+                <ho:COMPU-SCALE>
+                  <ho:LOWER-LIMIT>1</ho:LOWER-LIMIT>
+                  <ho:UPPER-LIMIT>1</ho:UPPER-LIMIT>
+                  <ho:COMPU-CONST><ho:VT>Low</ho:VT></ho:COMPU-CONST>
+                </ho:COMPU-SCALE>
+                <ho:COMPU-SCALE>
+                  <ho:LOWER-LIMIT>2</ho:LOWER-LIMIT>
+                  <ho:UPPER-LIMIT>2</ho:UPPER-LIMIT>
+                  <ho:COMPU-CONST><ho:VT>High</ho:VT></ho:COMPU-CONST>
+                </ho:COMPU-SCALE>
+                <ho:COMPU-SCALE>
+                  <ho:LOWER-LIMIT>3</ho:LOWER-LIMIT>
+                  <ho:UPPER-LIMIT>3</ho:UPPER-LIMIT>
+                  <ho:COMPU-CONST><ho:VT>Auto</ho:VT></ho:COMPU-CONST>
+                </ho:COMPU-SCALE>
+              </ho:COMPU-SCALES>
+            </ho:COMPU-INTERNAL-TO-PHYS>
+          </ho:COMPU-METHOD>
+        </ho:COMPU-METHODS>
+      </fx:CODING>
+      <fx:CODING ID="C_Current">
+        <ho:SHORT-NAME>Current</ho:SHORT-NAME>
+        <ho:CODED-TYPE ho:BASE-DATA-TYPE="A_UINT8" CATEGORY="STANDARD-LENGTH-TYPE" ENCODING="UNSIGNED">
+          <ho:BIT-LENGTH>8</ho:BIT-LENGTH>
+        </ho:CODED-TYPE>
+        <ho:COMPU-METHODS>
+          <ho:COMPU-METHOD>
+            <ho:SHORT-NAME>Current</ho:SHORT-NAME>
+            <ho:CATEGORY>LINEAR</ho:CATEGORY>
+            <ho:UNIT-REF ID-REF="U_A"/>
+            <ho:COMPU-INTERNAL-TO-PHYS>
+              <ho:COMPU-SCALES>
+                <ho:COMPU-SCALE>
+                  <ho:COMPU-RATIONAL-COEFFS>
+                    <ho:COMPU-NUMERATOR><ho:V>0</ho:V><ho:V>0.1</ho:V></ho:COMPU-NUMERATOR>
+                    <ho:COMPU-DENOMINATOR><ho:V>1</ho:V></ho:COMPU-DENOMINATOR>
+                  </ho:COMPU-RATIONAL-COEFFS>
+                </ho:COMPU-SCALE>
+              </ho:COMPU-SCALES>
+            </ho:COMPU-INTERNAL-TO-PHYS>
+          </ho:COMPU-METHOD>
+        </ho:COMPU-METHODS>
+      </fx:CODING>
+      <fx:CODING ID="C_Byte">
+        <ho:SHORT-NAME>Byte</ho:SHORT-NAME>
+        <ho:CODED-TYPE ho:BASE-DATA-TYPE="A_UINT8" CATEGORY="STANDARD-LENGTH-TYPE" ENCODING="UNSIGNED">
+          <ho:BIT-LENGTH>8</ho:BIT-LENGTH>
+        </ho:CODED-TYPE>
+        <ho:COMPU-METHODS>
+          <ho:COMPU-METHOD>
+            <ho:SHORT-NAME>Byte</ho:SHORT-NAME>
+            <ho:CATEGORY>IDENTICAL</ho:CATEGORY>
+          </ho:COMPU-METHOD>
+        </ho:COMPU-METHODS>
+      </fx:CODING>
+    </fx:CODINGS>
+  </fx:PROCESSING-INFORMATION>
+</fx:FIBEX>

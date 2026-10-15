@@ -746,3 +746,142 @@ fn unsupported_multiplexing_is_reported() {
         assert!(e.contains(expected), "{name}: {e}");
     }
 }
+
+fn lin_flexray() -> String {
+    std::fs::read_to_string(data("lin_flexray.xml")).unwrap()
+}
+
+fn lin(channel: &ChannelDescription) -> &Lin {
+    match &channel.bus {
+        Bus::Lin(l) => l,
+        other => panic!("not LIN: {other:?}"),
+    }
+}
+
+#[test]
+fn lin_frames_and_checksum_models() {
+    let ch = load_channel(data("lin_flexray.xml"), Some("Lin"), None).unwrap();
+    let l = lin(&ch);
+    let frames: Vec<_> = l
+        .frames
+        .iter()
+        .map(|f| (f.name.as_str(), f.id, f.checksum))
+        .collect();
+    assert_eq!(
+        frames,
+        [
+            ("LightCmd", 0x10, LinChecksum::Enhanced), // LIN 2.1 default
+            ("LightStatus", 0x11, LinChecksum::Classic), // CHECKSUM-TYPE
+            ("MasterReq", 0x3C, LinChecksum::Classic), // diagnostic
+        ]
+    );
+    let cmd = ch.database.message_by_id(0x10, false).unwrap();
+    assert_eq!(
+        (cmd.name.as_str(), cmd.size, cmd.fd),
+        ("LightCmd", 2, false)
+    );
+    assert_eq!(cmd.transmitters, ["Bcm"]);
+    assert_eq!(cmd.receivers, ["Lamp"]);
+    assert_eq!(cmd.signal("Brightness").unwrap().factor, 0.5);
+    // The CAN-only entry point gives the same database.
+    let db = load(data("lin_flexray.xml"), Some("CH_LIN")).unwrap();
+    assert_eq!(db.messages, ch.database.messages);
+    // LIN 1.x clusters default to classic.
+    let path = variant(
+        "lin13",
+        &lin_flexray().replace(
+            "<fx:PROTOCOL-VERSION>2.1</fx:PROTOCOL-VERSION>\n        <fx:CHANNEL-REFS>\n          <fx:CHANNEL-REF ID-REF=\"CH_LIN\"/>",
+            "<fx:PROTOCOL-VERSION>1.3</fx:PROTOCOL-VERSION>\n        <fx:CHANNEL-REFS>\n          <fx:CHANNEL-REF ID-REF=\"CH_LIN\"/>",
+        ),
+    );
+    let ch = load_channel(&path, Some("Lin"), None).unwrap();
+    assert_eq!(lin(&ch).frames[0].checksum, LinChecksum::Classic);
+}
+
+#[test]
+fn lin_schedule_tables_give_cycle_times() {
+    let ms = Duration::from_millis;
+    let ch = load_channel(data("lin_flexray.xml"), Some("Lin"), None).unwrap();
+    let tables = &lin(&ch).schedule_tables;
+    assert_eq!(tables.len(), 2);
+    let (normal, diag) = (&tables[0], &tables[1]);
+    assert_eq!((normal.name.as_str(), normal.period()), ("Normal", ms(40)));
+    assert_eq!(normal.entries[1].frame.as_deref(), Some("LightStatus"));
+    assert_eq!((diag.name.as_str(), diag.period()), ("Diagnostic", ms(20)));
+    assert_eq!(diag.entries[1].frame, None, "a free-format entry");
+    // LightCmd is twice in Normal's 40 ms; each frame from the first table
+    // that sends it.
+    let cycle =
+        |ch: &ChannelDescription, name: &str| ch.database.message_by_name(name).unwrap().cycle_time;
+    assert_eq!(cycle(&ch, "LightCmd"), Some(ms(20)));
+    assert_eq!(cycle(&ch, "LightStatus"), Some(ms(40)));
+    assert_eq!(cycle(&ch, "MasterReq"), Some(ms(20)));
+    // A chosen table (by name or ID) gives the cycle times alone.
+    let d = load_channel(data("lin_flexray.xml"), Some("Lin"), Some("Diagnostic")).unwrap();
+    assert_eq!(cycle(&d, "MasterReq"), Some(ms(20)));
+    assert_eq!(cycle(&d, "LightCmd"), None);
+    let n = load_channel(data("lin_flexray.xml"), Some("Lin"), Some("ST_Normal")).unwrap();
+    assert_eq!(cycle(&n, "MasterReq"), None);
+    assert_eq!(cycle(&n, "LightCmd"), Some(ms(20)));
+    let e = load_channel(data("lin_flexray.xml"), Some("Lin"), Some("Sleep"))
+        .unwrap_err()
+        .to_string();
+    assert!(
+        e.contains("no schedule table \"Sleep\"") && e.contains("tables: Normal, Diagnostic"),
+        "{e}"
+    );
+    let e = load_channel(data("network.xml"), Some("Body"), Some("Normal"))
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("not a LIN channel"), "{e}");
+}
+
+#[test]
+fn lin_errors_are_reported() {
+    let text = lin_flexray();
+    let cases = [
+        (
+            text.replace(
+                "<fx:IDENTIFIER-VALUE>16</fx:IDENTIFIER-VALUE>",
+                "<fx:IDENTIFIER-VALUE>64</fx:IDENTIFIER-VALUE>",
+            ),
+            "not a LIN frame identifier (0..=63)",
+        ),
+        (
+            text.replace(
+                "<lin:CHECKSUM-TYPE>CLASSIC</lin:CHECKSUM-TYPE>",
+                "<lin:CHECKSUM-TYPE>FANCY</lin:CHECKSUM-TYPE>",
+            ),
+            "\"FANCY\" is not CLASSIC or ENHANCED",
+        ),
+        (
+            text.replacen(
+                "<lin:DELAY>PT0.01S</lin:DELAY>",
+                "<lin:DELAY>10</lin:DELAY>",
+                1,
+            ),
+            "schedule table Normal: delay \"10\" is not a duration",
+        ),
+        (
+            text.replace(
+                "<fx:FRAME-TRIGGERING-REF ID-REF=\"FT_LightStatus\"/>\n              </lin:SCHEDULE",
+                "<fx:FRAME-TRIGGERING-REF ID-REF=\"FT_Nope\"/>\n              </lin:SCHEDULE",
+            ),
+            "refers to frame triggering FT_Nope",
+        ),
+        (
+            text.replace(
+                "<fx:BYTE-LENGTH>8</fx:BYTE-LENGTH>\n        <fx:FRAME-TYPE>",
+                "<fx:BYTE-LENGTH>9</fx:BYTE-LENGTH>\n        <fx:FRAME-TYPE>",
+            ),
+            "LIN frame MasterReq is 9 bytes (at most 8)",
+        ),
+    ];
+    for (i, (text, expected)) in cases.into_iter().enumerate() {
+        let path = variant(&format!("lin-error-{i}"), &text);
+        let e = load_channel(&path, Some("Lin"), None)
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains(expected), "{expected}: {e}");
+    }
+}

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 import hilspy
@@ -69,3 +71,78 @@ def test_headers_travel_over_mem(mem: str) -> None:
         assert fr is not None
         assert (fr.bus, fr.id, fr.cycle, fr.channel) == ("flexray", 12, 33, "AB")
         assert fr.data == b"\x01\x02"
+
+
+DATA = Path(__file__).parent / "data"
+FIBEX = f"fibex:{DATA / 'lin_flexray.xml'}"
+LIGHT_CMD = {"Brightness": 50.0, "Mode": "High"}
+
+
+def drain(ch: hilspy.Channel) -> list[Message]:
+    out = []
+    while (m := ch.recv(timeout=0.05)) is not None:
+        out.append(m)
+    return out
+
+
+def test_lin_round_trip_over_mem(mem: str) -> None:
+    with (
+        hilspy.open(mem, FIBEX, channel="Lin", ecu="Bcm") as master,
+        hilspy.open(mem, FIBEX, channel="Lin", ecu="Lamp") as slave,
+        hilspy.open(mem) as raw,
+    ):
+        master.send("LightCmd", LIGHT_CMD)
+        frame = raw.recv(timeout=1)
+        assert frame is not None
+        assert (frame.bus, frame.id, frame.enhanced, frame.checksum) == ("lin", 0x10, True, 0x49)
+        assert frame.data == b"\x64\x02"
+        got = slave.recv(timeout=1)
+        assert got is not None and got.name == "LightCmd" and got.fields == LIGHT_CMD
+        assert got.bus == "lin" and got.checksum == 0x49
+        slave.send("LightStatus", {"Current": 1.5, "Fault": 0})
+        status = master.recv(timeout=1)
+        assert status is not None and status.name == "LightStatus"
+        assert (status.enhanced, status.checksum) == (False, 0xF0)
+
+
+def test_lin_bad_checksum_is_a_decode_error(mem: str) -> None:
+    with hilspy.open(mem, FIBEX, channel="Lin") as rx, hilspy.open(mem) as tx:
+        tx.send(Message(data=b"\x64\x02", id=0x10, checksum=0x48))  # 0x49 is right
+        with pytest.raises(
+            hilspy.Error, match=r"checksum 0x48, expected the enhanced checksum 0x49"
+        ):
+            rx.recv(timeout=1)
+        # A classic checksum on an enhanced frame is wrong too.
+        tx.send(Message(data=b"\x64\x02", id=0x10, enhanced=False))
+        with pytest.raises(hilspy.Error, match="LIN frame LightCmd"):
+            rx.recv(timeout=1)
+        # The stream goes on.
+        tx.send(Message(data=b"\x64\x02", id=0x10, bus="lin"))
+        ok = rx.recv(timeout=1)
+        assert ok is not None and ok.name == "LightCmd"
+        tx.send(Message(data=b"\x01", id=0x20, bus="lin"))
+        unknown = rx.recv(timeout=1)
+        assert unknown is not None and unknown.name is None and unknown.id == 0x20
+
+
+def test_lin_schedule_cycle_times_on_a_clock(mem: str) -> None:
+    clock = hilspy.Clock()
+    with (
+        hilspy.open(mem, FIBEX, channel="Lin", clock=clock) as master,
+        hilspy.open(mem, FIBEX, channel="Lin") as rx,
+    ):
+        # Schedule table Normal: 40 ms, LightCmd twice, LightStatus once.
+        cmd = master.every(None, "LightCmd", LIGHT_CMD)
+        status = master.every(None, "LightStatus", {"Current": 0.5, "Fault": 1})
+        assert (cmd.period, status.period) == pytest.approx((0.02, 0.04))
+        clock.advance(0.1)
+        assert (cmd.sent_count, status.sent_count) == (6, 3)
+        names = [m.name for m in drain(rx)]
+        assert (names.count("LightCmd"), names.count("LightStatus")) == (6, 3)
+    with (
+        hilspy.open(mem, FIBEX, channel="Lin", schedule="Diagnostic", clock=clock) as diag,
+    ):
+        req = diag.every(None, "MasterReq", {"Nad": 0x7F, "Pci": 6, "Sid": 0xB2})
+        assert req.period == pytest.approx(0.02)
+        with pytest.raises(hilspy.Error, match='"LightCmd" has no cycle time'):
+            diag.every(None, "LightCmd", LIGHT_CMD)

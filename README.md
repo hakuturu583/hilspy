@@ -30,7 +30,7 @@ with hilspy.open("can://vcan0", "dbc:vehicle.dbc") as ecu:
 | --- | --- |
 | `raw` (default) | none: messages carry `data` (and `id` for CAN) |
 | `dbc:FILE` | CAN frames <-> DBC messages, via [`can-dbc`](https://crates.io/crates/can-dbc) (options `strict`, `scaling`, `decode_choices`, `e2e`, `ecu`) |
-| `fibex:FILE` | CAN / CAN FD frames <-> the frames of an ASAM FIBEX channel, via [`afibex`](https://crates.io/crates/afibex) (option `channel`, and the `dbc:` options); see [FIBEX](#fibex-networks) |
+| `fibex:FILE` | CAN / CAN FD and LIN frames <-> the frames of an ASAM FIBEX channel, via [`afibex`](https://crates.io/crates/afibex) (options `channel`, `schedule`, and the `dbc:` options); see [FIBEX](#fibex-networks) |
 | `someip:FILE` | SOME/IP messages <-> the methods, events and fields of ASAM FIBEX 4 services, parsed by [`afibex`](https://crates.io/crates/afibex) and checked against [`asomeip`](https://crates.io/crates/asomeip) (options `client_id`, `decode_choices`, `stream`); see [SOME/IP](#someip-services) |
 | `sbf` | Septentrio Binary Format stream <-> blocks, via [`libsbf`](https://crates.io/crates/libsbf); encodes `PVTGeodetic` and `AttEuler` |
 | `nmea` | NMEA 0183 sentences <-> messages via [`nmea`](https://crates.io/crates/nmea) (`GGA`, `RMC`, `GSV`, ...); encodes `GGA`, `RMC`, `VTG`, `HDT`, `ZDA` |
@@ -109,7 +109,8 @@ and CAN logs, `udp://` and `tcp://` carry the bytes only.
 `every(None, ...)` sends a message at the period its network description
 gives it: a DBC's `GenMsgCycleTime` (milliseconds) or, for `fibex:`, the
 `REPEATING-TIME-RANGE` of the frame triggering's `CYCLIC-TIMING` (an
-`xs:duration` such as `PT0.01S`, so per channel). A message without one (or
+`xs:duration` such as `PT0.01S`, so per channel); on a LIN channel, its
+schedule table (see [LIN channels](#lin-channels)). A message without one (or
 with a cycle time of 0) raises `hilspy.Error` naming it; other codecs have
 no cycle times. The `Periodic`'s `period` can still be changed afterwards.
 
@@ -145,7 +146,7 @@ with hilspy.open("can://can0", "dbc:vehicle.dbc", ecu="VCU") as vcu:
 
 ### FIBEX networks
 
-`fibex:FILE` sends and receives the CAN and CAN FD frames of one channel of an
+`fibex:FILE` sends and receives the CAN, CAN FD and LIN frames of one channel of an
 ASAM FIBEX (MCD-2 NET) file, like `dbc:` does a DBC's:
 
 ```python
@@ -194,6 +195,43 @@ with hilspy.open("can://can0", "fibex:network.xml", channel="Chassis") as ecu:
   nested multiplexing, switched or static PDU instances off bit 0 or
   high-low, and encodings other than those above are rejected when the file
   is opened.
+
+#### LIN channels
+
+A channel of a cluster whose `PROTOCOL` is `LIN` sends and receives LIN
+frames (on `mem://` or a plugin transport for now: hilspy has no LIN hardware
+transport yet):
+
+```python
+master = hilspy.open("mem://body-lin", "fibex:network.xml", channel="Lin", ecu="Bcm", clock=clock)
+lamp = hilspy.open("mem://body-lin", "fibex:network.xml", channel="Lin", ecu="Lamp")
+cmd = master.every(None, "LightCmd", {"Brightness": 50.0, "Mode": "High"})  # schedule table period
+msg = lamp.recv()  # msg.bus == "lin", msg.id == 0x10, msg.checksum == 0x49
+```
+
+* The frame triggering's `IDENTIFIER-VALUE` is the frame identifier
+  (0..=63); signals are laid out as on CAN.
+* Checksums: the triggering's `CHECKSUM-TYPE` (or `LIN-CHECKSUM`) `CLASSIC` /
+  `ENHANCED`, else classic for a cluster `PROTOCOL-VERSION` 1.x and enhanced
+  otherwise; the diagnostic frames `0x3C` / `0x3D` are always classic.
+  Sending computes the checksum; receiving verifies it under the frame's model
+  (not the model the sender claims). A mismatch raises `hilspy.Error` from
+  `recv` (or reaches a subscription as an error) naming the frame and both
+  checksums, and the next frame decodes as usual: a frame failing its
+  checksum has no trustworthy payload, as a CAN frame failing its CRC never
+  arrives, whereas E2E checks an intact payload and reports in the `e2e` field.
+* Cycle times come from the `SCHEDULE-TABLE`s of the channel (or its
+  cluster): an entry's `DELAY` (`xs:duration`) is the time from its start to
+  the next entry's, the table's period the sum of its delays, and a frame's
+  cycle time the period divided by the number of entries that send it (exact
+  for evenly spaced entries, their mean interval otherwise). The table is the
+  one the `schedule` option names (short name or ID), else the first table
+  that sends the frame; a frame no table sends falls back to its
+  `CYCLIC-TIMING`. `every(None, ...)` therefore runs each frame at its
+  schedule rate; it does not run the table's slots in order.
+* Not covered: the master/slave header-response split (a sender sends the
+  whole frame), event-triggered and sporadic frame collision resolution, and
+  LDF files.
 
 ### SOME/IP services
 

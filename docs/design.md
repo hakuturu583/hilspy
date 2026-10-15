@@ -161,7 +161,20 @@ deadlocking. A Python exception raised in a plugin travels through the core as
   order; clashing names qualified as `PDU.Signal`; a multiplexed PDU's switch
   becomes the multiplexor and its switched PDUs' signals are multiplexed on
   their switch codes, in the multiplexed PDU's bit numbering), and the codec is the `dbc` codec over it, so
-  the bit layout, options and E2E are shared. Compu methods that one factor
+  the bit layout, options and E2E are shared. `fibex::load_channel` adds the
+  channel's bus, from its cluster's `PROTOCOL`: on a LIN channel the
+  identifiers are LIN frame identifiers, each frame has a checksum model
+  (triggering `CHECKSUM-TYPE`, else the cluster's protocol version; 0x3C/0x3D
+  classic) and the `SCHEDULE-TABLE`s (read with `roxmltree`: entries with a
+  `DELAY` and optionally a `FRAME-TRIGGERING-REF`) set each message's cycle
+  time to the table period over the frame's entry count (the `schedule`
+  option's table, else the first that sends the frame). The LIN codec wraps
+  the `dbc` codec (`Dbc::payload` / `Dbc::decode_as`, which the CAN framing
+  uses too) with LIN framing: the header gets the identifier, model and
+  checksum; decoding verifies the checksum under the frame's model after the
+  `ecu` filter and before E2E, and a mismatch is `Error::Decode` (a
+  link-layer check like the CAN CRC: no message, the stream continues),
+  unlike E2E's status field. Compu methods that one factor
   and offset plus exact value table entries cannot express become a
   per-signal `dbc::Coding` (texttable ranges, piecewise linear and rational
   scales; `dbc/coding.rs`) that `Signal` encoding and decoding consult

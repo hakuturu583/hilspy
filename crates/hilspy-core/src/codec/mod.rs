@@ -4,7 +4,7 @@
 //! | --- | --- |
 //! | `raw` | none: every packet is a nameless message carrying its data |
 //! | `dbc:FILE` | CAN frames <-> DBC messages (options `strict`, `scaling`, `decode_choices`, `e2e`, `ecu`) |
-//! | `fibex:FILE` | CAN frames <-> the frames of a FIBEX channel (option `channel`, and the `dbc` options) |
+//! | `fibex:FILE` | CAN or LIN frames <-> the frames of a FIBEX channel (options `channel`, `schedule`, and the `dbc` options) |
 //! | `sbf` | a Septentrio Binary Format byte stream <-> SBF blocks |
 //! | `nmea` | NMEA 0183 sentences <-> messages (`GGA`, `RMC`, ...) |
 //! | `ubx` | u-blox UBX frames <-> messages (`NAV-PVT`, ...) |
@@ -71,10 +71,7 @@ fn registry() -> &'static RwLock<HashMap<String, Factory>> {
             "dbc".into(),
             Arc::new(|s| Ok(Box::new(dbc::Dbc::open(s)?) as Box<dyn Codec>)),
         );
-        m.insert(
-            "fibex".into(),
-            Arc::new(|s| Ok(Box::new(fibex::open(s)?) as Box<dyn Codec>)),
-        );
+        m.insert("fibex".into(), Arc::new(fibex::open));
         m.insert(
             "lidar".into(),
             Arc::new(|s| Ok(Box::new(lidar::Lidar::open(s)?) as Box<dyn Codec>)),
