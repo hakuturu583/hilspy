@@ -89,11 +89,9 @@ pub(crate) fn take_sentences(buf: &mut Vec<u8>) -> Vec<Vec<u8>> {
             }
             break;
         };
-        let mut line: Vec<u8> = buf.drain(..=end).collect();
-        while line.last().is_some_and(|b| *b == b'\n' || *b == b'\r') {
-            line.pop();
-        }
-        out.push(line);
+        // With its terminator: a sentence passed on as raw data stays
+        // framed for the next decoder.
+        out.push(buf.drain(..=end).collect());
     }
     out
 }
@@ -348,7 +346,9 @@ impl Codec for Nmea {
         Ok(take_sentences(buf)
             .into_iter()
             .map(|line| {
-                let text = String::from_utf8_lossy(&line).into_owned();
+                let text = String::from_utf8_lossy(&line)
+                    .trim_end_matches(['\r', '\n'])
+                    .to_owned();
                 let p = Packet {
                     data: line,
                     can: None,
@@ -403,7 +403,10 @@ $GPHDT,274.07,T*03\r\n$GPXYZ,1,2*00\r\n$GPRMC,225446,A,4916.45,N,12311.12,W,000.
         assert_eq!(f(&out[0], "talker"), Value::Str("GP".into()));
         // The crate keeps some values as f32.
         assert!((f(&out[1], "heading").as_f64().unwrap() - 274.07).abs() < 1e-4);
-        assert_eq!(out[2].packet.as_ref().unwrap().data, b"$GPXYZ,1,2*00");
+        assert_eq!(out[2].packet.as_ref().unwrap().data, b"$GPXYZ,1,2*00\r\n");
+        // Passed on as raw data, it decodes the same on the other side.
+        let again = codec().decode(out[2].packet.clone().unwrap()).unwrap();
+        assert_eq!(again[0].packet.as_ref().unwrap().data, b"$GPXYZ,1,2*00\r\n");
     }
 
     #[test]

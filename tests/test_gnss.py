@@ -98,7 +98,7 @@ def test_nmea_decodes_a_receiver_stream(mem: str) -> None:
         "azimuth": 270.0,
         "snr": 0.0,
     }
-    assert got[2].data == b"$GPBAD,1*00"
+    assert got[2].data == b"$GPBAD,1*00\r\n"
 
 
 def test_ubx_nav_pvt_parses_elsewhere(mem: str) -> None:
