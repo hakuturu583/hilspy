@@ -975,6 +975,24 @@ fn flexray_slots_cycles_and_channels() {
 }
 
 #[test]
+fn flexray_3_cycle_repetitions_are_accepted() {
+    let text = lin_flexray();
+    let yaw = "<fx:CYCLE-REPETITION>4</fx:CYCLE-REPETITION>";
+    for repetition in [5, 10, 20, 40, 50] {
+        let path = variant(
+            &format!("fr3-{repetition}"),
+            &text.replacen(
+                yaw,
+                &format!("<fx:CYCLE-REPETITION>{repetition}</fx:CYCLE-REPETITION>"),
+                1,
+            ),
+        );
+        let ch = load_channel(&path, Some("FlexRayA"), None).unwrap();
+        assert!(ch.database.message_by_name("YawFr").is_ok(), "{repetition}");
+    }
+}
+
+#[test]
 fn flexray_errors_are_reported() {
     let text = lin_flexray();
     let yaw = "<fx:SLOT-ID>7</fx:SLOT-ID>\n                <fx:BASE-CYCLE>1</fx:BASE-CYCLE>\n                <fx:CYCLE-REPETITION>4</fx:CYCLE-REPETITION>";
@@ -989,7 +1007,7 @@ fn flexray_errors_are_reported() {
                 yaw,
                 "<fx:SLOT-ID>7</fx:SLOT-ID><fx:CYCLE-REPETITION>3</fx:CYCLE-REPETITION>",
             ),
-            "cycle repetition 3 is not a power of two",
+            "cycle repetition 3 is not a FlexRay cycle repetition",
         ),
         (
             text.replace(

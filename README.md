@@ -257,7 +257,7 @@ clock.advance(0.04)  # YawFr in cycles 1, 5 and 9: msg.id == 7 (slot), msg.cycle
 
 * A frame triggering's `ABSOLUTELY-SCHEDULED-TIMING`s give its `SLOT-ID`,
   `BASE-CYCLE` (default 0) and `CYCLE-REPETITION` (a power of two up to 64,
-  default 1): the frame is sent in that slot of every cycle whose counter
+  or 5, 10, 20, 40 or 50 for FlexRay 3.0; default 1): the frame is sent in that slot of every cycle whose counter
   modulo the repetition is the base cycle. Frames may share a slot in
   different cycles (slot multiplexing).
 * The channel's `FLEXRAY-CHANNEL-NAME` (`A` or `B`; both when absent) is the

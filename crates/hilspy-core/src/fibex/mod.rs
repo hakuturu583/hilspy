@@ -23,8 +23,8 @@
 //! frame, else its triggering's `CYCLIC-TIMING`.
 //!
 //! FlexRay: a frame triggering's `ABSOLUTELY-SCHEDULED-TIMING`s (`SLOT-ID`,
-//! `BASE-CYCLE`, default 0, and `CYCLE-REPETITION`, a power of two up to 64,
-//! default 1) say where the frame is sent: in its slot in every cycle whose
+//! `BASE-CYCLE`, default 0, and `CYCLE-REPETITION`, a power of two up to 64
+//! or 5, 10, 20, 40 or 50 (FlexRay 3.0), default 1) say where the frame is sent: in its slot in every cycle whose
 //! counter modulo the repetition is the base cycle. Several frames may share
 //! a slot in different cycles, so the database is built
 //! [without identifiers](Database::without_identifiers) (a message's `id` is
@@ -154,7 +154,7 @@ pub struct SlotTiming {
     pub slot: u16,
     /// Less than the repetition.
     pub base_cycle: u8,
-    /// A power of two, 1..=64.
+    /// A power of two up to 64, or 5, 10, 20, 40 or 50 (FlexRay 3.0).
     pub repetition: u8,
 }
 
@@ -1395,10 +1395,15 @@ fn flexray_triggering(t: Node<'_, '_>) -> Result<Option<(Triggering, Vec<SlotTim
                 "frame triggering {tid}: slot {slot} is not in 1..=2047"
             )));
         }
-        if !(1..=64).contains(&repetition) || !repetition.is_power_of_two() {
+        // FlexRay 2.1 allows powers of two up to 64; FlexRay 3.0 adds 5, 10,
+        // 20, 40 and 50. The simulated cycle counter always runs 0..=63.
+        if !matches!(
+            repetition,
+            1 | 2 | 4 | 5 | 8 | 10 | 16 | 20 | 32 | 40 | 50 | 64
+        ) {
             return Err(bad(format!(
-                "frame triggering {tid}: cycle repetition {repetition} is not a power of two \
-                 up to 64"
+                "frame triggering {tid}: cycle repetition {repetition} is not a FlexRay cycle \
+                 repetition (1, 2, 4, 5, 8, 10, 16, 20, 32, 40, 50 or 64)"
             )));
         }
         if base >= repetition {

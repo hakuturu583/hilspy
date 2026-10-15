@@ -349,7 +349,9 @@ impl Message {
                         .ok_or_else(|| {
                             PyValueError::new_err(format!("LIN identifier {id} is not in 0..=63"))
                         })?;
+                    // Diagnostic frames always use the classic checksum.
                     let model = match enhanced {
+                        _ if hilspy_core::is_lin_diagnostic(id) => LinChecksum::Classic,
                         Some(true) => LinChecksum::Enhanced,
                         Some(false) => LinChecksum::Classic,
                         None => LinChecksum::for_id(id),

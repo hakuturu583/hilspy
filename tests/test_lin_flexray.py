@@ -20,6 +20,9 @@ def test_lin_message() -> None:
     # Diagnostic frames default to (and always compute) classic.
     diag = Message(data=bytes(8), id=0x3C, bus="lin")
     assert not diag.enhanced and diag.checksum == 0xFF
+    # Even when the caller asks for enhanced.
+    forced = Message(data=bytes(8), id=0x3D, enhanced=True)
+    assert not forced.enhanced and forced.checksum == 0xFF
     assert Message(data=b"\x01", id=1, checksum=0x12).checksum == 0x12
     assert m.cycle is None and m.channel is None
     assert 'bus="lin"' in repr(m)
