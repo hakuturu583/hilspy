@@ -219,3 +219,32 @@ def test_texttable_ranges_piecewise_and_rational_codings(mem: str) -> None:
             tx.send("Codings", {**values, "Parabola": 36.0})
         with pytest.raises(hilspy.Error, match="signal Inverse.*outside"):
             tx.send("Codings", {**values, "Inverse": 2000.0})
+
+
+FEATURES_DBC = DATA / "fibex_features.dbc"
+
+
+@pytest.mark.parametrize("name", ["Shifted"])
+def test_features_match_the_dbc(mem: str, name: str) -> None:
+    """Frames of the features fixture give the payloads of the equivalent DBC (and cantools)."""
+    rng = random.Random(name)
+    reference: Any = cantools.database.load_file(str(FEATURES_DBC))
+    theirs = reference.get_message_by_name(name)
+    raw: dict[str, Any] = {"scaling": False, "strict": False, "decode_choices": False}
+    fibex_bus, dbc_bus = f"{mem}-fibex", f"{mem}-dbc"
+    with (
+        hilspy.open(fibex_bus, FEATURES, **raw) as fibex,
+        hilspy.open(fibex_bus) as fibex_raw,
+        hilspy.open(dbc_bus, f"dbc:{FEATURES_DBC}", **raw) as dbc,
+        hilspy.open(dbc_bus) as dbc_raw,
+    ):
+        for _ in range(50):
+            values = random_raw(theirs, rng)
+            fibex.send(name, values)
+            dbc.send(name, values)
+            a, b = fibex_raw.recv(timeout=1), dbc_raw.recv(timeout=1)
+            assert a is not None and b is not None
+            assert a.data == b.data == theirs.encode(values, scaling=False, strict=False)
+            fibex_raw.send(b)
+            back = fibex.recv(timeout=1)
+            assert back is not None and back.fields == values

@@ -96,10 +96,13 @@ with hilspy.open("can://can0", "fibex:network.xml", channel="Chassis") as ecu:
   triggerings (`EXTENDED-ADDRESSING="true"` or an identifier over `0x7FF`
   for extended frames, `CAN-FRAME-TX-BEHAVIOR`/`RX-BEHAVIOR` `CAN-FD` for
   CAN FD).
-* Fields are the signals of all the frame's PDUs (at byte offsets); a name
-  two PDUs share becomes `PDU.Signal`. A signal's `BIT-POSITION` is read as a
-  DBC start bit: the least significant bit for Intel, the most significant
-  for Motorola (`IS-HIGH-LOW-BYTE-ORDER`).
+* Fields are the signals of all the frame's PDUs; a name two PDUs share
+  becomes `PDU.Signal`. A signal's `BIT-POSITION` is read as a DBC start bit
+  within its PDU: the least significant bit for Intel, the most significant
+  for Motorola (`IS-HIGH-LOW-BYTE-ORDER`). A PDU instance's `BIT-POSITION`
+  is its least significant bit in the frame, at any bit; a signal whose bits
+  a PDU at a non-byte offset splits (a Motorola signal across PDU bytes) is
+  rejected, as is one past the end of the frame.
 * Coded types: unsigned, two's complement (`2C`, `SIGNED`), sign-magnitude
   (`SM`: the top bit is the sign) and one's complement (`1C`) integers of up
   to 64 bits, and IEEE floats; a negative zero decodes to 0.

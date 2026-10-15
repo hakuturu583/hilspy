@@ -21,12 +21,16 @@
 //! (texttable ranges, piecewise or rational functions) becomes the signal's
 //! [`Coding`], which the `dbc` encoding and decoding consult instead.
 //!
-//! Layout: a PDU instance's `BIT-POSITION` is the PDU's offset in the frame
-//! (a whole number of bytes). A signal instance's `BIT-POSITION` is read as a
-//! DBC start bit within its PDU (bit 0 is the least significant bit of byte
-//! 0): the least significant bit for `IS-HIGH-LOW-BYTE-ORDER` false (Intel,
-//! the default), the most significant bit for true (Motorola), as `canmatrix`
-//! reads and writes FIBEX.
+//! Layout: a signal instance's `BIT-POSITION` is read as a DBC start bit
+//! within its PDU (bit 0 is the least significant bit of byte 0): the least
+//! significant bit for `IS-HIGH-LOW-BYTE-ORDER` false (Intel, the default),
+//! the most significant bit for true (Motorola), as `canmatrix` reads and
+//! writes FIBEX. A PDU instance's `BIT-POSITION` places the PDU's bits in the
+//! frame: PDU bit `b` (numbered like a start bit) is frame bit `offset + b`.
+//! A signal's frame bits are those of its PDU bits ([`Placement`]); they must
+//! again form one DBC signal, which they always do at a byte offset. At
+//! another offset, an Intel signal stays Intel, while a Motorola signal that
+//! crosses a byte of its PDU is split in the frame and rejected.
 
 use std::collections::HashMap;
 use std::ops::Bound;
@@ -172,6 +176,50 @@ impl Compu {
     }
 }
 
+/// Where the bits of a PDU instance sit in its frame.
+struct Placement {
+    /// The frame `(byte, bit)` of each PDU bit, by PDU bit number (a DBC
+    /// start bit: byte * 8 + bit, bit 0 the least significant).
+    bits: Vec<(usize, u32)>,
+    frame_len: usize,
+}
+
+impl Placement {
+    /// A PDU of `len` bytes at the instance's `BIT-POSITION` in a frame of
+    /// `frame_len` bytes; `None` if it does not fit. Low-high (Intel): the
+    /// position is the PDU's least significant bit and PDU bit `b` is frame
+    /// bit `offset + b`. High-low: the PDU is a Motorola field whose most
+    /// significant bit is at the position, so its last byte comes first.
+    fn new(offset: u32, high_low: bool, len: usize, frame_len: usize) -> Option<Self> {
+        let size = u32::try_from(len * 8).ok()?;
+        let bits = if high_low {
+            bits::positions(offset, size, ByteOrder::BigEndian, frame_len)?
+        } else {
+            if u64::from(offset) + u64::from(size) > frame_len as u64 * 8 {
+                return None;
+            }
+            (offset..offset + size)
+                .map(|b| ((b / 8) as usize, b % 8))
+                .collect()
+        };
+        Some(Self { bits, frame_len })
+    }
+
+    /// Move a signal positioned in a PDU of `len` bytes to the frame;
+    /// `None` if its bits are not one DBC signal there.
+    fn apply(&self, signal: &mut Signal, len: usize) -> Option<()> {
+        let in_pdu = bits::positions(signal.start_bit, signal.size, signal.byte_order, len)?;
+        let in_frame: Vec<_> = in_pdu
+            .into_iter()
+            .map(|(byte, bit)| self.bits[byte * 8 + bit as usize])
+            .collect();
+        let (start, order) = bits::layout(&in_frame, signal.byte_order, self.frame_len)?;
+        signal.start_bit = start;
+        signal.byte_order = order;
+        Some(())
+    }
+}
+
 struct Network<'d, 'a, 'i> {
     data: &'d FibexData,
     /// Elements by `ID` attribute.
@@ -291,15 +339,22 @@ impl Network<'_, '_, '_> {
             }
             let offset = instance.bit_position.unwrap_or(0);
             let len = pdu.byte_length as usize;
-            if offset % 8 != 0 || (offset / 8) as usize + len > size {
-                return Err(bad(format!(
-                    "PDU {pdu_name} ({len} bytes at bit {offset}) does not fit at a byte offset \
-                     in frame {name} ({size} bytes)"
-                )));
-            }
+            let high_low = instance.is_high_low_byte_order == Some(true);
+            let place = Placement::new(offset, high_low, len, size).ok_or_else(|| {
+                bad(format!(
+                    "PDU {pdu_name} ({len} bytes at bit {offset}) does not fit in frame {name} \
+                     ({size} bytes)"
+                ))
+            })?;
             for s in &pdu.signal_instances {
                 let (signal_name, mut signal) = self.signal(&pdu_name, s, len)?;
-                signal.start_bit += offset;
+                place.apply(&mut signal, len).ok_or_else(|| {
+                    bad(format!(
+                        "signal {signal_name} of PDU {pdu_name}: its bits are not one signal in \
+                         frame {name} (a signal that crosses a byte of a PDU placed at bit \
+                         {offset}, not at a byte boundary)"
+                    ))
+                })?;
                 signals.push((pdu_name.clone(), signal_name, signal));
             }
         }

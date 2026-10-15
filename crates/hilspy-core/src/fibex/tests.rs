@@ -200,7 +200,15 @@ fn unsupported_content_is_reported() {
                 "<fx:PDU-REF ID-REF=\"P_Brake\"/>\n            <fx:BIT-POSITION>32</fx:BIT-POSITION>",
                 "<fx:PDU-REF ID-REF=\"P_Brake\"/>\n            <fx:BIT-POSITION>36</fx:BIT-POSITION>",
             ),
-            "byte offset",
+            "does not fit in frame",
+        ),
+        (
+            "split",
+            text.replace(
+                "<fx:PDU-REF ID-REF=\"P_Brake\"/>\n            <fx:BIT-POSITION>32</fx:BIT-POSITION>",
+                "<fx:PDU-REF ID-REF=\"P_Brake\"/>\n            <fx:BIT-POSITION>28</fx:BIT-POSITION>",
+            ),
+            "BrakePressure of PDU BrakePdu: its bits are not one signal",
         ),
         (
             "pdu-order",
@@ -368,4 +376,48 @@ fn texttable_ranges_piecewise_and_rational_codings() {
         "{e}"
     );
     assert!(err(0, Value::Str("Medium".into())).contains("Low, High, Error"));
+}
+
+/// The frames of the features fixture that a DBC can express match it.
+#[test]
+fn features_match_the_equivalent_dbc() {
+    let fibex = features();
+    let dbc = Database::from_file(data("fibex_features.dbc")).unwrap();
+    for d in &dbc.messages {
+        let f = fibex.message_by_name(&d.name).unwrap();
+        assert_eq!((f.id, f.size), (d.id, d.size), "{}", d.name);
+        let mut expected = d.signals.clone();
+        for s in &mut expected {
+            s.receivers.clear();
+        }
+        assert_eq!(f.signals, expected, "{}", d.name);
+    }
+}
+
+#[test]
+fn pdus_at_bit_offsets() {
+    let db = features();
+    let m = db.message_by_name("Shifted").unwrap();
+    let layout: Vec<_> = m
+        .signals
+        .iter()
+        .map(|s| (s.name.as_str(), s.start_bit, s.byte_order))
+        .collect();
+    assert_eq!(
+        layout,
+        [
+            ("ShiftedA", 4, ByteOrder::LittleEndian),
+            ("ShiftedB", 19, ByteOrder::BigEndian),
+            ("Tail", 27, ByteOrder::LittleEndian),
+        ]
+    );
+    let values = named(&[
+        ("ShiftedA", Value::Int(0x3A5)),
+        ("ShiftedB", Value::Int(0xC)),
+        ("Tail", Value::Int(0xB7)),
+    ]);
+    let data = m.encode(&values, &EncodeOptions::default()).unwrap();
+    // A: bits 4..14; B: byte 2 bits 3..0; Tail: bits 27..35.
+    assert_eq!(data, [0x50, 0x3A, 0x0C, 0xB8, 0x05, 0, 0, 0]);
+    assert_eq!(m.decode(&data, &DecodeOptions::default()).unwrap(), values);
 }
