@@ -1,7 +1,7 @@
 //! DBC databases: message and signal definitions parsed with the `can-dbc`
 //! crate, and the encoding of physical signal values to payloads and back.
 
-mod bits;
+pub(crate) mod bits;
 
 use std::collections::HashMap;
 use std::path::Path;

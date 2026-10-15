@@ -19,6 +19,10 @@ pub enum Error {
     /// A DBC file that does not parse or is inconsistent.
     #[error("DBC parse error: {0}")]
     DbcParse(String),
+    /// A FIBEX file that does not parse, or that describes something the
+    /// `fibex` codec does not support.
+    #[error("FIBEX error: {0}")]
+    FibexParse(String),
     /// A message or field the codec does not know.
     #[error("{0}")]
     NotFound(String),

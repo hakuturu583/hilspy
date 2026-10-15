@@ -1,6 +1,6 @@
 [package]
 name = "hilspy-core"
-description = "Rust core of hilspy: CAN buses (SocketCAN / virtual), DBC, Septentrio Binary Format (SBF) and LiDAR (Hesai, Velodyne) codecs for HILS"
+description = "Rust core of hilspy: CAN buses (SocketCAN / virtual), DBC, FIBEX, Septentrio Binary Format (SBF) and LiDAR (Hesai, Velodyne) codecs for HILS"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,6 +9,8 @@ repository.workspace = true
 
 [dependencies]
 can-dbc.workspace = true
+afibex.workspace = true
+roxmltree.workspace = true
 libsbf.workspace = true
 prost.workspace = true
 serialport.workspace = true

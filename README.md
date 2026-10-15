@@ -30,6 +30,7 @@ with hilspy.open("can://vcan0", "dbc:vehicle.dbc") as ecu:
 | --- | --- |
 | `raw` (default) | none: messages carry `data` (and `id` for CAN) |
 | `dbc:FILE` | CAN frames <-> DBC messages, via [`can-dbc`](https://crates.io/crates/can-dbc) (options `strict`, `scaling`, `decode_choices`, `e2e`) |
+| `fibex:FILE` | CAN / CAN FD frames <-> the frames of an ASAM FIBEX channel, via [`afibex`](https://crates.io/crates/afibex) (option `channel`, and the `dbc:` options); see [FIBEX](#fibex-networks) |
 | `sbf` | Septentrio Binary Format stream <-> blocks, via [`libsbf`](https://crates.io/crates/libsbf); encodes `PVTGeodetic` and `AttEuler` |
 | `nmea` | NMEA 0183 sentences <-> messages via [`nmea`](https://crates.io/crates/nmea) (`GGA`, `RMC`, `GSV`, ...); encodes `GGA`, `RMC`, `VTG`, `HDT`, `ZDA` |
 | `ubx` | u-blox UBX frames <-> messages via [`ublox`](https://crates.io/crates/ublox) (`NAV-PVT`, `NAV-ATT`, `MON-VER`, ...); encodes `NAV-PVT` |
@@ -75,6 +76,36 @@ The whole public API:
 | `hilspy.Clock(start=0.0)` | simulated time: `advance(dt)`, `advance_to(t)`, `now`, `next_due` |
 | `hilspy.register_transport(scheme, factory)` / `register_codec(name, factory)` | plugins |
 | `hilspy.Error` | bad URL/codec/option, encode/decode failure, closed channel |
+
+### FIBEX networks
+
+`fibex:FILE` sends and receives the CAN and CAN FD frames of one channel of an
+ASAM FIBEX (MCD-2 NET) file, like `dbc:` does a DBC's:
+
+```python
+with hilspy.open("can://can0", "fibex:network.xml", channel="Chassis") as ecu:
+    ecu.send("VehicleStatus", {"Speed": 12.5, "Gear": "D", "BrakePressure": 3.0, "BrakeActive": 0})
+    wheels = {"Front.Left": 10.0, "Front.Right": 10.0, "Rear.Left": 10.0, "Rear.Right": 10.0}
+    cyclic = ecu.every(0.01, "WheelSpeeds", wheels)  # fields of two PDUs, qualified
+```
+
+* `channel` selects a channel by short name or ID; it is optional when the
+  file has one channel (otherwise the error lists them).
+* Messages are named by frame. Identifiers come from the channel's frame
+  triggerings (`EXTENDED-ADDRESSING="true"` or an identifier over `0x7FF`
+  for extended frames, `CAN-FRAME-TX-BEHAVIOR`/`RX-BEHAVIOR` `CAN-FD` for
+  CAN FD).
+* Fields are the signals of all the frame's PDUs (at byte offsets); a name
+  two PDUs share becomes `PDU.Signal`. A signal's `BIT-POSITION` is read as a
+  DBC start bit: the least significant bit for Intel, the most significant
+  for Motorola (`IS-HIGH-LOW-BYTE-ORDER`).
+* Codings: `IDENTICAL`, `LINEAR` and `SCALE-LINEAR` (one set of coefficients,
+  plus texttable entries) give physical values, `TEXTTABLE` names work like
+  DBC value tables, and physical constraints are the range `strict` checks.
+* `strict`, `scaling`, `decode_choices` and `e2e` work as for `dbc:`; frames
+  the channel lacks decode as nameless messages. Multiplexed PDUs, high-low
+  byte order PDU instances, texttable ranges and piecewise or non-linear
+  scaling are rejected when the file is opened.
 
 ### AUTOSAR E2E (alive counter + CRC)
 

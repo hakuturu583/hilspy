@@ -12,8 +12,8 @@ they mean)::
 
 Transports: ``can://`` (SocketCAN), ``udp://``, ``tcp://``, ``mem://``
 (in-process), ``file://``, ``serial://``. Codecs: ``raw``, ``dbc:FILE``,
-``sbf``, ``nmea``, ``ubx``, ``rtcm``, ``lidar:MODEL``. Add more
-with :func:`register_transport` and :func:`register_codec`.
+``fibex:FILE``, ``sbf``, ``nmea``, ``ubx``, ``rtcm``, ``lidar:MODEL``. Add
+more with :func:`register_transport` and :func:`register_codec`.
 
 Several buses at once, with asyncio::
 

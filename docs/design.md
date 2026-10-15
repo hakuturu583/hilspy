@@ -6,7 +6,8 @@
 Python API     python/hilspy/                 open, Channel (sync + asyncio), merge, Message, Periodic, Error, register_*
 PyO3 layer     crates/hilspy-python           conversions, GIL release, Python plugins as Rust traits
 Rust core      crates/hilspy-core             Channel = Transport + Codec; registries; formats
-Crates         socketcan, can-dbc, libsbf     I/O and parsing
+Crates         socketcan, can-dbc, afibex,    I/O and parsing
+               libsbf, ...
 ```
 
 The core has no Python dependency, so a Rust-side scenario runner or a
@@ -125,6 +126,16 @@ deadlocking. A Python exception raised in a plugin travels through the core as
   the result becomes the `e2e` field. `every()` sends its first message
   itself instead of dry-run encoding it, so stateful codecs (E2E counters,
   sequence numbers) never lose a value.
+* `fibex`: `afibex` parses channels, frames, PDUs, signals and coded types;
+  `roxmltree` reads, by element ID, what it leaves out (frame triggerings
+  with identifier, extended addressing and CAN FD; compu methods with
+  rational coefficients, `SCALE-LINEAR`, texttable limits, physical
+  constraints and units). `fibex::load` turns one channel into a `dbc`
+  `Database` (PDU offsets added to signal start bits, clashing names
+  qualified as `PDU.Signal`), and the codec is the `dbc` codec over it, so
+  the bit layout, options and E2E are shared. `tests/data/network.dbc`
+  describes the fixture's Body channel; the tests require identical models
+  and payloads.
 * `sbf`: own framing (`$@`, length a multiple of 4, CRC-16/XMODEM, resync one
   byte after a bad CRC) so every block keeps its raw bytes; bodies go to
   `libsbf::parse_datagram` and `sbf/fields.rs` maps common navigation blocks to
