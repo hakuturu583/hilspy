@@ -133,9 +133,18 @@ deadlocking. A Python exception raised in a plugin travels through the core as
   the result becomes the `e2e` field. `every()` sends its first message
   itself instead of dry-run encoding it, so stateful codecs (E2E counters,
   sequence numbers) never lose a value.
+* `dbc` + `ecu`: `dbc::Message` keeps its `transmitters` (`BO_` and
+  `BO_TX_BU_`) and `receivers` (its signals' receivers), and
+  `Database::ecus` lists the nodes plus any ECU they name. With the option,
+  `encode` refuses a message the ECU does not transmit and `decode` returns
+  a frame it does not receive as a nameless message, before any E2E check.
+  No transmitter field is added to decoded messages: it would change every
+  decoded field set and what a decoded message re-encodes (strict mode).
 * `fibex`: `afibex` parses channels, frames, PDUs, signals and coded types;
   `roxmltree` reads, by element ID, what it leaves out (frame triggerings
-  with identifier, extended addressing and CAN FD; compu methods with
+  with identifier, extended addressing, CAN FD and cyclic timing; ECU
+  connectors, whose input and output ports' `FRAME-TRIGGERING-REF`s become
+  each message's receivers and transmitters; compu methods with
   scale limits, rational coefficients and texttable names, physical
   constraints and units). `fibex::load` turns one channel into a `dbc`
   `Database` (each signal's PDU bits mapped through its PDU instance to

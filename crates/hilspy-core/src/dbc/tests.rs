@@ -31,6 +31,30 @@ fn loads_attributes_and_comments() {
 }
 
 #[test]
+fn transmitters_and_receivers() {
+    let db = db();
+    let m = db.message_by_name("VehicleSpeed").unwrap();
+    assert_eq!(
+        (m.transmitters.as_slice(), m.receivers.as_slice()),
+        (&["VCU".to_string()][..], &["ADAS".to_string()][..])
+    );
+    assert_eq!(db.ecus(), ["VCU", "ADAS", "GNSS"]);
+    // BO_TX_BU_ adds transmitters; Vector__XXX is none; receivers are
+    // those of every signal, once each; ECUs not in BU_ still count.
+    let text = "VERSION \"\"\n\nNS_ :\n\nBS_:\n\nBU_: A B\n\n\
+        BO_ 1 M: 8 A\n SG_ S : 0|8@1+ (1,0) [0|0] \"\" B,C\n SG_ T : 8|8@1+ (1,0) [0|0] \"\" C\n\n\
+        BO_ 2 N: 8 Vector__XXX\n SG_ U : 0|8@1+ (1,0) [0|0] \"\" Vector__XXX\n\n\
+        BO_TX_BU_ 1 : D,A;\n";
+    let db = Database::parse(text).unwrap();
+    let m = db.message_by_name("M").unwrap();
+    assert_eq!(m.transmitters, ["A", "D"]);
+    assert_eq!(m.receivers, ["B", "C"]);
+    let n = db.message_by_name("N").unwrap();
+    assert!(n.transmitters.is_empty() && n.receivers.is_empty());
+    assert_eq!(db.ecus(), ["A", "B", "D", "C"]);
+}
+
+#[test]
 fn little_endian_round_trip() {
     let db = db();
     let m = db.message_by_name("VehicleSpeed").unwrap();
@@ -274,7 +298,8 @@ fn single(kind: ValueKind, size: u32) -> Message {
         extended: false,
         name: "M".into(),
         size: 8,
-        transmitter: None,
+        transmitters: Vec::new(),
+        receivers: Vec::new(),
         signals: vec![signal],
         comment: None,
         cycle_time: None,

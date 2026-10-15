@@ -70,11 +70,18 @@ fn matches_the_equivalent_dbc() {
     let fibex = load(data("network.xml"), Some("CH_BODY")).unwrap();
     let dbc = Database::from_file(data("network.dbc")).unwrap();
     assert_eq!(fibex.messages.len(), dbc.messages.len());
+    assert_eq!(fibex.nodes, dbc.nodes);
     for d in &dbc.messages {
         let f = fibex.message_by_name(&d.name).unwrap();
         assert_eq!(
             (f.id, f.extended, f.size, f.fd, &f.comment, f.cycle_time),
             (d.id, d.extended, d.size, d.fd, &d.comment, d.cycle_time),
+            "{}",
+            d.name
+        );
+        assert_eq!(
+            (&f.transmitters, &f.receivers),
+            (&d.transmitters, &d.receivers),
             "{}",
             d.name
         );
@@ -118,6 +125,63 @@ fn cycle_times_from_cyclic_timings() {
         e.contains("FT_VehicleStatus_Body") && e.contains("\"P1M\""),
         "{e}"
     );
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn ecus_from_connector_ports() {
+    let names = |v: &[String]| v.join(",");
+    let chassis = load(data("network.xml"), Some("Chassis")).unwrap();
+    assert_eq!(chassis.nodes, ["Gateway", "Adas", "Radar", "Abs"]);
+    // Ports refer to frame triggerings, so the same frame has other ECUs on
+    // the other channel.
+    let status = chassis.message_by_name("VehicleStatus").unwrap();
+    assert_eq!(
+        (names(&status.transmitters), names(&status.receivers)),
+        ("Gateway".into(), "Abs".into())
+    );
+    let wheels = chassis.message_by_name("WheelSpeeds").unwrap();
+    assert_eq!(
+        (names(&wheels.transmitters), names(&wheels.receivers)),
+        ("Abs".into(), "Gateway".into())
+    );
+    let body = load(data("network.xml"), Some("Body")).unwrap();
+    let radar = body.message_by_name("RadarObjects").unwrap();
+    assert_eq!(
+        (names(&radar.transmitters), names(&radar.receivers)),
+        ("Radar".into(), "Adas".into())
+    );
+    // Several senders; an ECU without a short name is named by its ID;
+    // without ECUs a frame has neither.
+    let text = network()
+        .replace(
+            "<fx:CONNECTOR ID=\"CON_Radar_Body\" xsi:type=\"can:CONNECTOR-TYPE\">\n            <fx:CHANNEL-REF ID-REF=\"CH_BODY\"/>",
+            "<fx:CONNECTOR ID=\"CON_Radar_Body\" xsi:type=\"can:CONNECTOR-TYPE\">\n            <fx:CHANNEL-REF ID-REF=\"CH_BODY\"/>\n            <fx:INPUTS><fx:INPUT-PORT ID=\"IP_X\"><fx:FRAME-TRIGGERING-REF ID-REF=\"FT_SteeringCmd\"/></fx:INPUT-PORT></fx:INPUTS>",
+        )
+        .replace(
+            "<ho:SHORT-NAME>Abs</ho:SHORT-NAME>",
+            "",
+        )
+        .replace(
+            "<fx:OUTPUT-PORT ID=\"OP_Radar_Body_RadarObjects\">",
+            "<fx:OUTPUT-PORT ID=\"OP_Gw_Radar\"><fx:FRAME-TRIGGERING-REF ID-REF=\"FT_VehicleStatus_Body\"/></fx:OUTPUT-PORT><fx:OUTPUT-PORT ID=\"OP_Radar_Body_RadarObjects\">",
+        );
+    let path = variant("ecus", &text);
+    let db = load(&path, Some("Body")).unwrap();
+    assert_eq!(db.nodes, ["Gateway", "Adas", "Radar", "ECU_ABS"]);
+    let status = db.message_by_name("VehicleStatus").unwrap();
+    assert_eq!(names(&status.transmitters), "Gateway,Radar");
+    let steer = db.message_by_name("SteeringCmd").unwrap();
+    assert_eq!(names(&steer.receivers), "Gateway,Radar");
+    std::fs::remove_file(path).unwrap();
+    let text = without(&network(), "<fx:ECUS>", "</fx:ECUS>");
+    let path = variant("no-ecus", &text);
+    let db = load(&path, Some("Body")).unwrap();
+    assert!(db.nodes.is_empty());
+    assert!(db
+        .messages
+        .iter()
+        .all(|m| m.transmitters.is_empty() && m.receivers.is_empty()));
     std::fs::remove_file(path).unwrap();
 }
 

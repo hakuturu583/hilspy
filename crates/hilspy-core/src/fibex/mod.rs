@@ -7,7 +7,9 @@
 //! of codings. What it leaves out is read from the same document with
 //! `roxmltree`, by element ID: the frame triggerings of a channel (CAN
 //! identifier, extended addressing, CAN FD, the `CYCLIC-TIMING` that becomes
-//! the message's cycle time) and the compu methods of a coding
+//! the message's cycle time), the connectors of the ECUs (the `OUTPUT-PORT`s
+//! and `INPUT-PORT`s that refer to a frame triggering make its message's
+//! transmitters and receivers; the ECUs are the database's nodes) and the compu methods of a coding
 //! (scales with their limits, rational coefficients and texttable names,
 //! physical constraints, units).
 //!
@@ -92,7 +94,66 @@ pub fn load(path: impl AsRef<Path>, channel: Option<&str>) -> Result<Database> {
         .descendants()
         .filter_map(|n| Some((attr(n, "ID")?, n)))
         .collect();
-    Network { data: &data, ids }.database(channel)
+    let (ecus, ports) = ecus(&xml);
+    Network {
+        data: &data,
+        ids,
+        ecus,
+        ports,
+    }
+    .database(channel)
+}
+
+/// The ECUs that send and receive a frame triggering, by name.
+#[derive(Default)]
+struct Ports {
+    outputs: Vec<String>,
+    inputs: Vec<String>,
+}
+
+/// The ECUs of the file by name (`SHORT-NAME`, else `ID`), and the ports of
+/// their connectors by frame triggering ID (`OUTPUT-PORT` /
+/// `INPUT-PORT` `FRAME-TRIGGERING-REF`s). `afibex` skips connectors.
+fn ecus<'a>(xml: &'a Document<'_>) -> (Vec<String>, HashMap<&'a str, Ports>) {
+    let mut names = Vec::new();
+    let mut ports: HashMap<&str, Ports> = HashMap::new();
+    let ecu_elements = xml.descendants().filter(|n| {
+        n.is_element()
+            && n.tag_name().name() == "ECU"
+            && n.parent_element()
+                .is_some_and(|p| p.tag_name().name() == "ECUS")
+    });
+    for ecu in ecu_elements {
+        let Some(name) = child(ecu, "SHORT-NAME")
+            .map(text)
+            .filter(|n| !n.is_empty())
+            .or_else(|| attr(ecu, "ID"))
+        else {
+            continue;
+        };
+        if !names.iter().any(|n| n == name) {
+            names.push(name.to_owned());
+        }
+        for port in ecu.descendants().filter(|n| n.is_element()) {
+            let output = match port.tag_name().name() {
+                "OUTPUT-PORT" => true,
+                "INPUT-PORT" => false,
+                _ => continue,
+            };
+            for t in children(port, "FRAME-TRIGGERING-REF").filter_map(|r| attr(r, "ID-REF")) {
+                let p = ports.entry(t).or_default();
+                let list = if output {
+                    &mut p.outputs
+                } else {
+                    &mut p.inputs
+                };
+                if !list.iter().any(|n| n == name) {
+                    list.push(name.to_owned());
+                }
+            }
+        }
+    }
+    (names, ports)
 }
 
 /// The value of an attribute by local name (any namespace).
@@ -127,6 +188,8 @@ fn number(n: Node<'_, '_>, what: &str) -> Result<f64> {
 
 /// A frame triggering: how a channel carries a frame.
 struct Triggering {
+    /// The triggering's own `ID`.
+    tid: String,
     id: u32,
     extended: bool,
     fd: bool,
@@ -261,6 +324,10 @@ struct Network<'d, 'a, 'i> {
     data: &'d FibexData,
     /// Elements by `ID` attribute.
     ids: HashMap<&'a str, Node<'a, 'i>>,
+    /// ECU names, in document order.
+    ecus: Vec<String>,
+    /// The sending and receiving ECUs by frame triggering ID.
+    ports: HashMap<&'a str, Ports>,
 }
 
 impl Network<'_, '_, '_> {
@@ -280,7 +347,7 @@ impl Network<'_, '_, '_> {
                 messages.push(self.message(&t)?);
             }
         }
-        Database::new(String::new(), Vec::new(), messages).map_err(|e| match e {
+        Database::new(String::new(), self.ecus.clone(), messages).map_err(|e| match e {
             Error::DbcParse(m) => bad(format!("channel {channel}: {m}")),
             e => e,
         })
@@ -400,7 +467,16 @@ impl Network<'_, '_, '_> {
             extended: t.extended,
             name,
             size,
-            transmitter: None,
+            transmitters: self
+                .ports
+                .get(t.tid.as_str())
+                .map(|p| p.outputs.clone())
+                .unwrap_or_default(),
+            receivers: self
+                .ports
+                .get(t.tid.as_str())
+                .map(|p| p.inputs.clone())
+                .unwrap_or_default(),
             signals: out,
             comment: frame.desc.clone(),
             cycle_time: t.cycle_time,
@@ -891,6 +967,7 @@ fn triggering(t: Node<'_, '_>) -> Result<Option<Triggering>> {
         .and_then(|f| attr(f, "ID-REF"))
         .ok_or_else(|| bad(format!("frame triggering {tid} has no FRAME-REF")))?;
     Ok(Some(Triggering {
+        tid: tid.to_owned(),
         id,
         extended,
         fd,

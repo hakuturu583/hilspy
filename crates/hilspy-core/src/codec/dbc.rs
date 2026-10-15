@@ -3,7 +3,9 @@
 //! Options: `strict` (default true: every signal given, values within
 //! `[min|max]`), `scaling` (default true: physical values; false: raw),
 //! `decode_choices` (default true: value-table names instead of numbers),
-//! `e2e` (AUTOSAR E2E protection per message, see [`super::e2e`]).
+//! `e2e` (AUTOSAR E2E protection per message, see [`super::e2e`]), `ecu`
+//! (act as that ECU: send only the messages it transmits, decode only those
+//! it receives; others arrive nameless).
 //! Frames whose identifier the database lacks decode as nameless messages.
 //! A message's `GenMsgCycleTime` is its [`Codec::cycle_time`].
 
@@ -25,6 +27,8 @@ pub(crate) struct Dbc {
     decode: DecodeOptions,
     /// E2E protection by message name.
     e2e: HashMap<String, Protection>,
+    /// The ECU the channel acts as.
+    ecu: Option<String>,
 }
 
 /// The signal options `dbc:` and `fibex:` share.
@@ -33,16 +37,18 @@ pub(crate) struct SignalOptions {
     scaling: bool,
     decode_choices: bool,
     e2e: Option<Value>,
+    ecu: Option<String>,
 }
 
 impl SignalOptions {
-    /// Consume `strict`, `scaling`, `decode_choices` and `e2e`.
+    /// Consume `strict`, `scaling`, `decode_choices`, `e2e` and `ecu`.
     pub(crate) fn take(o: &mut Options) -> Result<Self> {
         Ok(Self {
             strict: o.take_bool("strict", true)?,
             scaling: o.take_bool("scaling", true)?,
             decode_choices: o.take_bool("decode_choices", true)?,
             e2e: o.take("e2e"),
+            ecu: o.take_str("ecu")?,
         })
     }
 }
@@ -66,7 +72,18 @@ impl Dbc {
             scaling,
             decode_choices,
             e2e,
+            ecu,
         } = options;
+        if let Some(ecu) = &ecu {
+            let known = db.ecus();
+            if !known.contains(&ecu.as_str()) {
+                return Err(Error::Config(if known.is_empty() {
+                    format!("option ecu: no ECU {ecu:?} (the network names no ECUs)")
+                } else {
+                    format!("option ecu: no ECU {ecu:?} (ECUs: {})", known.join(", "))
+                }));
+            }
+        }
         let e2e = match e2e {
             None | Some(Value::Null) => HashMap::new(),
             Some(Value::Map(entries)) => entries
@@ -85,6 +102,7 @@ impl Dbc {
         Ok(Self {
             db,
             e2e,
+            ecu,
             encode: EncodeOptions { scaling, strict },
             decode: DecodeOptions {
                 decode_choices,
@@ -122,6 +140,14 @@ impl Codec for Dbc {
     fn encode(&mut self, message: &Message) -> Result<Vec<Packet>> {
         let name = message.name.as_deref().unwrap_or_default();
         let m = self.db.message_by_name(name)?;
+        if let Some(ecu) = &self.ecu {
+            if !m.transmitters.contains(ecu) {
+                return Err(Error::encode(match m.transmitters.as_slice() {
+                    [] => format!("{name} has no transmitter, so {ecu} does not send it"),
+                    t => format!("{name} is sent by {}, not {ecu}", t.join(", ")),
+                }));
+            }
+        }
         let mut values = message
             .fields
             .iter()
@@ -172,6 +198,10 @@ impl Codec for Dbc {
         let Ok(m) = self.db.message_by_id(h.id, h.extended) else {
             return Ok(vec![Message::raw(packet)]);
         };
+        if self.ecu.as_ref().is_some_and(|e| !m.receivers.contains(e)) {
+            // Not for this ECU: as if the database lacked it.
+            return Ok(vec![Message::raw(packet)]);
+        }
         let mut fields: Vec<(String, Value)> = m
             .decode(&packet.data, &self.decode)?
             .into_iter()
@@ -319,6 +349,80 @@ mod tests {
             assert_eq!(status(&d), "Ok");
             assert_eq!(d.field("Counter"), Some(&Value::Int(i64::from(i % 256))));
         }
+    }
+
+    fn vehicle(ecu: Option<&str>) -> Result<Dbc> {
+        let path = format!(
+            "{}/../../tests/data/vehicle.dbc",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        let mut o = Options::new();
+        o.insert("strict", Value::Bool(false));
+        if let Some(e) = ecu {
+            o.insert("ecu", Value::Str(e.into()));
+        }
+        Dbc::open(CodecSpec::parse(&format!("dbc:{path}"), o).unwrap())
+    }
+
+    #[test]
+    fn acts_as_an_ecu() {
+        let mut any = vehicle(None).unwrap();
+        let mut vcu = vehicle(Some("VCU")).unwrap();
+        let mut gnss = vehicle(Some("GNSS")).unwrap();
+        let frame = |c: &mut Dbc, name: &str| {
+            c.encode(&Message::new(name, vec![]))
+                .map(|mut p| p.remove(0))
+        };
+        // VCU sends VehicleSpeed; SteeringCmd is ADAS's.
+        assert_eq!(
+            frame(&mut vcu, "VehicleSpeed").unwrap().can.unwrap().id,
+            0x100
+        );
+        let e = frame(&mut vcu, "SteeringCmd").unwrap_err().to_string();
+        assert!(e.contains("SteeringCmd is sent by ADAS, not VCU"), "{e}");
+        // Unknown messages still fail as unknown.
+        let e = frame(&mut vcu, "Nope").unwrap_err().to_string();
+        assert!(e.contains("no message named"), "{e}");
+        // Receiving: VCU receives SteeringCmd (ADAS -> VCU), not ImuData
+        // (GNSS -> ADAS) nor its own VehicleSpeed.
+        let name = |c: &mut Dbc, p: Packet| c.decode(p).unwrap().remove(0).name;
+        let steer = frame(&mut any, "SteeringCmd").unwrap();
+        let imu = frame(&mut any, "ImuData").unwrap();
+        let speed = frame(&mut any, "VehicleSpeed").unwrap();
+        assert_eq!(
+            name(&mut vcu, steer.clone()).as_deref(),
+            Some("SteeringCmd")
+        );
+        assert_eq!(name(&mut vcu, imu.clone()), None);
+        assert_eq!(name(&mut vcu, speed.clone()), None);
+        assert_eq!(name(&mut any, imu.clone()).as_deref(), Some("ImuData"));
+        // GNSS sends ImuData and receives nothing.
+        assert!(frame(&mut gnss, "ImuData").is_ok());
+        assert_eq!(name(&mut gnss, steer), None);
+        assert_eq!(name(&mut gnss, speed), None);
+        // A message without a transmitter cannot be sent by any ECU.
+        let text = "VERSION \"\"\n\nNS_ :\n\nBS_:\n\nBU_: A\n\nBO_ 1 M: 1 Vector__XXX\n SG_ S : 0|8@1+ (1,0) [0|0] \"\" A\n";
+        let mut o = SignalOptions::take(&mut Options::new()).unwrap();
+        o.ecu = Some("A".into());
+        let mut a = Dbc::new(Database::parse(text).unwrap(), o).unwrap();
+        let e = frame(&mut a, "M").unwrap_err().to_string();
+        assert!(
+            e.contains("M has no transmitter, so A does not send it"),
+            "{e}"
+        );
+        // Unknown ECUs: a config error listing them.
+        let e = vehicle(Some("BCM")).err().unwrap();
+        assert!(matches!(e, Error::Config(_)), "{e:?}");
+        assert!(
+            e.to_string()
+                .contains("no ECU \"BCM\" (ECUs: VCU, ADAS, GNSS)"),
+            "{e}"
+        );
+        let mut o = SignalOptions::take(&mut Options::new()).unwrap();
+        o.ecu = Some("A".into());
+        let bare = "VERSION \"\"\n\nNS_ :\n\nBS_:\n\nBU_:\n\nBO_ 1 M: 1 Vector__XXX\n SG_ S : 0|8@1+ (1,0) [0|0] \"\" Vector__XXX\n";
+        let e = Dbc::new(Database::parse(bare).unwrap(), o).err().unwrap();
+        assert!(e.to_string().contains("names no ECUs"), "{e}");
     }
 
     #[test]

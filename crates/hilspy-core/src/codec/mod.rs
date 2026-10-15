@@ -3,7 +3,7 @@
 //! | Spec | Codec |
 //! | --- | --- |
 //! | `raw` | none: every packet is a nameless message carrying its data |
-//! | `dbc:FILE` | CAN frames <-> DBC messages (options `strict`, `scaling`, `decode_choices`, `e2e`) |
+//! | `dbc:FILE` | CAN frames <-> DBC messages (options `strict`, `scaling`, `decode_choices`, `e2e`, `ecu`) |
 //! | `fibex:FILE` | CAN frames <-> the frames of a FIBEX channel (option `channel`, and the `dbc` options) |
 //! | `sbf` | a Septentrio Binary Format byte stream <-> SBF blocks |
 //! | `nmea` | NMEA 0183 sentences <-> messages (`GGA`, `RMC`, ...) |

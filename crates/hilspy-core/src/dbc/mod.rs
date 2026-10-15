@@ -412,7 +412,12 @@ pub struct Message {
     pub name: String,
     /// Payload length in bytes.
     pub size: usize,
-    pub transmitter: Option<String>,
+    /// The ECUs that send it: the `BO_` transmitter and any `BO_TX_BU_`
+    /// ones (a FIBEX frame triggering's output ports).
+    pub transmitters: Vec<String>,
+    /// The ECUs that receive it: every receiver of its signals (a FIBEX
+    /// frame triggering's input ports).
+    pub receivers: Vec<String>,
     pub signals: Vec<Signal>,
     pub comment: Option<String>,
     /// How often the message is sent (`GenMsgCycleTime`; a FIBEX frame
@@ -683,12 +688,26 @@ impl Database {
                 signals.push(convert_signal(dbc, m, s)?);
             }
             resolve_multiplexing(dbc, m, &mut signals)?;
+            let mut transmitters = Vec::new();
+            let extra = dbc
+                .message_transmitters
+                .iter()
+                .filter(|t| t.message_id == m.id)
+                .flat_map(|t| &t.transmitter);
+            for t in m.transmitter.iter().chain(extra) {
+                push_unique(&mut transmitters, t);
+            }
+            let mut receivers = Vec::new();
+            for r in signals.iter().flat_map(|s| &s.receivers) {
+                push_unique(&mut receivers, r);
+            }
             messages.push(Message {
                 id,
                 extended,
                 name: m.name.clone(),
                 size,
-                transmitter: m.transmitter.clone(),
+                transmitters,
+                receivers,
                 comment: dbc.message_comment(m.id).map(str::to_owned),
                 cycle_time: dbc
                     .resolved_message_attribute(m.id, "GenMsgCycleTime")
@@ -734,6 +753,22 @@ impl Database {
         })
     }
 
+    /// The ECUs of the network: its nodes (`BU_`, FIBEX ECUs), then any
+    /// other ECU a message names as transmitter or receiver.
+    pub fn ecus(&self) -> Vec<&str> {
+        let mut out: Vec<&str> = Vec::new();
+        let named = self
+            .messages
+            .iter()
+            .flat_map(|m| m.transmitters.iter().chain(&m.receivers));
+        for e in self.nodes.iter().chain(named) {
+            if !out.contains(&e.as_str()) {
+                out.push(e);
+            }
+        }
+        out
+    }
+
     pub fn message_by_name(&self, name: &str) -> Result<&Message> {
         self.by_name
             .get(name)
@@ -751,6 +786,12 @@ impl Database {
                     if extended { "extended" } else { "standard" }
                 ))
             })
+    }
+}
+
+fn push_unique(list: &mut Vec<String>, item: &str) {
+    if !list.iter().any(|i| i == item) {
+        list.push(item.to_owned());
     }
 }
 

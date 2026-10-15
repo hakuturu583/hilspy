@@ -4,7 +4,9 @@
 //! Option `channel` selects the channel by short name or ID (optional when
 //! the file has a single channel). The frames become a DBC database, so the
 //! other options are the `dbc` codec's: `strict`, `scaling`,
-//! `decode_choices` and `e2e` (see [`super::dbc`]). Messages are named by
+//! `decode_choices`, `e2e` and `ecu` (see [`super::dbc`]; a frame's
+//! transmitters and receivers are the ECUs whose connectors have an output or
+//! input port for its frame triggering). Messages are named by
 //! frame; their fields are the signals of all the frame's PDUs, as
 //! `PDU.Signal` where two PDUs have a signal of the same name. Frames whose
 //! identifier the channel lacks decode as nameless messages. A frame
@@ -204,6 +206,71 @@ mod tests {
     }
 
     #[test]
+    fn acts_as_an_ecu() {
+        let gateway = || body(&[("ecu", Value::Str("Gateway".into()))]);
+        let mut adas = body(&[("ecu", Value::Str("Adas".into()))]);
+        let mut any = body(&[]);
+        let status = [
+            ("Speed", Value::Float(1.0)),
+            ("Gear", Value::Str("D".into())),
+            ("BrakePressure", Value::Float(0.0)),
+            ("BrakeActive", Value::Int(0)),
+        ];
+        let steer = [
+            ("SteeringAngle", Value::Float(1.0)),
+            ("Torque", Value::Float(0.5)),
+            ("Enable", Value::Int(1)),
+        ];
+        let radar = [
+            ("ObjectCount", Value::Int(1)),
+            ("Distance", Value::Float(2.0)),
+            ("RadarStatus", Value::Str("Ok".into())),
+        ];
+        // Sending: only what the ECU transmits; the error names the sender.
+        let mut gw = gateway();
+        let p_status = gw
+            .encode(&Message::new("VehicleStatus", fields(&status)))
+            .unwrap()
+            .remove(0);
+        let e = gw
+            .encode(&Message::new("SteeringCmd", fields(&steer)))
+            .unwrap_err();
+        assert!(matches!(e, Error::Encode(_)), "{e:?}");
+        assert!(
+            e.to_string()
+                .contains("SteeringCmd is sent by Adas, not Gateway"),
+            "{e}"
+        );
+        // Receiving: only what the ECU receives is decoded.
+        let p_steer = any
+            .encode(&Message::new("SteeringCmd", fields(&steer)))
+            .unwrap()
+            .remove(0);
+        let p_radar = any
+            .encode(&Message::new("RadarObjects", fields(&radar)))
+            .unwrap()
+            .remove(0);
+        let name = |c: &mut Dbc, p: &Packet| c.decode(p.clone()).unwrap().remove(0).name;
+        assert_eq!(name(&mut gw, &p_steer).as_deref(), Some("SteeringCmd"));
+        assert_eq!(name(&mut gw, &p_radar), None);
+        assert_eq!(name(&mut gw, &p_status), None, "its own frame");
+        assert_eq!(name(&mut adas, &p_status).as_deref(), Some("VehicleStatus"));
+        assert_eq!(name(&mut adas, &p_radar).as_deref(), Some("RadarObjects"));
+        let nameless = gw.decode(p_radar.clone()).unwrap().remove(0);
+        assert!(nameless.fields.is_empty());
+        assert_eq!(nameless.packet.unwrap().data, p_radar.data);
+        // Without the option, everything as before.
+        assert_eq!(name(&mut any, &p_radar).as_deref(), Some("RadarObjects"));
+        // An ECU on the other channel only sends and receives nothing here.
+        let mut abs = body(&[("ecu", Value::Str("Abs".into()))]);
+        let e = abs
+            .encode(&Message::new("VehicleStatus", fields(&status)))
+            .unwrap_err();
+        assert!(e.to_string().contains("sent by Gateway, not Abs"), "{e}");
+        assert_eq!(name(&mut abs, &p_status), None);
+    }
+
+    #[test]
     fn option_errors() {
         let err = |o: &[(&str, Value)]| codec(o).err().unwrap().to_string();
         let e = err(&[]);
@@ -236,6 +303,19 @@ mod tests {
             ),
         ]);
         assert!(e.contains("WheelSpeeds"), "{e}");
+        let e = err(&[
+            ("channel", Value::Str("Body".into())),
+            ("ecu", Value::Str("Engine".into())),
+        ]);
+        assert!(
+            e.contains("option ecu: no ECU \"Engine\" (ECUs: Gateway, Adas, Radar, Abs)"),
+            "{e}"
+        );
+        let e = err(&[
+            ("channel", Value::Str("Body".into())),
+            ("ecu", Value::Bool(true)),
+        ]);
+        assert!(e.contains("not a string"), "{e}");
         let no_file = open(CodecSpec::parse("fibex", Options::new()).unwrap());
         assert!(no_file.err().unwrap().to_string().contains("needs a file"));
         assert!(crate::codec::names().contains(&"fibex".to_string()));

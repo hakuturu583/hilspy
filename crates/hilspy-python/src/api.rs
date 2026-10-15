@@ -27,7 +27,8 @@ fn duration(seconds: f64, what: &str) -> PyResult<Duration> {
 /// Transports: `can://vcan0` (Linux SocketCAN; `?fd`, `?echo`,
 /// `?filter=0x100:0x700`), `udp://host:port` (`?listen`, `?bind=`),
 /// `tcp://host:port` (`?listen`), `mem://name` (in-process). Codecs: `raw`,
-/// `dbc:FILE` (options `strict`, `scaling`, `decode_choices`), `sbf`.
+/// `dbc:FILE` (options `strict`, `scaling`, `decode_choices`, `e2e`, `ecu`),
+/// `fibex:FILE` (option `channel`, and the `dbc` options), `sbf`, ...
 /// Keyword arguments configure the codec.
 #[pyfunction(name = "_open")]
 #[pyo3(signature = (url, codec = String::from("raw"), *, clock = None, **options))]

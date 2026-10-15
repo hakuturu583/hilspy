@@ -77,6 +77,91 @@
         </fx:FRAME-TRIGGERINGS>
       </fx:CHANNEL>
     </fx:CHANNELS>
+    <!-- Who sends and receives each frame triggering: the ECUs' connector
+         ports. Abs is on the Chassis channel only. -->
+    <fx:ECUS>
+      <fx:ECU ID="ECU_GATEWAY">
+        <ho:SHORT-NAME>Gateway</ho:SHORT-NAME>
+        <fx:CONTROLLERS>
+          <fx:CONTROLLER ID="CTRL_Gateway_Body" xsi:type="can:CONTROLLER-TYPE"><ho:SHORT-NAME>Gateway_Body</ho:SHORT-NAME></fx:CONTROLLER>
+          <fx:CONTROLLER ID="CTRL_Gateway_Chassis" xsi:type="can:CONTROLLER-TYPE"><ho:SHORT-NAME>Gateway_Chassis</ho:SHORT-NAME></fx:CONTROLLER>
+        </fx:CONTROLLERS>
+        <fx:CONNECTORS>
+          <fx:CONNECTOR ID="CON_Gateway_Body" xsi:type="can:CONNECTOR-TYPE">
+            <fx:CHANNEL-REF ID-REF="CH_BODY"/>
+            <fx:CONTROLLER-REF ID-REF="CTRL_Gateway_Body"/>
+            <fx:INPUTS>
+              <fx:INPUT-PORT ID="IP_Gateway_Body_SteeringCmd"><fx:FRAME-TRIGGERING-REF ID-REF="FT_SteeringCmd"/></fx:INPUT-PORT>
+            </fx:INPUTS>
+            <fx:OUTPUTS>
+              <fx:OUTPUT-PORT ID="OP_Gateway_Body_VehicleStatus_Body"><fx:FRAME-TRIGGERING-REF ID-REF="FT_VehicleStatus_Body"/></fx:OUTPUT-PORT>
+            </fx:OUTPUTS>
+          </fx:CONNECTOR>
+          <fx:CONNECTOR ID="CON_Gateway_Chassis" xsi:type="can:CONNECTOR-TYPE">
+            <fx:CHANNEL-REF ID-REF="CH_CHASSIS"/>
+            <fx:CONTROLLER-REF ID-REF="CTRL_Gateway_Chassis"/>
+            <fx:INPUTS>
+              <fx:INPUT-PORT ID="IP_Gateway_Chassis_WheelSpeeds"><fx:FRAME-TRIGGERING-REF ID-REF="FT_WheelSpeeds"/></fx:INPUT-PORT>
+            </fx:INPUTS>
+            <fx:OUTPUTS>
+              <fx:OUTPUT-PORT ID="OP_Gateway_Chassis_VehicleStatus_Chassis"><fx:FRAME-TRIGGERING-REF ID-REF="FT_VehicleStatus_Chassis"/></fx:OUTPUT-PORT>
+            </fx:OUTPUTS>
+          </fx:CONNECTOR>
+        </fx:CONNECTORS>
+      </fx:ECU>
+      <fx:ECU ID="ECU_ADAS">
+        <ho:SHORT-NAME>Adas</ho:SHORT-NAME>
+        <fx:CONTROLLERS>
+          <fx:CONTROLLER ID="CTRL_Adas_Body" xsi:type="can:CONTROLLER-TYPE"><ho:SHORT-NAME>Adas_Body</ho:SHORT-NAME></fx:CONTROLLER>
+        </fx:CONTROLLERS>
+        <fx:CONNECTORS>
+          <fx:CONNECTOR ID="CON_Adas_Body" xsi:type="can:CONNECTOR-TYPE">
+            <fx:CHANNEL-REF ID-REF="CH_BODY"/>
+            <fx:CONTROLLER-REF ID-REF="CTRL_Adas_Body"/>
+            <fx:INPUTS>
+              <fx:INPUT-PORT ID="IP_Adas_Body_VehicleStatus_Body"><fx:FRAME-TRIGGERING-REF ID-REF="FT_VehicleStatus_Body"/></fx:INPUT-PORT>
+              <fx:INPUT-PORT ID="IP_Adas_Body_RadarObjects"><fx:FRAME-TRIGGERING-REF ID-REF="FT_RadarObjects"/></fx:INPUT-PORT>
+            </fx:INPUTS>
+            <fx:OUTPUTS>
+              <fx:OUTPUT-PORT ID="OP_Adas_Body_SteeringCmd"><fx:FRAME-TRIGGERING-REF ID-REF="FT_SteeringCmd"/></fx:OUTPUT-PORT>
+            </fx:OUTPUTS>
+          </fx:CONNECTOR>
+        </fx:CONNECTORS>
+      </fx:ECU>
+      <fx:ECU ID="ECU_RADAR">
+        <ho:SHORT-NAME>Radar</ho:SHORT-NAME>
+        <fx:CONTROLLERS>
+          <fx:CONTROLLER ID="CTRL_Radar_Body" xsi:type="can:CONTROLLER-TYPE"><ho:SHORT-NAME>Radar_Body</ho:SHORT-NAME></fx:CONTROLLER>
+        </fx:CONTROLLERS>
+        <fx:CONNECTORS>
+          <fx:CONNECTOR ID="CON_Radar_Body" xsi:type="can:CONNECTOR-TYPE">
+            <fx:CHANNEL-REF ID-REF="CH_BODY"/>
+            <fx:CONTROLLER-REF ID-REF="CTRL_Radar_Body"/>
+            <fx:OUTPUTS>
+              <fx:OUTPUT-PORT ID="OP_Radar_Body_RadarObjects"><fx:FRAME-TRIGGERING-REF ID-REF="FT_RadarObjects"/></fx:OUTPUT-PORT>
+            </fx:OUTPUTS>
+          </fx:CONNECTOR>
+        </fx:CONNECTORS>
+      </fx:ECU>
+      <fx:ECU ID="ECU_ABS">
+        <ho:SHORT-NAME>Abs</ho:SHORT-NAME>
+        <fx:CONTROLLERS>
+          <fx:CONTROLLER ID="CTRL_Abs_Chassis" xsi:type="can:CONTROLLER-TYPE"><ho:SHORT-NAME>Abs_Chassis</ho:SHORT-NAME></fx:CONTROLLER>
+        </fx:CONTROLLERS>
+        <fx:CONNECTORS>
+          <fx:CONNECTOR ID="CON_Abs_Chassis" xsi:type="can:CONNECTOR-TYPE">
+            <fx:CHANNEL-REF ID-REF="CH_CHASSIS"/>
+            <fx:CONTROLLER-REF ID-REF="CTRL_Abs_Chassis"/>
+            <fx:INPUTS>
+              <fx:INPUT-PORT ID="IP_Abs_Chassis_VehicleStatus_Chassis"><fx:FRAME-TRIGGERING-REF ID-REF="FT_VehicleStatus_Chassis"/></fx:INPUT-PORT>
+            </fx:INPUTS>
+            <fx:OUTPUTS>
+              <fx:OUTPUT-PORT ID="OP_Abs_Chassis_WheelSpeeds"><fx:FRAME-TRIGGERING-REF ID-REF="FT_WheelSpeeds"/></fx:OUTPUT-PORT>
+            </fx:OUTPUTS>
+          </fx:CONNECTOR>
+        </fx:CONNECTORS>
+      </fx:ECU>
+    </fx:ECUS>
     <fx:PDUS>
       <fx:PDU ID="P_Speed">
         <ho:SHORT-NAME>SpeedPdu</ho:SHORT-NAME>

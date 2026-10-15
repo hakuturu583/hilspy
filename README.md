@@ -29,7 +29,7 @@ with hilspy.open("can://vcan0", "dbc:vehicle.dbc") as ecu:
 | Codec | |
 | --- | --- |
 | `raw` (default) | none: messages carry `data` (and `id` for CAN) |
-| `dbc:FILE` | CAN frames <-> DBC messages, via [`can-dbc`](https://crates.io/crates/can-dbc) (options `strict`, `scaling`, `decode_choices`, `e2e`) |
+| `dbc:FILE` | CAN frames <-> DBC messages, via [`can-dbc`](https://crates.io/crates/can-dbc) (options `strict`, `scaling`, `decode_choices`, `e2e`, `ecu`) |
 | `fibex:FILE` | CAN / CAN FD frames <-> the frames of an ASAM FIBEX channel, via [`afibex`](https://crates.io/crates/afibex) (option `channel`, and the `dbc:` options); see [FIBEX](#fibex-networks) |
 | `someip:FILE` | SOME/IP messages <-> the methods, events and fields of ASAM FIBEX 4 services, parsed by [`afibex`](https://crates.io/crates/afibex) and checked against [`asomeip`](https://crates.io/crates/asomeip) (options `client_id`, `decode_choices`, `stream`); see [SOME/IP](#someip-services) |
 | `sbf` | Septentrio Binary Format stream <-> blocks, via [`libsbf`](https://crates.io/crates/libsbf); encodes `PVTGeodetic` and `AttEuler` |
@@ -92,6 +92,31 @@ with hilspy.open("can://can0", "dbc:vehicle.dbc") as ecu:
     speed = ecu.every(None, "VehicleSpeed", {"Speed": 0.0, "Gear": "D"})  # every 10 ms
 ```
 
+### Acting as an ECU
+
+`ecu="Name"` (for `dbc:` and `fibex:`) makes the channel one ECU of the
+network:
+
+```python
+with hilspy.open("can://can0", "dbc:vehicle.dbc", ecu="VCU") as vcu:
+    vcu.send("VehicleSpeed", {"Speed": 12.5, "Gear": "D"})  # the VCU transmits it
+    vcu.send("SteeringCmd", {"Enable": 1})  # hilspy.Error: SteeringCmd is sent by ADAS, not VCU
+    for msg in vcu:  # decoded: what the VCU receives; nameless: the rest
+        ...
+```
+
+* Sending: only messages the ECU transmits encode; any other is an encode
+  error naming its transmitter(s).
+* Receiving: only messages the ECU receives decode; the others arrive as
+  nameless messages with their identifier and bytes, like unknown frames.
+* A DBC's transmitters are the `BO_` sender and any `BO_TX_BU_` ones, and its
+  receivers those of the message's signals (`Vector__XXX` is none). A FIBEX
+  frame's are the ECUs whose `CONNECTORS` have an `OUTPUT-PORT` /
+  `INPUT-PORT` with a `FRAME-TRIGGERING-REF` to the channel's triggering of
+  it. ECUs are named by `SHORT-NAME` (`BU_` for a DBC); an unknown name is an
+  error listing the network's ECUs.
+* Decoded messages carry no transmitter field.
+
 ### FIBEX networks
 
 `fibex:FILE` sends and receives the CAN and CAN FD frames of one channel of an
@@ -137,7 +162,8 @@ with hilspy.open("can://can0", "fibex:network.xml", channel="Chassis") as ecu:
   is linear or strictly monotonic over its scale (otherwise sending the signal
   fails, naming it). A single linear function with exact texttable entries is
   a plain DBC factor, offset and value table.
-* `strict`, `scaling`, `decode_choices` and `e2e` work as for `dbc:`; frames
+* `strict`, `scaling`, `decode_choices`, `e2e` and `ecu` work as for `dbc:`
+  (see [Acting as an ECU](#acting-as-an-ecu) for FIBEX connectors); frames
   the channel lacks decode as nameless messages. `FORMULA` compu methods,
   nested multiplexing, switched or static PDU instances off bit 0 or
   high-low, and encodings other than those above are rejected when the file

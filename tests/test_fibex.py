@@ -181,6 +181,60 @@ def test_every_without_a_period_uses_the_cyclic_timing(mem: str) -> None:
         chassis.every(None, "VehicleStatus", VALUES["VehicleStatus"])
 
 
+def test_acts_as_an_ecu(mem: str) -> None:
+    # Body: VehicleStatus Gateway -> Adas, SteeringCmd Adas -> Gateway,
+    # RadarObjects Radar -> Adas (the ECUs' connector ports).
+    with (
+        hilspy.open(mem, FIBEX, ecu="Gateway", **BODY) as gateway,
+        hilspy.open(mem, FIBEX, ecu="Adas", **BODY) as adas,
+        hilspy.open(mem, FIBEX, ecu="Radar", **BODY) as radar,
+    ):
+        gateway.send("VehicleStatus", VALUES["VehicleStatus"])
+        with pytest.raises(hilspy.Error, match="SteeringCmd is sent by Adas, not Gateway"):
+            gateway.send("SteeringCmd", VALUES["SteeringCmd"])
+        with pytest.raises(hilspy.Error, match="RadarObjects is sent by Radar, not Adas"):
+            adas.send("RadarObjects", VALUES["RadarObjects"])
+        m = adas.recv(timeout=1)
+        assert m is not None and m.name == "VehicleStatus" and m["Gear"] == "D"
+        # Radar receives nothing: the frame arrives nameless, with its bytes.
+        m = radar.recv(timeout=1)
+        assert m is not None and (m.name, m.id, m.fields) == (None, 0x100, {})
+        radar.send("RadarObjects", VALUES["RadarObjects"])
+        m = adas.recv(timeout=1)
+        assert m is not None and m.name == "RadarObjects"
+        m = gateway.recv(timeout=1)
+        assert m is not None and (m.name, m.id) == (None, 0x200)
+        adas.send("SteeringCmd", VALUES["SteeringCmd"])
+        m = gateway.recv(timeout=1)
+        assert m is not None and m.name == "SteeringCmd"
+    # On the Chassis channel the Gateway receives WheelSpeeds from Abs.
+    with (
+        hilspy.open(mem, FIBEX, channel="Chassis", ecu="Abs") as abs_ecu,
+        hilspy.open(mem, FIBEX, channel="Chassis", ecu="Gateway") as gateway,
+    ):
+        wheels = {"Front.Left": 1.0, "Front.Right": 2.0, "Rear.Left": 3.0, "Rear.Right": 4.0}
+        abs_ecu.send("WheelSpeeds", wheels)
+        m = gateway.recv(timeout=1)
+        assert m is not None and m.name == "WheelSpeeds" and m.fields == wheels
+    with pytest.raises(hilspy.Error, match=r'no ECU "Engine" \(ECUs: Gateway, Adas, Radar, Abs\)'):
+        hilspy.open(mem, FIBEX, ecu="Engine", **BODY)
+
+
+def test_the_dbc_names_the_same_ecus(mem: str) -> None:
+    with (
+        hilspy.open(mem, DBC, ecu="Gateway") as gateway,
+        hilspy.open(mem, FIBEX, ecu="Adas", **BODY) as adas,
+    ):
+        with pytest.raises(hilspy.Error, match="SteeringCmd is sent by Adas, not Gateway"):
+            gateway.send("SteeringCmd", VALUES["SteeringCmd"])
+        gateway.send("VehicleStatus", VALUES["VehicleStatus"])
+        m = adas.recv(timeout=1)
+        assert m is not None and m.name == "VehicleStatus"
+        adas.send("SteeringCmd", VALUES["SteeringCmd"])
+        m = gateway.recv(timeout=1)
+        assert m is not None and m.name == "SteeringCmd"
+
+
 FEATURES = f"fibex:{DATA / 'fibex_features.xml'}"
 
 

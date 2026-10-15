@@ -9,23 +9,23 @@ NS_ :
 
 BS_:
 
-BU_:
+BU_: Gateway Adas Radar Abs
 
-BO_ 256 VehicleStatus: 8 Vector__XXX
- SG_ Speed : 0|16@1+ (0.01,0) [0|655.35] "km/h" Vector__XXX
- SG_ Gear : 16|4@1+ (1,0) [0|0] "" Vector__XXX
- SG_ BrakePressure : 39|12@0+ (0.1,0) [0|409.5] "bar" Vector__XXX
- SG_ BrakeActive : 40|1@1+ (1,0) [0|1] "" Vector__XXX
+BO_ 256 VehicleStatus: 8 Gateway
+ SG_ Speed : 0|16@1+ (0.01,0) [0|655.35] "km/h" Adas
+ SG_ Gear : 16|4@1+ (1,0) [0|0] "" Adas
+ SG_ BrakePressure : 39|12@0+ (0.1,0) [0|409.5] "bar" Adas
+ SG_ BrakeActive : 40|1@1+ (1,0) [0|1] "" Adas
 
-BO_ 2566853172 SteeringCmd: 8 Vector__XXX
- SG_ SteeringAngle : 7|16@0- (0.1,0) [-780|780] "deg" Vector__XXX
- SG_ Torque : 16|8@1- (0.05,0) [-6.4|6.3] "Nm" Vector__XXX
- SG_ Enable : 24|1@1+ (1,0) [0|1] "" Vector__XXX
+BO_ 2566853172 SteeringCmd: 8 Adas
+ SG_ SteeringAngle : 7|16@0- (0.1,0) [-780|780] "deg" Gateway
+ SG_ Torque : 16|8@1- (0.05,0) [-6.4|6.3] "Nm" Gateway
+ SG_ Enable : 24|1@1+ (1,0) [0|1] "" Gateway
 
-BO_ 512 RadarObjects: 16 Vector__XXX
- SG_ ObjectCount : 0|8@1+ (1,0) [0|0] "" Vector__XXX
- SG_ Distance : 8|16@1+ (0.01,0) [0|655.35] "m" Vector__XXX
- SG_ RadarStatus : 127|2@0+ (1,0) [0|0] "" Vector__XXX
+BO_ 512 RadarObjects: 16 Radar
+ SG_ ObjectCount : 0|8@1+ (1,0) [0|0] "" Adas
+ SG_ Distance : 8|16@1+ (0.01,0) [0|655.35] "m" Adas
+ SG_ RadarStatus : 127|2@0+ (1,0) [0|0] "" Adas
 
 CM_ BO_ 256 "Speed, gear and brake";
 CM_ SG_ 256 Speed "Vehicle speed";
