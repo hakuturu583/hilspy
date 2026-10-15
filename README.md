@@ -21,7 +21,7 @@ with hilspy.open("can://vcan0", "dbc:vehicle.dbc") as ecu:
 | `can://vcan0` | Linux SocketCAN (`?fd`, `?echo`, `?filter=0x100:0x700,...`) |
 | `udp://host:port` | UDP to a peer (`?bind=addr:port`); `udp://addr:port?listen` replies to the last sender |
 | `tcp://host:port` | TCP client; `tcp://addr:port?listen` serves every connected client |
-| `mem://name` | in-process bus (tests, simulated ECUs in one process) |
+| `mem://name` | in-process bus (tests, simulated ECUs in one process); carries CAN, LIN and FlexRay frames with their headers |
 | `file://path` | replay a recording; `?write` / `?append` records one |
 | `file://drive.blf`, `drive.asc`, `drive.log?format=candump` | CAN logs (Vector BLF/ASC, candump) with identifiers and times; `?realtime` replays them as recorded, `?write` records |
 | `serial:///dev/ttyUSB0` | serial port (`?baud=115200`, `data_bits`, `parity`, `stop_bits`, `flow`); `serial://COM3` on Windows |
@@ -73,10 +73,36 @@ The whole public API:
 | `Channel.close()` | also via `with` / `async with` |
 | `await Channel.asend(...)`, `await Channel.arecv(timeout=None)`, `async for msg in channel` | asyncio |
 | `hilspy.merge(*channels)` | `(channel, message)` from several buses as they arrive (`for` / `async for`) |
-| `hilspy.Message(name=None, fields=None, *, data=None, id=None, extended=None, fd=False)` | `.name`, `.fields`, `msg["field"]`, `.data`, `.id`, `.timestamp` |
+| `hilspy.Message(name=None, fields=None, *, data=None, id=None, bus=None, extended=None, fd=False, enhanced=None, checksum=None, cycle=None, channel=None)` | `.name`, `.fields`, `msg["field"]`, `.data`, `.id`, `.timestamp`; frame headers `.bus`, `.extended`, `.fd` (CAN), `.enhanced`, `.checksum` (LIN), `.cycle`, `.channel` (FlexRay); see [Frames](#can-lin-and-flexray-frames) |
 | `hilspy.Clock(start=0.0)` | simulated time: `advance(dt)`, `advance_to(t)`, `now`, `next_due` |
 | `hilspy.register_transport(scheme, factory)` / `register_codec(name, factory)` | plugins |
 | `hilspy.Error` | bad URL/codec/option, encode/decode failure, closed channel |
+
+### CAN, LIN and FlexRay frames
+
+A raw message's packet may be a frame of one of three buses; its header is
+part of the `Message`:
+
+| `bus` | `id` | Header |
+| --- | --- | --- |
+| `"can"` | CAN identifier | `extended` (29-bit), `fd` (CAN FD) |
+| `"lin"` | frame identifier, 0..=63 (the protected identifier's parity bits are derived) | `enhanced` (checksum model: enhanced, else classic), `checksum` (the checksum byte) |
+| `"flexray"` | slot, 1..=2047 | `cycle` (cycle counter, 0..=63), `channel` (`"A"`, `"B"` or `"AB"`) |
+
+```python
+hilspy.Message(data=b"\x01\x02", id=0x123)  # CAN (bus="can")
+hilspy.Message(data=b"\x80\x01", id=0x10, bus="lin")  # enhanced checksum computed
+hilspy.Message(data=b"\x80\x01", id=0x10, enhanced=False)  # classic
+hilspy.Message(data=bytes(4), id=7, cycle=1, channel="A")  # FlexRay (bus="flexray")
+```
+
+`bus` is implied by the keywords (`enhanced` / `checksum` for LIN, `cycle` /
+`channel` for FlexRay, else CAN when there is an `id`). A LIN frame's `data`
+are its data bytes; the checksum is computed under its model unless given
+(diagnostic frames `0x3C` / `0x3D` are always classic). A FlexRay payload is an
+even number of bytes, up to 254. `mem://` carries every header as is (a bad
+LIN checksum arrives bad); there is no LIN or FlexRay hardware transport yet,
+and CAN logs, `udp://` and `tcp://` carry the bytes only.
 
 ### Cycle times
 

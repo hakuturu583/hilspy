@@ -119,6 +119,8 @@ fn packet<F: EmbeddedFrame>(f: &F, fd: bool, brs: bool) -> Packet {
     Packet {
         data: f.data().to_vec(),
         can: Some(header(f, fd, brs)),
+        lin: None,
+        flexray: None,
         timestamp: Some(now_timestamp()),
         source: None,
     }

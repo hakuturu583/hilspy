@@ -137,6 +137,8 @@ mod tests {
                     fd: false,
                     brs: false,
                 }),
+                lin: None,
+                flexray: None,
                 timestamp: None,
                 source: None,
             };

@@ -181,6 +181,8 @@ impl Codec for Dbc {
                 fd: m.fd,
                 brs: m.fd,
             }),
+            lin: None,
+            flexray: None,
             timestamp: None,
             source: None,
         }])

@@ -74,6 +74,8 @@ fn message(block: Block, timestamp: Option<f64>) -> Message {
         packet: Some(Packet {
             data: block.raw,
             can: None,
+            lin: None,
+            flexray: None,
             timestamp,
             source: None,
         }),

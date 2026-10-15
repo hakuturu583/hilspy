@@ -67,6 +67,8 @@ fn message(
         packet: Some(Packet {
             data: frame.frame_data().to_vec(),
             can: None,
+            lin: None,
+            flexray: None,
             timestamp,
             source,
         }),

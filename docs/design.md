@@ -25,9 +25,16 @@ real-time process can use it directly.
            Transport::send(Packet)                    Transport::recv(timeout) -> Packet
 ```
 
-* **Packet**: bytes, an optional CAN header (`id`, `extended`, `fd`, `brs`)
-  and a reception timestamp. It is what a transport moves: a CAN frame, a
-  UDP datagram, a TCP chunk, a file chunk.
+* **Packet**: bytes, at most one bus header and a reception timestamp. It is
+  what a transport moves: a CAN, LIN or FlexRay frame, a UDP datagram, a TCP
+  chunk, a file chunk. Headers: CAN (`id`, `extended`, `fd`, `brs`), LIN
+  (`id` 0..=63, the checksum model and the checksum byte; the protected
+  identifier is derived) and FlexRay (`slot`, `cycle`, `channel` A/B/AB).
+  A LIN packet's bytes are the data bytes, the checksum travels in the
+  header, so a simulated bus can carry a bad one. `Packet::check_headers`
+  enforces the ranges; `mem://` checks and carries every header, and Python
+  sees them as `Message` attributes (`bus`, `id`, `extended`, `fd`,
+  `enhanced`, `checksum`, `cycle`, `channel`).
 * **Message**: an optional name, named fields (`Value`: null, bool, int,
   float, str, map) and the packet it came from or goes out as. A nameless
   message bypasses the codec in both directions.
@@ -102,7 +109,8 @@ deadlocking. A Python exception raised in a plugin travels through the core as
   receive polls in 100 ms slices so `close()` wakes a blocked receiver. Remote
   and error frames are not delivered.
 * `mem://`: a registry of hubs by name; each endpoint has a bounded queue
-  (oldest dropped) and software filters.
+  (oldest dropped) and software filters (CAN). Packets keep their headers,
+  so LIN and FlexRay frames travel with their metadata.
 * `udp://`: one datagram per packet; a listener replies to the last sender.
 * `tcp://`: reader threads push chunks into a queue; a server broadcasts sends
   to every connected client and drops broken ones. A client channel ends when
