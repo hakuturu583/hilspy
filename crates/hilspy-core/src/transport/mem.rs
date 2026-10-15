@@ -1,8 +1,12 @@
 //! `mem://name`: an in-process bus. Every channel opened on the same name
-//! receives the packets the others send (CAN frames and byte packets alike),
-//! with no kernel interface: for tests and for wiring simulated ECUs together.
+//! receives the packets the others send (CAN, LIN and FlexRay frames with
+//! their headers, and byte packets alike), with no kernel interface: for
+//! tests and for wiring simulated ECUs together. Packets travel as they are,
+//! so a LIN frame keeps its checksum (a bad one arrives bad) and a FlexRay
+//! frame its slot, cycle and channel.
 //!
-//! Options: `echo` (receive own packets), `filter=ID[:MASK],...` (CAN).
+//! Options: `echo` (receive own packets), `filter=ID[:MASK],...` (CAN; other
+//! packets pass).
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock, Weak};
@@ -64,6 +68,7 @@ impl Mem {
 
 impl Transport for Mem {
     fn send(&self, packet: &Packet) -> Result<()> {
+        packet.check_headers()?;
         if packet.can.is_some() {
             super::can_frame::check(packet, true)?;
         }
@@ -111,6 +116,31 @@ mod tests {
         assert_eq!(b.recv(Some(Duration::ZERO)).unwrap().unwrap().data, b"xyz");
         assert!(a.recv(Some(Duration::ZERO)).unwrap().is_none());
         assert!(other.recv(Some(Duration::ZERO)).unwrap().is_none());
+    }
+
+    #[test]
+    fn carries_lin_and_flexray_headers() {
+        use crate::message::{FlexRayChannel, LinChecksum};
+        let a = open("mem://t-mem-lin-fr?filter=0x100").unwrap();
+        let b = open("mem://t-mem-lin-fr").unwrap();
+        let mut bad = Packet::lin(0x10, LinChecksum::Enhanced, vec![1, 2]);
+        bad.lin.as_mut().unwrap().checksum ^= 0xFF;
+        b.send(&bad).unwrap();
+        b.send(&Packet::flexray(5, 7, FlexRayChannel::B, vec![1, 2]))
+            .unwrap();
+        let got = a.recv(Some(Duration::from_millis(100))).unwrap().unwrap();
+        assert_eq!(got.lin, bad.lin, "sent as is, bad checksum and all");
+        assert!(!got.lin.unwrap().checksum_ok(&got.data));
+        let got = a.recv(Some(Duration::from_millis(100))).unwrap().unwrap();
+        let h = got.flexray.unwrap();
+        assert_eq!((h.slot, h.cycle, h.channel), (5, 7, FlexRayChannel::B));
+        let e = b
+            .send(&Packet::lin(64, LinChecksum::Classic, vec![]))
+            .unwrap_err();
+        assert!(e.to_string().contains("0..=63"), "{e}");
+        assert!(b
+            .send(&Packet::flexray(5, 0, FlexRayChannel::A, vec![1]))
+            .is_err());
     }
 
     #[test]

@@ -141,6 +141,8 @@ fn frame_message(raw: Vec<u8>, timestamp: Option<f64>, source: Option<u64>) -> M
         packet: Some(Packet {
             data: raw,
             can: None,
+            lin: None,
+            flexray: None,
             timestamp,
             source,
         }),

@@ -100,6 +100,8 @@ fn from_blf(m: &blf_asc::Message) -> Option<Packet> {
             fd: m.is_fd,
             brs: m.bitrate_switch,
         }),
+        lin: None,
+        flexray: None,
         timestamp: Some(m.timestamp),
         source: None,
     })
@@ -385,6 +387,8 @@ mod tests {
                 fd,
                 brs: fd,
             }),
+            lin: None,
+            flexray: None,
             timestamp: Some(t),
             source: None,
         };

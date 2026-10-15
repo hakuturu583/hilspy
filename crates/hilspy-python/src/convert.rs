@@ -1,6 +1,9 @@
 //! `Message` and conversions between Python objects and core values.
 
-use hilspy_core::{Array, CanHeader, Message as CoreMessage, Options, Packet, Value};
+use hilspy_core::{
+    Array, CanHeader, FlexRayChannel, FlexRayHeader, LinChecksum, LinHeader,
+    Message as CoreMessage, Options, Packet, Value,
+};
 use pyo3::exceptions::{PyKeyError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyBytes, PyDict, PyFloat, PyInt, PyList, PyString, PyTuple};
@@ -216,7 +219,8 @@ fn bytes_from_py(obj: &Bound<'_, PyAny>) -> PyResult<Vec<u8>> {
 }
 
 /// A message: a name and fields (decoded or to encode), and the raw packet
-/// (`data`, plus `id` for CAN) it was received as or is sent as.
+/// (`data`, plus `id` and the bus header for CAN, LIN and FlexRay frames) it
+/// was received as or is sent as.
 ///
 /// `Message("VehicleSpeed", {"Speed": 12.5})` is encoded by the channel's
 /// codec; `Message(data=b"...", id=0x123)` (no name) is sent as is.
@@ -262,35 +266,124 @@ pub(crate) fn message_arg(
 #[pymethods]
 impl Message {
     #[new]
-    #[pyo3(signature = (name = None, fields = None, *, data = None, id = None, extended = None, fd = false))]
+    #[pyo3(signature = (
+        name = None, fields = None, *, data = None, id = None, bus = None, extended = None,
+        fd = false, enhanced = None, checksum = None, cycle = None, channel = None
+    ))]
+    #[allow(clippy::too_many_arguments)]
     fn new(
         name: Option<String>,
         fields: Option<&Bound<'_, PyAny>>,
         data: Option<&Bound<'_, PyAny>>,
         id: Option<u32>,
+        bus: Option<&str>,
         extended: Option<bool>,
         fd: bool,
+        enhanced: Option<bool>,
+        checksum: Option<u8>,
+        cycle: Option<u8>,
+        channel: Option<&str>,
     ) -> PyResult<Self> {
         let fields = fields.map(fields_from_py).transpose()?.unwrap_or_default();
         let data = data.map(bytes_from_py).transpose()?;
-        if id.is_none() && (extended.is_some() || fd) {
-            return Err(PyValueError::new_err("extended and fd need an id"));
+        let lin_args = enhanced.is_some() || checksum.is_some();
+        let flexray_args = cycle.is_some() || channel.is_some();
+        let bus = match bus {
+            Some(b) => Some(match b.to_ascii_lowercase().as_str() {
+                "can" => "can",
+                "lin" => "lin",
+                "flexray" => "flexray",
+                _ => {
+                    return Err(PyValueError::new_err(format!(
+                        "bus must be \"can\", \"lin\" or \"flexray\", not {b:?}"
+                    )))
+                }
+            }),
+            None if lin_args => Some("lin"),
+            None if flexray_args => Some("flexray"),
+            None => id.map(|_| "can"),
+        };
+        let misplaced = match bus {
+            Some("can") => {
+                (lin_args || flexray_args).then_some("enhanced, checksum, cycle and channel")
+            }
+            Some("lin") => (extended.is_some() || fd || flexray_args)
+                .then_some("extended, fd, cycle and channel"),
+            Some(_) => (extended.is_some() || fd || lin_args)
+                .then_some("extended, fd, enhanced and checksum"),
+            None => (extended.is_some() || fd).then_some("extended and fd"),
+        };
+        if let Some(what) = misplaced {
+            return Err(PyValueError::new_err(match bus {
+                Some(b) => format!("{what} do not apply to a {b} frame"),
+                None => format!("{what} need an id"),
+            }));
         }
-        let packet = if data.is_some() || id.is_some() {
+        if bus.is_some() && id.is_none() {
+            return Err(PyValueError::new_err(
+                "a CAN, LIN or FlexRay frame needs an id",
+            ));
+        }
+        let mut packet = if data.is_some() || id.is_some() {
             Some(Packet {
                 data: data.unwrap_or_default(),
-                can: id.map(|id| CanHeader {
-                    id,
-                    extended: extended.unwrap_or(id > SFF_MASK),
-                    fd,
-                    brs: fd,
-                }),
-                timestamp: None,
-                source: None,
+                ..Packet::default()
             })
         } else {
             None
         };
+        if let (Some(p), Some(id), Some(bus)) = (packet.as_mut(), id, bus) {
+            match bus {
+                "can" => {
+                    p.can = Some(CanHeader {
+                        id,
+                        extended: extended.unwrap_or(id > SFF_MASK),
+                        fd,
+                        brs: fd,
+                    })
+                }
+                "lin" => {
+                    let id = u8::try_from(id)
+                        .ok()
+                        .filter(|id| *id <= 0x3F)
+                        .ok_or_else(|| {
+                            PyValueError::new_err(format!("LIN identifier {id} is not in 0..=63"))
+                        })?;
+                    // Diagnostic frames always use the classic checksum.
+                    let model = match enhanced {
+                        _ if hilspy_core::is_lin_diagnostic(id) => LinChecksum::Classic,
+                        Some(true) => LinChecksum::Enhanced,
+                        Some(false) => LinChecksum::Classic,
+                        None => LinChecksum::for_id(id),
+                    };
+                    p.lin = Some(LinHeader {
+                        id,
+                        checksum_model: model,
+                        checksum: checksum.unwrap_or_else(|| model.compute(id, &p.data)),
+                    });
+                }
+                _ => {
+                    let slot = u16::try_from(id).map_err(|_| {
+                        PyValueError::new_err(format!("FlexRay slot {id} is not in 1..=2047"))
+                    })?;
+                    let channel = match channel {
+                        None => FlexRayChannel::A,
+                        Some(c) => FlexRayChannel::parse(c).ok_or_else(|| {
+                            PyValueError::new_err(format!(
+                                "channel must be \"A\", \"B\" or \"AB\", not {c:?}"
+                            ))
+                        })?,
+                    };
+                    p.flexray = Some(FlexRayHeader {
+                        slot,
+                        cycle: cycle.unwrap_or(0),
+                        channel,
+                    });
+                }
+            }
+            p.check_headers()
+                .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        }
         if name.is_none() && packet.is_none() {
             return Err(PyValueError::new_err("a message needs a name or data"));
         }
@@ -324,10 +417,56 @@ impl Message {
             .map(|p| PyBytes::new(py, &p.data))
     }
 
-    /// CAN identifier, for CAN frames.
+    /// The bus a frame is from: "can", "lin" or "flexray"; None for byte
+    /// packets.
+    #[getter]
+    fn bus(&self) -> Option<&'static str> {
+        let p = self.inner.packet.as_ref()?;
+        if p.can.is_some() {
+            Some("can")
+        } else if p.lin.is_some() {
+            Some("lin")
+        } else if p.flexray.is_some() {
+            Some("flexray")
+        } else {
+            None
+        }
+    }
+
+    /// The frame identifier: CAN identifier, LIN frame identifier (0..=63)
+    /// or FlexRay slot.
     #[getter]
     fn id(&self) -> Option<u32> {
-        self.inner.packet.as_ref()?.can.map(|h| h.id)
+        let p = self.inner.packet.as_ref()?;
+        p.can
+            .map(|h| h.id)
+            .or(p.lin.map(|h| u32::from(h.id)))
+            .or(p.flexray.map(|h| u32::from(h.slot)))
+    }
+
+    /// LIN frame sent with the enhanced checksum model (else classic).
+    #[getter]
+    fn enhanced(&self) -> bool {
+        self.lin()
+            .is_some_and(|h| h.checksum_model == LinChecksum::Enhanced)
+    }
+
+    /// The checksum byte of a LIN frame.
+    #[getter]
+    fn checksum(&self) -> Option<u8> {
+        self.lin().map(|h| h.checksum)
+    }
+
+    /// The cycle counter (0..=63) of a FlexRay frame.
+    #[getter]
+    fn cycle(&self) -> Option<u8> {
+        self.flexray().map(|h| h.cycle)
+    }
+
+    /// The channel of a FlexRay frame: "A", "B" or "AB".
+    #[getter]
+    fn channel(&self) -> Option<&'static str> {
+        self.flexray().map(|h| h.channel.name())
     }
 
     /// 29-bit CAN identifier.
@@ -377,6 +516,17 @@ impl Message {
             if let Some(h) = p.can {
                 parts.push(format!("id=0x{:X}", h.id));
             }
+            if let Some(h) = p.lin {
+                parts.push(format!("bus=\"lin\", id=0x{:02X}", h.id));
+            }
+            if let Some(h) = p.flexray {
+                parts.push(format!(
+                    "bus=\"flexray\", id={}, cycle={}, channel={:?}",
+                    h.slot,
+                    h.cycle,
+                    h.channel.name()
+                ));
+            }
             if m.name.is_none() {
                 let hex: String = p.data.iter().map(|b| format!("{b:02x}")).collect();
                 parts.push(format!("data=bytes.fromhex('{hex}')"));
@@ -389,5 +539,13 @@ impl Message {
 impl Message {
     fn can(&self) -> Option<CanHeader> {
         self.inner.packet.as_ref()?.can
+    }
+
+    fn lin(&self) -> Option<LinHeader> {
+        self.inner.packet.as_ref()?.lin
+    }
+
+    fn flexray(&self) -> Option<FlexRayHeader> {
+        self.inner.packet.as_ref()?.flexray
     }
 }

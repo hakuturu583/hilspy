@@ -25,9 +25,16 @@ real-time process can use it directly.
            Transport::send(Packet)                    Transport::recv(timeout) -> Packet
 ```
 
-* **Packet**: bytes, an optional CAN header (`id`, `extended`, `fd`, `brs`)
-  and a reception timestamp. It is what a transport moves: a CAN frame, a
-  UDP datagram, a TCP chunk, a file chunk.
+* **Packet**: bytes, at most one bus header and a reception timestamp. It is
+  what a transport moves: a CAN, LIN or FlexRay frame, a UDP datagram, a TCP
+  chunk, a file chunk. Headers: CAN (`id`, `extended`, `fd`, `brs`), LIN
+  (`id` 0..=63, the checksum model and the checksum byte; the protected
+  identifier is derived) and FlexRay (`slot`, `cycle`, `channel` A/B/AB).
+  A LIN packet's bytes are the data bytes, the checksum travels in the
+  header, so a simulated bus can carry a bad one. `Packet::check_headers`
+  enforces the ranges; `mem://` checks and carries every header, and Python
+  sees them as `Message` attributes (`bus`, `id`, `extended`, `fd`,
+  `enhanced`, `checksum`, `cycle`, `channel`).
 * **Message**: an optional name, named fields (`Value`: null, bool, int,
   float, str, map) and the packet it came from or goes out as. A nameless
   message bypasses the codec in both directions.
@@ -102,7 +109,8 @@ deadlocking. A Python exception raised in a plugin travels through the core as
   receive polls in 100 ms slices so `close()` wakes a blocked receiver. Remote
   and error frames are not delivered.
 * `mem://`: a registry of hubs by name; each endpoint has a bounded queue
-  (oldest dropped) and software filters.
+  (oldest dropped) and software filters (CAN). Packets keep their headers,
+  so LIN and FlexRay frames travel with their metadata.
 * `udp://`: one datagram per packet; a listener replies to the last sender.
 * `tcp://`: reader threads push chunks into a queue; a server broadcasts sends
   to every connected client and drops broken ones. A client channel ends when
@@ -153,7 +161,28 @@ deadlocking. A Python exception raised in a plugin travels through the core as
   order; clashing names qualified as `PDU.Signal`; a multiplexed PDU's switch
   becomes the multiplexor and its switched PDUs' signals are multiplexed on
   their switch codes, in the multiplexed PDU's bit numbering), and the codec is the `dbc` codec over it, so
-  the bit layout, options and E2E are shared. Compu methods that one factor
+  the bit layout, options and E2E are shared. `fibex::load_channel` adds the
+  channel's bus, from its cluster's `PROTOCOL`: on a LIN channel the
+  identifiers are LIN frame identifiers, each frame has a checksum model
+  (triggering `CHECKSUM-TYPE`, else the cluster's protocol version; 0x3C/0x3D
+  classic) and the `SCHEDULE-TABLE`s (read with `roxmltree`: entries with a
+  `DELAY` and optionally a `FRAME-TRIGGERING-REF`) set each message's cycle
+  time to the table period over the frame's entry count (the `schedule`
+  option's table, else the first that sends the frame). The LIN codec wraps
+  the `dbc` codec (`Dbc::payload` / `Dbc::decode_as`, which the CAN framing
+  uses too) with LIN framing: the header gets the identifier, model and
+  checksum; decoding verifies the checksum under the frame's model after the
+  `ecu` filter and before E2E, and a mismatch is `Error::Decode` (a
+  link-layer check like the CAN CRC: no message, the stream continues),
+  unlike E2E's status field. On a FlexRay channel the triggerings'
+  `ABSOLUTELY-SCHEDULED-TIMING`s (slot, base cycle, repetition) place the
+  frames; frames share slots across cycles, so the database is built
+  `without_identifiers`. Decoding matches channel (A/B/AB overlap), slot and
+  `cycle % repetition == base`; encoding picks the first matching cycle
+  counter at or after the message time's cycle (`floor(t / cycle) % 64`),
+  so frames sent on a virtual clock land in their own cycles. Cycle times
+  are the cluster `CYCLE` (or macroticks) times the repetition. No hardware
+  transport exists for either bus; `mem://` carries both. Compu methods that one factor
   and offset plus exact value table entries cannot express become a
   per-signal `dbc::Coding` (texttable ranges, piecewise linear and rational
   scales; `dbc/coding.rs`) that `Signal` encoding and decoding consult

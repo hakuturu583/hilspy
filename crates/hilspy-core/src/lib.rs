@@ -29,7 +29,10 @@ pub use channel::{Channel, Periodic, Subscription};
 pub use clock::Clock;
 pub use codec::Codec;
 pub use error::{Error, Result};
-pub use message::{CanHeader, Message, Packet};
+pub use message::{
+    is_lin_diagnostic, CanHeader, FlexRayChannel, FlexRayHeader, LinChecksum, LinHeader, Message,
+    Packet,
+};
 pub use transport::Transport;
 pub use url::{CodecSpec, Endpoint};
 pub use value::{Array, Options, Value};

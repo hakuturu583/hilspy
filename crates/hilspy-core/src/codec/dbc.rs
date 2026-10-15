@@ -136,8 +136,11 @@ fn from_db(v: db::Value) -> Value {
     }
 }
 
-impl Codec for Dbc {
-    fn encode(&mut self, message: &Message) -> Result<Vec<Packet>> {
+impl Dbc {
+    /// The payload of a named message: the ECU's right to send it checked,
+    /// its signals packed and E2E protection applied ([`Database::message_by_name`]
+    /// gives the rest of the frame).
+    pub(crate) fn payload(&mut self, message: &Message) -> Result<Vec<u8>> {
         let name = message.name.as_deref().unwrap_or_default();
         let m = self.db.message_by_name(name)?;
         if let Some(ecu) = &self.ecu {
@@ -168,6 +171,48 @@ impl Codec for Dbc {
             let n = m.size.min(data.len());
             p.protect(&mut data[..n])?;
         }
+        Ok(data)
+    }
+
+    /// Decode `packet` as message `name`: nameless if the ECU does not
+    /// receive it; otherwise `check` (a frame checksum) runs, then the
+    /// signals are decoded and any E2E protection checked.
+    pub(crate) fn decode_as(
+        &mut self,
+        name: &str,
+        packet: Packet,
+        check: impl FnOnce(&Packet) -> Result<()>,
+    ) -> Result<Message> {
+        let m = self.db.message_by_name(name)?;
+        if self.ecu.as_ref().is_some_and(|e| !m.receivers.contains(e)) {
+            // Not for this ECU: as if the database lacked it.
+            return Ok(Message::raw(packet));
+        }
+        check(&packet)?;
+        let mut fields: Vec<(String, Value)> = m
+            .decode(&packet.data, &self.decode)?
+            .into_iter()
+            .map(|(k, v)| (k, from_db(v)))
+            .collect();
+        if let Some(p) = self.e2e.get_mut(&m.name) {
+            let n = m.size.min(packet.data.len());
+            let status = p.check(&packet.data[..n])?;
+            fields.push(("e2e".into(), Value::Str(status_name(status))));
+        }
+        Ok(Message {
+            name: Some(m.name.clone()),
+            fields,
+            packet: Some(packet),
+        })
+    }
+}
+
+impl Codec for Dbc {
+    fn encode(&mut self, message: &Message) -> Result<Vec<Packet>> {
+        let mut data = self.payload(message)?;
+        let m = self
+            .db
+            .message_by_name(message.name.as_deref().unwrap_or_default())?;
         if m.fd {
             let len = fd_padded_len(data.len())
                 .ok_or_else(|| Error::encode(format!("{} bytes exceeds CAN FD", data.len())))?;
@@ -181,8 +226,7 @@ impl Codec for Dbc {
                 fd: m.fd,
                 brs: m.fd,
             }),
-            timestamp: None,
-            source: None,
+            ..Packet::default()
         }])
     }
 
@@ -198,25 +242,8 @@ impl Codec for Dbc {
         let Ok(m) = self.db.message_by_id(h.id, h.extended) else {
             return Ok(vec![Message::raw(packet)]);
         };
-        if self.ecu.as_ref().is_some_and(|e| !m.receivers.contains(e)) {
-            // Not for this ECU: as if the database lacked it.
-            return Ok(vec![Message::raw(packet)]);
-        }
-        let mut fields: Vec<(String, Value)> = m
-            .decode(&packet.data, &self.decode)?
-            .into_iter()
-            .map(|(k, v)| (k, from_db(v)))
-            .collect();
-        if let Some(p) = self.e2e.get_mut(&m.name) {
-            let n = m.size.min(packet.data.len());
-            let status = p.check(&packet.data[..n])?;
-            fields.push(("e2e".into(), Value::Str(status_name(status))));
-        }
-        Ok(vec![Message {
-            name: Some(m.name.clone()),
-            fields,
-            packet: Some(packet),
-        }])
+        let name = m.name.clone();
+        Ok(vec![self.decode_as(&name, packet, |_| Ok(()))?])
     }
 }
 

@@ -135,6 +135,8 @@ impl Lidar {
             packet: Some(Packet {
                 data,
                 can: None,
+                lin: None,
+                flexray: None,
                 timestamp: Some(start),
                 source,
             }),

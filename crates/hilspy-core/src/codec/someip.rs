@@ -296,6 +296,8 @@ impl Someip {
         let packet = Packet {
             data: frame.to_vec(),
             can: None,
+            lin: None,
+            flexray: None,
             timestamp,
             source,
         };

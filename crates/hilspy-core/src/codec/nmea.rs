@@ -352,6 +352,8 @@ impl Codec for Nmea {
                 let p = Packet {
                     data: line,
                     can: None,
+                    lin: None,
+                    flexray: None,
                     timestamp: packet.timestamp,
                     source: packet.source,
                 };

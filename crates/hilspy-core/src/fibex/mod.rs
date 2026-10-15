@@ -1,6 +1,38 @@
-//! ASAM FIBEX (MCD-2 NET) network descriptions: the CAN / CAN FD frames of
-//! one channel, converted to a DBC [`Database`] so the `dbc` encoding,
-//! decoding and E2E protection apply unchanged.
+//! ASAM FIBEX (MCD-2 NET) network descriptions: the CAN / CAN FD, LIN or
+//! FlexRay frames of one channel, converted to a DBC [`Database`] so the
+//! `dbc` encoding, decoding and E2E protection apply unchanged, plus what the
+//! channel's bus adds ([`Bus`]: LIN identifiers, checksum models and schedule
+//! tables; FlexRay slots, cycles and channel).
+//!
+//! The bus is the `PROTOCOL` of the cluster whose `CHANNEL-REFS` name the
+//! channel: `LIN` makes a LIN channel, `FlexRay` a FlexRay one, anything else
+//! (or no cluster) CAN.
+//!
+//! LIN: a frame triggering's `IDENTIFIER-VALUE` is the frame identifier
+//! (0..=63). Its checksum model is the triggering's `CHECKSUM-TYPE` (or
+//! `LIN-CHECKSUM`) `CLASSIC` / `ENHANCED` if it has one, else classic for a
+//! cluster `PROTOCOL-VERSION` 1.x and enhanced otherwise; the diagnostic
+//! frames `0x3C` / `0x3D` are always classic. Schedule tables are the
+//! `SCHEDULE-TABLE`s of the channel (or its cluster): each entry with a
+//! `DELAY` (an `xs:duration`, the time from the entry's start to the next
+//! one's) and, for frame entries, a `FRAME-TRIGGERING-REF`. A table's period
+//! is the sum of its delays; a frame's cycle time is the period divided by
+//! the number of the table's entries that send it (exact when they are
+//! evenly spaced, the mean interval otherwise), from the table chosen with
+//! `schedule`, else the first table (in document order) that sends the
+//! frame, else its triggering's `CYCLIC-TIMING`.
+//!
+//! FlexRay: a frame triggering's `ABSOLUTELY-SCHEDULED-TIMING`s (`SLOT-ID`,
+//! `BASE-CYCLE`, default 0, and `CYCLE-REPETITION`, a power of two up to 64
+//! or 5, 10, 20, 40 or 50 (FlexRay 3.0), default 1) say where the frame is sent: in its slot in every cycle whose
+//! counter modulo the repetition is the base cycle. Several frames may share
+//! a slot in different cycles, so the database is built
+//! [without identifiers](Database::without_identifiers) (a message's `id` is
+//! its first slot). The channel's `FLEXRAY-CHANNEL-NAME` (`A` or `B`; both
+//! when absent) is the frames' channel. The cluster's `CYCLE` (microseconds;
+//! else `MACRO-PER-CYCLE` times `MACROTICK`, in microseconds) is the cycle
+//! length, and a frame's cycle time is the cycle length times its first
+//! timing's repetition. Static and dynamic slots are treated alike.
 //!
 //! The `afibex` crate parses the file: channels, frames with their PDU
 //! instances, PDUs with their signal instances, signals and the coded types
@@ -63,6 +95,7 @@ use crate::dbc::{
     bits, ByteOrder, Coding, Conversion, Database, Message, Multiplexing, Scale, Signal, ValueKind,
 };
 use crate::error::{Error, Result};
+use crate::message::{FlexRayChannel, LinChecksum};
 
 fn bad(msg: impl Into<String>) -> Error {
     Error::FibexParse(msg.into())
@@ -70,8 +103,148 @@ fn bad(msg: impl Into<String>) -> Error {
 
 /// The frames of one channel of a FIBEX file as a database. `channel` is a
 /// channel short name or ID; it may be left out when the file has a single
-/// channel.
+/// channel. See [`load_channel`] for what a LIN channel adds.
 pub fn load(path: impl AsRef<Path>, channel: Option<&str>) -> Result<Database> {
+    Ok(load_channel(path, channel, None)?.database)
+}
+
+/// One channel of a FIBEX file: its frames as a database, and its bus.
+#[derive(Clone, Debug)]
+pub struct ChannelDescription {
+    pub database: Database,
+    pub bus: Bus,
+}
+
+/// What a channel's bus adds to its frames.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Bus {
+    /// CAN / CAN FD: frames by the database's `id` and `extended`.
+    Can,
+    /// LIN: the database's `id` is the frame identifier.
+    Lin(Lin),
+    /// FlexRay: frames by slot and cycle.
+    FlexRay(FlexRay),
+}
+
+/// The FlexRay side of a channel.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FlexRay {
+    /// The cluster's cycle length, if it gives one.
+    pub cycle: Option<Duration>,
+    /// The channel's name: `A`, `B`, or both when the file does not say.
+    pub channel: FlexRayChannel,
+    /// The channel's frames, in triggering order.
+    pub frames: Vec<FlexRayFrame>,
+}
+
+/// A FlexRay frame of a channel.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FlexRayFrame {
+    /// The database message's name.
+    pub name: String,
+    /// Where it is sent (at least one).
+    pub timings: Vec<SlotTiming>,
+}
+
+/// An absolutely scheduled timing: a slot in every `repetition`-th cycle
+/// from `base_cycle`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SlotTiming {
+    /// 1..=2047.
+    pub slot: u16,
+    /// Less than the repetition.
+    pub base_cycle: u8,
+    /// A power of two up to 64, or 5, 10, 20, 40 or 50 (FlexRay 3.0).
+    pub repetition: u8,
+}
+
+impl SlotTiming {
+    /// Whether the frame is sent in `slot` of cycle `cycle`.
+    pub fn matches(&self, slot: u16, cycle: u8) -> bool {
+        slot == self.slot && cycle % self.repetition == self.base_cycle
+    }
+}
+
+impl FlexRayFrame {
+    /// Whether the frame is sent in `slot` of cycle `cycle`.
+    pub fn matches(&self, slot: u16, cycle: u8) -> bool {
+        self.timings.iter().any(|t| t.matches(slot, cycle))
+    }
+}
+
+/// The LIN side of a channel.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Lin {
+    /// The channel's frames, in triggering order.
+    pub frames: Vec<LinFrame>,
+    /// The channel's schedule tables, in document order.
+    pub schedule_tables: Vec<ScheduleTable>,
+}
+
+/// A LIN frame of a channel.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LinFrame {
+    /// The database message's name.
+    pub name: String,
+    /// Frame identifier, 0..=63.
+    pub id: u8,
+    pub checksum: LinChecksum,
+}
+
+/// A LIN schedule table.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ScheduleTable {
+    /// `SHORT-NAME`, else `ID`.
+    pub name: String,
+    pub entries: Vec<ScheduleEntry>,
+}
+
+/// One slot of a schedule table.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ScheduleEntry {
+    /// The frame it sends (the database message's name); `None` for other
+    /// entries (diagnostic or free-format commands), which still take their
+    /// delay.
+    pub frame: Option<String>,
+    /// From the entry's start to the next entry's.
+    pub delay: Duration,
+}
+
+impl ScheduleTable {
+    /// One pass through the table: the sum of its delays.
+    pub fn period(&self) -> Duration {
+        self.entries.iter().map(|e| e.delay).sum()
+    }
+
+    /// How often the table sends `frame`: its period divided by the number
+    /// of entries that send it; `None` if none do or the period is zero.
+    pub fn cycle_time(&self, frame: &str) -> Option<Duration> {
+        let n = self
+            .entries
+            .iter()
+            .filter(|e| e.frame.as_deref() == Some(frame))
+            .count();
+        let period = self.period();
+        (n > 0 && !period.is_zero()).then(|| period / n as u32)
+    }
+
+    /// Whether any entry sends `frame`.
+    pub fn sends(&self, frame: &str) -> bool {
+        self.entries
+            .iter()
+            .any(|e| e.frame.as_deref() == Some(frame))
+    }
+}
+
+/// One channel of a FIBEX file. `channel` is a channel short name or ID (it
+/// may be left out when the file has a single channel); `schedule` names the
+/// LIN schedule table (short name or ID) that gives a LIN channel's frames
+/// their cycle times, and is an error on other channels.
+pub fn load_channel(
+    path: impl AsRef<Path>,
+    channel: Option<&str>,
+    schedule: Option<&str>,
+) -> Result<ChannelDescription> {
     let path = path.as_ref();
     let text = std::fs::read_to_string(path).map_err(|e| {
         Error::Io(std::io::Error::new(
@@ -100,8 +273,9 @@ pub fn load(path: impl AsRef<Path>, channel: Option<&str>) -> Result<Database> {
         ids,
         ecus,
         ports,
+        xml: &xml,
     }
-    .database(channel)
+    .channel(channel, schedule)
 }
 
 /// The ECUs that send and receive a frame triggering, by name.
@@ -328,28 +502,176 @@ struct Network<'d, 'a, 'i> {
     ecus: Vec<String>,
     /// The sending and receiving ECUs by frame triggering ID.
     ports: HashMap<&'a str, Ports>,
+    xml: &'a Document<'i>,
+}
+
+/// The bus of a channel's cluster.
+#[derive(Clone, Copy, PartialEq)]
+enum BusKind {
+    Can,
+    Lin,
+    FlexRay,
+}
+
+impl BusKind {
+    /// The longest frame, in bytes.
+    fn max_size(self) -> usize {
+        match self {
+            Self::Can => 64,
+            Self::Lin => 8,
+            Self::FlexRay => 254,
+        }
+    }
 }
 
 impl Network<'_, '_, '_> {
-    fn database(&self, channel: Option<&str>) -> Result<Database> {
+    fn channel(&self, channel: Option<&str>, schedule: Option<&str>) -> Result<ChannelDescription> {
         let channel = self.select(channel)?;
         let node = self
             .ids
             .get(channel)
             .copied()
             .ok_or_else(|| bad(format!("channel {channel} not found")))?;
-        let mut messages = Vec::new();
-        for t in node
-            .descendants()
-            .filter(|n| n.is_element() && n.tag_name().name() == "FRAME-TRIGGERING")
-        {
-            if let Some(t) = triggering(t)? {
-                messages.push(self.message(&t)?);
-            }
+        let cluster = self.cluster(channel);
+        let protocol = cluster
+            .and_then(|c| child(c, "PROTOCOL"))
+            .map(|p| text(p).to_ascii_uppercase())
+            .unwrap_or_default();
+        let kind = if protocol.contains("LIN") {
+            BusKind::Lin
+        } else if protocol.contains("FLEXRAY") {
+            BusKind::FlexRay
+        } else {
+            BusKind::Can
+        };
+        if kind != BusKind::Lin && schedule.is_some() {
+            return Err(Error::Config(format!(
+                "option schedule: channel {channel} is not a LIN channel"
+            )));
         }
-        Database::new(String::new(), self.ecus.clone(), messages).map_err(|e| match e {
+        let triggerings = node
+            .descendants()
+            .filter(|n| n.is_element() && n.tag_name().name() == "FRAME-TRIGGERING");
+        let mut messages = Vec::new();
+        let bus = match kind {
+            BusKind::Can => {
+                for t in triggerings {
+                    if let Some(t) = triggering(t)? {
+                        messages.push(self.message(&t, kind)?);
+                    }
+                }
+                Bus::Can
+            }
+            BusKind::Lin => {
+                let classic = cluster
+                    .and_then(|c| child(c, "PROTOCOL-VERSION"))
+                    .is_some_and(|v| text(v).starts_with('1'));
+                // Frame names by triggering ID, for the schedule tables.
+                let mut by_tid = HashMap::new();
+                let mut frames = Vec::new();
+                for t in triggerings {
+                    let Some((t, id, checksum)) = lin_triggering(t, classic)? else {
+                        continue;
+                    };
+                    let m = self.message(&t, kind)?;
+                    by_tid.insert(t.tid.clone(), m.name.clone());
+                    frames.push(LinFrame {
+                        name: m.name.clone(),
+                        id,
+                        checksum,
+                    });
+                    messages.push(m);
+                }
+                let tables = schedule_tables(node, cluster, &by_tid)?;
+                let chosen = match schedule {
+                    None => None,
+                    Some(s) => Some(
+                        tables
+                            .iter()
+                            .find(|(id, t)| t.name == s || id == s)
+                            .map(|(_, t)| t)
+                            .ok_or_else(|| {
+                                let names: Vec<_> =
+                                    tables.iter().map(|(_, t)| t.name.as_str()).collect();
+                                Error::Config(format!(
+                                    "option schedule: no schedule table {s:?} on channel \
+                                     {channel} (tables: {})",
+                                    if names.is_empty() {
+                                        "none".to_owned()
+                                    } else {
+                                        names.join(", ")
+                                    }
+                                ))
+                            })?,
+                    ),
+                };
+                for m in &mut messages {
+                    let table =
+                        chosen.or_else(|| tables.iter().map(|(_, t)| t).find(|t| t.sends(&m.name)));
+                    if let Some(table) = table {
+                        m.cycle_time = table.cycle_time(&m.name);
+                    }
+                }
+                Bus::Lin(Lin {
+                    frames,
+                    schedule_tables: tables.into_iter().map(|(_, t)| t).collect(),
+                })
+            }
+            BusKind::FlexRay => {
+                let cycle = cluster.map(flexray_cycle).transpose()?.flatten();
+                let channel_name = child(node, "FLEXRAY-CHANNEL-NAME")
+                    .map(|n| {
+                        FlexRayChannel::parse(text(n)).ok_or_else(|| {
+                            bad(format!(
+                                "channel {channel}: FLEXRAY-CHANNEL-NAME {:?} is not A or B",
+                                text(n)
+                            ))
+                        })
+                    })
+                    .transpose()?
+                    .unwrap_or(FlexRayChannel::AB);
+                let mut frames = Vec::new();
+                for t in triggerings {
+                    let Some((t, timings)) = flexray_triggering(t)? else {
+                        continue;
+                    };
+                    let mut m = self.message(&t, kind)?;
+                    if let Some(cycle) = cycle {
+                        m.cycle_time = Some(cycle * u32::from(timings[0].repetition));
+                    }
+                    frames.push(FlexRayFrame {
+                        name: m.name.clone(),
+                        timings,
+                    });
+                    messages.push(m);
+                }
+                Bus::FlexRay(FlexRay {
+                    cycle,
+                    channel: channel_name,
+                    frames,
+                })
+            }
+        };
+        let build = if kind == BusKind::FlexRay {
+            Database::without_identifiers
+        } else {
+            Database::new
+        };
+        let database = build(String::new(), self.ecus.clone(), messages).map_err(|e| match e {
             Error::DbcParse(m) => bad(format!("channel {channel}: {m}")),
             e => e,
+        })?;
+        Ok(ChannelDescription { database, bus })
+    }
+
+    /// The cluster whose `CHANNEL-REFS` name the channel.
+    fn cluster(&self, channel: &str) -> Option<Node<'_, '_>> {
+        self.xml.descendants().find(|n| {
+            n.is_element()
+                && n.tag_name().name() == "CLUSTER"
+                && children(*n, "CHANNEL-REFS")
+                    .flat_map(|r| children(r, "CHANNEL-REF"))
+                    .any(|r| attr(r, "ID-REF") == Some(channel))
         })
     }
 
@@ -392,7 +714,7 @@ impl Network<'_, '_, '_> {
         }
     }
 
-    fn message(&self, t: &Triggering) -> Result<Message> {
+    fn message(&self, t: &Triggering, kind: BusKind) -> Result<Message> {
         let frame = self
             .data
             .elements
@@ -406,8 +728,14 @@ impl Network<'_, '_, '_> {
             })?;
         let name = frame.short_name.clone().unwrap_or_else(|| frame.id.clone());
         let size = frame.byte_length as usize;
-        if size > 64 {
-            return Err(bad(format!("frame {name} is {size} bytes (at most 64)")));
+        if size > kind.max_size() {
+            return Err(bad(match kind {
+                BusKind::Can => format!("frame {name} is {size} bytes (at most 64)"),
+                BusKind::Lin => format!("LIN frame {name} is {size} bytes (at most 8)"),
+                BusKind::FlexRay => {
+                    format!("FlexRay frame {name} is {size} bytes (at most 254)")
+                }
+            }));
         }
         // (PDU name, signal name, signal) for every signal of every PDU.
         let mut signals = Vec::new();
@@ -480,7 +808,7 @@ impl Network<'_, '_, '_> {
             signals: out,
             comment: frame.desc.clone(),
             cycle_time: t.cycle_time,
-            fd: t.fd || size > 8,
+            fd: kind == BusKind::Can && (t.fd || size > 8),
         })
     }
 
@@ -974,6 +1302,213 @@ fn triggering(t: Node<'_, '_>) -> Result<Option<Triggering>> {
         frame: frame.to_owned(),
         cycle_time: cycle_time(t, tid)?,
     }))
+}
+
+/// A number in decimal or `0x` hexadecimal.
+fn integer(s: &str) -> Option<u64> {
+    match s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
+        Some(hex) => u64::from_str_radix(hex, 16).ok(),
+        None => s.parse().ok(),
+    }
+}
+
+/// A LIN frame triggering: the triggering, its frame identifier and
+/// checksum model; `None` for one without an identifier. `classic` is the
+/// cluster's default model (LIN 1.x).
+fn lin_triggering(t: Node<'_, '_>, classic: bool) -> Result<Option<(Triggering, u8, LinChecksum)>> {
+    let tid = attr(t, "ID").unwrap_or_default();
+    let Some(value) = t
+        .descendants()
+        .find(|n| n.is_element() && n.tag_name().name() == "IDENTIFIER-VALUE")
+    else {
+        return Ok(None);
+    };
+    let s = text(value);
+    let id = integer(s)
+        .and_then(|i| u8::try_from(i).ok())
+        .filter(|&i| i <= 0x3F)
+        .ok_or_else(|| {
+            bad(format!(
+                "frame triggering {tid}: {s:?} is not a LIN frame identifier (0..=63)"
+            ))
+        })?;
+    let declared = t
+        .descendants()
+        .find(|n| n.is_element() && matches!(n.tag_name().name(), "CHECKSUM-TYPE" | "LIN-CHECKSUM"))
+        .map(|n| match text(n).to_ascii_uppercase().as_str() {
+            "CLASSIC" => Ok(LinChecksum::Classic),
+            "ENHANCED" => Ok(LinChecksum::Enhanced),
+            other => Err(bad(format!(
+                "frame triggering {tid}: checksum type {other:?} is not CLASSIC or ENHANCED"
+            ))),
+        })
+        .transpose()?;
+    let model = if crate::message::is_lin_diagnostic(id) {
+        LinChecksum::Classic
+    } else {
+        declared.unwrap_or(if classic {
+            LinChecksum::Classic
+        } else {
+            LinChecksum::Enhanced
+        })
+    };
+    let frame = child(t, "FRAME-REF")
+        .and_then(|f| attr(f, "ID-REF"))
+        .ok_or_else(|| bad(format!("frame triggering {tid} has no FRAME-REF")))?;
+    Ok(Some((
+        Triggering {
+            tid: tid.to_owned(),
+            id: u32::from(id),
+            extended: false,
+            fd: false,
+            frame: frame.to_owned(),
+            cycle_time: cycle_time(t, tid)?,
+        },
+        id,
+        model,
+    )))
+}
+
+/// A FlexRay frame triggering and its `ABSOLUTELY-SCHEDULED-TIMING`s;
+/// `None` for one without any.
+fn flexray_triggering(t: Node<'_, '_>) -> Result<Option<(Triggering, Vec<SlotTiming>)>> {
+    let tid = attr(t, "ID").unwrap_or_default();
+    let mut timings = Vec::new();
+    for timing in children(t, "TIMINGS").flat_map(|n| children(n, "ABSOLUTELY-SCHEDULED-TIMING")) {
+        let field = |name: &str, default: Option<u64>| -> Result<u64> {
+            match child(timing, name) {
+                Some(n) => integer(text(n)).ok_or_else(|| {
+                    bad(format!(
+                        "frame triggering {tid}: {name} {:?} is not a number",
+                        text(n)
+                    ))
+                }),
+                None => default
+                    .ok_or_else(|| bad(format!("frame triggering {tid}: a timing has no {name}"))),
+            }
+        };
+        let slot = field("SLOT-ID", None)?;
+        let base = field("BASE-CYCLE", Some(0))?;
+        let repetition = field("CYCLE-REPETITION", Some(1))?;
+        if !(1..=2047).contains(&slot) {
+            return Err(bad(format!(
+                "frame triggering {tid}: slot {slot} is not in 1..=2047"
+            )));
+        }
+        // FlexRay 2.1 allows powers of two up to 64; FlexRay 3.0 adds 5, 10,
+        // 20, 40 and 50. The simulated cycle counter always runs 0..=63.
+        if !matches!(
+            repetition,
+            1 | 2 | 4 | 5 | 8 | 10 | 16 | 20 | 32 | 40 | 50 | 64
+        ) {
+            return Err(bad(format!(
+                "frame triggering {tid}: cycle repetition {repetition} is not a FlexRay cycle \
+                 repetition (1, 2, 4, 5, 8, 10, 16, 20, 32, 40, 50 or 64)"
+            )));
+        }
+        if base >= repetition {
+            return Err(bad(format!(
+                "frame triggering {tid}: base cycle {base} is not below the cycle repetition \
+                 {repetition}"
+            )));
+        }
+        timings.push(SlotTiming {
+            slot: slot as u16,
+            base_cycle: base as u8,
+            repetition: repetition as u8,
+        });
+    }
+    if timings.is_empty() {
+        return Ok(None);
+    }
+    let frame = child(t, "FRAME-REF")
+        .and_then(|f| attr(f, "ID-REF"))
+        .ok_or_else(|| bad(format!("frame triggering {tid} has no FRAME-REF")))?;
+    Ok(Some((
+        Triggering {
+            tid: tid.to_owned(),
+            id: u32::from(timings[0].slot),
+            extended: false,
+            fd: false,
+            frame: frame.to_owned(),
+            cycle_time: None,
+        },
+        timings,
+    )))
+}
+
+/// A FlexRay cluster's cycle length: `CYCLE` (microseconds), else
+/// `MACRO-PER-CYCLE` times `MACROTICK` (microseconds); `None` without them.
+fn flexray_cycle(cluster: Node<'_, '_>) -> Result<Option<Duration>> {
+    let us = |name: &str| -> Result<Option<f64>> {
+        child(cluster, name)
+            .map(|n| number(n, &format!("FlexRay cluster {name}")))
+            .transpose()
+    };
+    let micros = match us("CYCLE")? {
+        Some(c) => Some(c),
+        None => match (us("MACRO-PER-CYCLE")?, us("MACROTICK")?) {
+            (Some(n), Some(t)) => Some(n * t),
+            _ => None,
+        },
+    };
+    match micros {
+        Some(m) if m.is_finite() && m > 0.0 => {
+            Ok(Some(Duration::from_nanos((m * 1e3).round() as u64)))
+        }
+        Some(m) => Err(bad(format!(
+            "FlexRay cluster: cycle length {m} us is not positive"
+        ))),
+        None => Ok(None),
+    }
+}
+
+/// The `SCHEDULE-TABLE`s of a LIN channel and its cluster, with their IDs.
+/// An entry is an element of the table with a `DELAY` child; its
+/// `FRAME-TRIGGERING-REF` must be one of the channel's (`frames`: frame
+/// names by triggering ID).
+fn schedule_tables(
+    channel: Node<'_, '_>,
+    cluster: Option<Node<'_, '_>>,
+    frames: &HashMap<String, String>,
+) -> Result<Vec<(String, ScheduleTable)>> {
+    let mut out = Vec::new();
+    let nodes = channel
+        .descendants()
+        .chain(cluster.into_iter().flat_map(|c| c.descendants()))
+        .filter(|n| n.is_element() && n.tag_name().name() == "SCHEDULE-TABLE");
+    for table in nodes {
+        let id = attr(table, "ID").unwrap_or_default().to_owned();
+        let name = child(table, "SHORT-NAME")
+            .map(text)
+            .filter(|n| !n.is_empty())
+            .unwrap_or(&id)
+            .to_owned();
+        let mut entries = Vec::new();
+        for entry in table.descendants().filter(|n| n.is_element()) {
+            let Some(delay) = child(entry, "DELAY") else {
+                continue;
+            };
+            let s = text(delay);
+            let delay = xs_duration(s).ok_or_else(|| {
+                bad(format!(
+                    "schedule table {name}: delay {s:?} is not a duration such as PT0.01S"
+                ))
+            })?;
+            let frame = match child(entry, "FRAME-TRIGGERING-REF").and_then(|r| attr(r, "ID-REF")) {
+                None => None,
+                Some(r) => Some(frames.get(r).cloned().ok_or_else(|| {
+                    bad(format!(
+                        "schedule table {name} refers to frame triggering {r}, which is not \
+                         a LIN frame triggering of the channel"
+                    ))
+                })?),
+            };
+            entries.push(ScheduleEntry { frame, delay });
+        }
+        out.push((id, ScheduleTable { name, entries }));
+    }
+    Ok(out)
 }
 
 /// The cycle time of a frame triggering: the `VALUE` of the

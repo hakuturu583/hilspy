@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use super::*;
 use crate::dbc::{DecodeOptions, EncodeOptions, Value};
+use crate::message::FlexRayChannel;
 
 fn data(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -745,4 +746,304 @@ fn unsupported_multiplexing_is_reported() {
         std::fs::remove_file(path).unwrap();
         assert!(e.contains(expected), "{name}: {e}");
     }
+}
+
+fn lin_flexray() -> String {
+    std::fs::read_to_string(data("lin_flexray.xml")).unwrap()
+}
+
+fn lin(channel: &ChannelDescription) -> &Lin {
+    match &channel.bus {
+        Bus::Lin(l) => l,
+        other => panic!("not LIN: {other:?}"),
+    }
+}
+
+#[test]
+fn lin_frames_and_checksum_models() {
+    let ch = load_channel(data("lin_flexray.xml"), Some("Lin"), None).unwrap();
+    let l = lin(&ch);
+    let frames: Vec<_> = l
+        .frames
+        .iter()
+        .map(|f| (f.name.as_str(), f.id, f.checksum))
+        .collect();
+    assert_eq!(
+        frames,
+        [
+            ("LightCmd", 0x10, LinChecksum::Enhanced), // LIN 2.1 default
+            ("LightStatus", 0x11, LinChecksum::Classic), // CHECKSUM-TYPE
+            ("MasterReq", 0x3C, LinChecksum::Classic), // diagnostic
+        ]
+    );
+    let cmd = ch.database.message_by_id(0x10, false).unwrap();
+    assert_eq!(
+        (cmd.name.as_str(), cmd.size, cmd.fd),
+        ("LightCmd", 2, false)
+    );
+    assert_eq!(cmd.transmitters, ["Bcm"]);
+    assert_eq!(cmd.receivers, ["Lamp"]);
+    assert_eq!(cmd.signal("Brightness").unwrap().factor, 0.5);
+    // The CAN-only entry point gives the same database.
+    let db = load(data("lin_flexray.xml"), Some("CH_LIN")).unwrap();
+    assert_eq!(db.messages, ch.database.messages);
+    // LIN 1.x clusters default to classic.
+    let path = variant(
+        "lin13",
+        &lin_flexray().replace(
+            "<fx:PROTOCOL-VERSION>2.1</fx:PROTOCOL-VERSION>\n        <fx:CHANNEL-REFS>\n          <fx:CHANNEL-REF ID-REF=\"CH_LIN\"/>",
+            "<fx:PROTOCOL-VERSION>1.3</fx:PROTOCOL-VERSION>\n        <fx:CHANNEL-REFS>\n          <fx:CHANNEL-REF ID-REF=\"CH_LIN\"/>",
+        ),
+    );
+    let ch = load_channel(&path, Some("Lin"), None).unwrap();
+    assert_eq!(lin(&ch).frames[0].checksum, LinChecksum::Classic);
+}
+
+#[test]
+fn lin_schedule_tables_give_cycle_times() {
+    let ms = Duration::from_millis;
+    let ch = load_channel(data("lin_flexray.xml"), Some("Lin"), None).unwrap();
+    let tables = &lin(&ch).schedule_tables;
+    assert_eq!(tables.len(), 2);
+    let (normal, diag) = (&tables[0], &tables[1]);
+    assert_eq!((normal.name.as_str(), normal.period()), ("Normal", ms(40)));
+    assert_eq!(normal.entries[1].frame.as_deref(), Some("LightStatus"));
+    assert_eq!((diag.name.as_str(), diag.period()), ("Diagnostic", ms(20)));
+    assert_eq!(diag.entries[1].frame, None, "a free-format entry");
+    // LightCmd is twice in Normal's 40 ms; each frame from the first table
+    // that sends it.
+    let cycle =
+        |ch: &ChannelDescription, name: &str| ch.database.message_by_name(name).unwrap().cycle_time;
+    assert_eq!(cycle(&ch, "LightCmd"), Some(ms(20)));
+    assert_eq!(cycle(&ch, "LightStatus"), Some(ms(40)));
+    assert_eq!(cycle(&ch, "MasterReq"), Some(ms(20)));
+    // A chosen table (by name or ID) gives the cycle times alone.
+    let d = load_channel(data("lin_flexray.xml"), Some("Lin"), Some("Diagnostic")).unwrap();
+    assert_eq!(cycle(&d, "MasterReq"), Some(ms(20)));
+    assert_eq!(cycle(&d, "LightCmd"), None);
+    let n = load_channel(data("lin_flexray.xml"), Some("Lin"), Some("ST_Normal")).unwrap();
+    assert_eq!(cycle(&n, "MasterReq"), None);
+    assert_eq!(cycle(&n, "LightCmd"), Some(ms(20)));
+    let e = load_channel(data("lin_flexray.xml"), Some("Lin"), Some("Sleep"))
+        .unwrap_err()
+        .to_string();
+    assert!(
+        e.contains("no schedule table \"Sleep\"") && e.contains("tables: Normal, Diagnostic"),
+        "{e}"
+    );
+    let e = load_channel(data("network.xml"), Some("Body"), Some("Normal"))
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("not a LIN channel"), "{e}");
+}
+
+#[test]
+fn lin_errors_are_reported() {
+    let text = lin_flexray();
+    let cases = [
+        (
+            text.replace(
+                "<fx:IDENTIFIER-VALUE>16</fx:IDENTIFIER-VALUE>",
+                "<fx:IDENTIFIER-VALUE>64</fx:IDENTIFIER-VALUE>",
+            ),
+            "not a LIN frame identifier (0..=63)",
+        ),
+        (
+            text.replace(
+                "<lin:CHECKSUM-TYPE>CLASSIC</lin:CHECKSUM-TYPE>",
+                "<lin:CHECKSUM-TYPE>FANCY</lin:CHECKSUM-TYPE>",
+            ),
+            "\"FANCY\" is not CLASSIC or ENHANCED",
+        ),
+        (
+            text.replacen(
+                "<lin:DELAY>PT0.01S</lin:DELAY>",
+                "<lin:DELAY>10</lin:DELAY>",
+                1,
+            ),
+            "schedule table Normal: delay \"10\" is not a duration",
+        ),
+        (
+            text.replace(
+                "<fx:FRAME-TRIGGERING-REF ID-REF=\"FT_LightStatus\"/>\n              </lin:SCHEDULE",
+                "<fx:FRAME-TRIGGERING-REF ID-REF=\"FT_Nope\"/>\n              </lin:SCHEDULE",
+            ),
+            "refers to frame triggering FT_Nope",
+        ),
+        (
+            text.replace(
+                "<fx:BYTE-LENGTH>8</fx:BYTE-LENGTH>\n        <fx:FRAME-TYPE>",
+                "<fx:BYTE-LENGTH>9</fx:BYTE-LENGTH>\n        <fx:FRAME-TYPE>",
+            ),
+            "LIN frame MasterReq is 9 bytes (at most 8)",
+        ),
+    ];
+    for (i, (text, expected)) in cases.into_iter().enumerate() {
+        let path = variant(&format!("lin-error-{i}"), &text);
+        let e = load_channel(&path, Some("Lin"), None)
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains(expected), "{expected}: {e}");
+    }
+}
+
+fn flexray(channel: &ChannelDescription) -> &FlexRay {
+    match &channel.bus {
+        Bus::FlexRay(f) => f,
+        other => panic!("not FlexRay: {other:?}"),
+    }
+}
+
+#[test]
+fn flexray_slots_cycles_and_channels() {
+    let ms = Duration::from_millis;
+    let a = load_channel(data("lin_flexray.xml"), Some("FlexRayA"), None).unwrap();
+    let fa = flexray(&a);
+    assert_eq!((fa.cycle, fa.channel), (Some(ms(5)), FlexRayChannel::A));
+    let timing = |slot, base_cycle, repetition| SlotTiming {
+        slot,
+        base_cycle,
+        repetition,
+    };
+    let frames: Vec<_> = fa
+        .frames
+        .iter()
+        .map(|f| (f.name.as_str(), f.timings.clone()))
+        .collect();
+    assert_eq!(
+        frames,
+        [
+            ("BrakeFr", vec![timing(3, 0, 1)]),
+            ("YawFr", vec![timing(7, 1, 4)]),
+            ("DiagFr", vec![timing(7, 3, 4)]),
+        ]
+    );
+    // Slot multiplexing: slot 7 is YawFr in cycles 1, 5, ... and DiagFr in
+    // 3, 7, ...; nothing in the even cycles.
+    let in_slot = |slot, cycle| {
+        fa.frames
+            .iter()
+            .find(|f| f.matches(slot, cycle))
+            .map(|f| f.name.as_str())
+    };
+    assert_eq!(in_slot(7, 1), Some("YawFr"));
+    assert_eq!(in_slot(7, 61), Some("YawFr"));
+    assert_eq!(in_slot(7, 3), Some("DiagFr"));
+    assert_eq!(in_slot(7, 2), None);
+    assert_eq!(in_slot(3, 42), Some("BrakeFr"));
+    assert_eq!(in_slot(4, 0), None);
+    // Cycle times: cycle length times repetition.
+    let cycle = |name: &str| a.database.message_by_name(name).unwrap().cycle_time;
+    assert_eq!(cycle("BrakeFr"), Some(ms(5)));
+    assert_eq!(cycle("YawFr"), Some(ms(20)));
+    assert_eq!(cycle("DiagFr"), Some(ms(20)));
+    // Slots repeat, so the database does not index identifiers.
+    let diag = a.database.message_by_name("DiagFr").unwrap();
+    assert_eq!((diag.id, diag.size, diag.fd), (7, 3, false));
+    assert!(a.database.message_by_id(7, false).is_err());
+    assert_eq!(diag.transmitters, ["Bcm"]);
+    assert_eq!(diag.receivers, ["Esc"]);
+    let b = load_channel(data("lin_flexray.xml"), Some("FlexRayB"), None).unwrap();
+    assert_eq!(flexray(&b).channel, FlexRayChannel::B);
+    assert_eq!(b.database.messages.len(), 1);
+    // Without CYCLE, MACRO-PER-CYCLE x MACROTICK; without both, none.
+    let text = lin_flexray();
+    let no_cycle = text.replace("<flexray:CYCLE>5000</flexray:CYCLE>", "");
+    let path = variant("fr-macro", &no_cycle);
+    let ch = load_channel(&path, Some("FlexRayA"), None).unwrap();
+    assert_eq!(flexray(&ch).cycle, Some(ms(5)));
+    let path = variant(
+        "fr-none",
+        &no_cycle.replace("<flexray:MACROTICK>1</flexray:MACROTICK>", ""),
+    );
+    let ch = load_channel(&path, Some("FlexRayA"), None).unwrap();
+    assert_eq!(flexray(&ch).cycle, None);
+    assert_eq!(
+        ch.database.message_by_name("YawFr").unwrap().cycle_time,
+        None
+    );
+    // Without FLEXRAY-CHANNEL-NAME, both channels.
+    let path = variant(
+        "fr-ab",
+        &text.replace(
+            "<flexray:FLEXRAY-CHANNEL-NAME>A</flexray:FLEXRAY-CHANNEL-NAME>",
+            "",
+        ),
+    );
+    let ch = load_channel(&path, Some("FlexRayA"), None).unwrap();
+    assert_eq!(flexray(&ch).channel, FlexRayChannel::AB);
+}
+
+#[test]
+fn flexray_3_cycle_repetitions_are_accepted() {
+    let text = lin_flexray();
+    let yaw = "<fx:CYCLE-REPETITION>4</fx:CYCLE-REPETITION>";
+    for repetition in [5, 10, 20, 40, 50] {
+        let path = variant(
+            &format!("fr3-{repetition}"),
+            &text.replacen(
+                yaw,
+                &format!("<fx:CYCLE-REPETITION>{repetition}</fx:CYCLE-REPETITION>"),
+                1,
+            ),
+        );
+        let ch = load_channel(&path, Some("FlexRayA"), None).unwrap();
+        assert!(ch.database.message_by_name("YawFr").is_ok(), "{repetition}");
+    }
+}
+
+#[test]
+fn flexray_errors_are_reported() {
+    let text = lin_flexray();
+    let yaw = "<fx:SLOT-ID>7</fx:SLOT-ID>\n                <fx:BASE-CYCLE>1</fx:BASE-CYCLE>\n                <fx:CYCLE-REPETITION>4</fx:CYCLE-REPETITION>";
+    assert!(text.contains(yaw));
+    let cases = [
+        (
+            text.replace(yaw, "<fx:SLOT-ID>0</fx:SLOT-ID>"),
+            "slot 0 is not in 1..=2047",
+        ),
+        (
+            text.replace(
+                yaw,
+                "<fx:SLOT-ID>7</fx:SLOT-ID><fx:CYCLE-REPETITION>3</fx:CYCLE-REPETITION>",
+            ),
+            "cycle repetition 3 is not a FlexRay cycle repetition",
+        ),
+        (
+            text.replace(
+                yaw,
+                "<fx:SLOT-ID>7</fx:SLOT-ID><fx:BASE-CYCLE>4</fx:BASE-CYCLE><fx:CYCLE-REPETITION>4</fx:CYCLE-REPETITION>",
+            ),
+            "base cycle 4 is not below the cycle repetition 4",
+        ),
+        (
+            text.replace(yaw, "<fx:BASE-CYCLE>1</fx:BASE-CYCLE>"),
+            "a timing has no SLOT-ID",
+        ),
+        (
+            text.replace(
+                "<flexray:FLEXRAY-CHANNEL-NAME>A</flexray:FLEXRAY-CHANNEL-NAME>",
+                "<flexray:FLEXRAY-CHANNEL-NAME>C</flexray:FLEXRAY-CHANNEL-NAME>",
+            ),
+            "FLEXRAY-CHANNEL-NAME \"C\" is not A or B",
+        ),
+        (
+            text.replace(
+                "<flexray:CYCLE>5000</flexray:CYCLE>",
+                "<flexray:CYCLE>0</flexray:CYCLE>",
+            ),
+            "cycle length 0 us is not positive",
+        ),
+    ];
+    for (i, (text, expected)) in cases.into_iter().enumerate() {
+        let path = variant(&format!("fr-error-{i}"), &text);
+        let e = load_channel(&path, Some("FlexRayA"), None)
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains(expected), "{expected}: {e}");
+    }
+    let e = load_channel(data("lin_flexray.xml"), Some("FlexRayA"), Some("Normal"))
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("not a LIN channel"), "{e}");
 }
