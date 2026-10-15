@@ -7,7 +7,8 @@
 //! `tow` and `wnc` always present.
 //!
 //! Encoding takes `PVTGeodetic` and `AttEuler` messages (the fields of
-//! [`crate::sbf::encode`]); `tow`/`wnc` default to the current GPS time.
+//! [`crate::sbf::encode`]); `tow`/`wnc` default to the GPS time of the
+//! message (its channel's virtual clock), else of now.
 
 use std::collections::HashMap;
 
@@ -193,7 +194,8 @@ fn encode_att_euler(mut f: Fields, wnc: u16, tow: u32) -> Result<Vec<u8>> {
 
 impl Codec for Sbf {
     fn encode(&mut self, message: &Message) -> Result<Vec<Packet>> {
-        let (wnc, tow) = gps_time(now_timestamp());
+        // The message's time (a virtual clock's), else now.
+        let (wnc, tow) = gps_time(message.timestamp().unwrap_or_else(now_timestamp));
         let fields = Fields(message.fields.clone());
         let data = match message.name.as_deref().unwrap_or_default() {
             "PVTGeodetic" => encode_pvt_geodetic(fields, wnc, tow)?,

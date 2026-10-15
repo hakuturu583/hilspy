@@ -3,7 +3,7 @@
 use std::time::{Duration, Instant};
 
 use hilspy_core::{
-    Channel as CoreChannel, Error as CoreError, Periodic as CorePeriodic,
+    Channel as CoreChannel, Clock as CoreClock, Error as CoreError, Periodic as CorePeriodic,
     Subscription as CoreSubscription,
 };
 use pyo3::exceptions::{PyStopIteration, PyValueError};
@@ -30,16 +30,18 @@ fn duration(seconds: f64, what: &str) -> PyResult<Duration> {
 /// `dbc:FILE` (options `strict`, `scaling`, `decode_choices`), `sbf`.
 /// Keyword arguments configure the codec.
 #[pyfunction(name = "_open")]
-#[pyo3(signature = (url, codec = String::from("raw"), **options))]
+#[pyo3(signature = (url, codec = String::from("raw"), *, clock = None, **options))]
 pub(crate) fn open(
     py: Python<'_>,
     url: String,
     codec: String,
+    clock: Option<PyRef<'_, Clock>>,
     options: Option<&Bound<'_, PyDict>>,
 ) -> PyResult<Channel> {
     let options = options_from_py(options)?;
+    let clock = clock.map(|c| c.inner.clone());
     let inner = py
-        .detach(|| CoreChannel::open(&url, &codec, options))
+        .detach(|| CoreChannel::open_on(&url, &codec, options, clock))
         .py()?;
     Ok(Channel { inner, url, codec })
 }
@@ -301,6 +303,57 @@ impl Periodic {
             t.period().as_secs_f64(),
             t.sent_count(),
             if t.is_running() { "True" } else { "False" }
+        )
+    }
+}
+
+/// Simulated time for synchronous simulation.
+///
+/// Channels opened with `clock=` run on it: `every()` sends and the paced
+/// packets of a message happen inside `advance()`, in time order, and
+/// messages are stamped with its time.
+#[pyclass(module = "hilspy", name = "Clock", frozen)]
+pub(crate) struct Clock {
+    pub(crate) inner: CoreClock,
+}
+
+#[pymethods]
+impl Clock {
+    #[new]
+    #[pyo3(signature = (start = 0.0))]
+    fn new(start: f64) -> PyResult<Self> {
+        Ok(Self {
+            inner: CoreClock::new(start).py()?,
+        })
+    }
+
+    /// The current time, seconds.
+    #[getter]
+    fn now(&self) -> f64 {
+        self.inner.now()
+    }
+
+    /// When the next scheduled send is due, or None.
+    #[getter]
+    fn next_due(&self) -> Option<f64> {
+        self.inner.next_due()
+    }
+
+    /// Advance by `dt` seconds, sending everything due on the way.
+    fn advance(&self, py: Python<'_>, dt: f64) -> PyResult<()> {
+        py.detach(|| self.inner.advance(dt)).py()
+    }
+
+    /// Advance to `t` seconds, sending everything due on the way.
+    fn advance_to(&self, py: Python<'_>, t: f64) -> PyResult<()> {
+        py.detach(|| self.inner.advance_to(t)).py()
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "Clock(now={}, pending={})",
+            self.inner.now(),
+            self.inner.pending()
         )
     }
 }

@@ -18,7 +18,7 @@ from collections.abc import AsyncIterator, Callable, Iterator, Mapping
 from types import TracebackType
 from typing import Any
 
-from hilspy._hilspy import Error, Message, Periodic, _Channel, _open, _Subscription
+from hilspy._hilspy import Clock, Error, Message, Periodic, _Channel, _open, _Subscription
 
 Value = Any
 #: How long a blocking wait sleeps between checks for Ctrl-C.
@@ -336,7 +336,7 @@ class merge:
         await asyncio.to_thread(self.close)
 
 
-def open(url: str, codec: str = "raw", **options: Value) -> Channel:
+def open(url: str, codec: str = "raw", *, clock: Clock | None = None, **options: Value) -> Channel:
     """Open a channel: the transport `url` with the codec `codec`.
 
     Transports: ``can://vcan0`` (Linux SocketCAN; ``?fd``, ``?echo``,
@@ -347,5 +347,9 @@ def open(url: str, codec: str = "raw", **options: Value) -> Channel:
     (Hesai/Velodyne data packets <-> ``scan`` point clouds; options
     ``frame``, ``phase``, ``rpm``, ``return_mode``, ``pace``, ``profiles``). Keyword
     arguments configure the codec.
+
+    With ``clock=`` (a :class:`Clock`) the channel runs on simulated time:
+    ``every()`` sends and the paced packets of a message happen inside
+    ``clock.advance()``, and messages are stamped with the clock's time.
     """
-    return Channel(_open(url, codec, **options))
+    return Channel(_open(url, codec, clock=clock, **options))

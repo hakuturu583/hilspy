@@ -54,6 +54,24 @@ received concurrently. A subscription is its channel's only consumer
 Sends from asyncio (`asend`) run in a worker thread because a transport may
 block (a full CAN queue, TCP back-pressure).
 
+## Virtual clock
+
+`Clock` (`src/clock.rs`) is a priority queue of work keyed by `(due ns,
+sequence)`. `advance_to(t)` pops what is due up to `t` in order, moving `now`
+to each due time before running it, so work can schedule more work within
+the same step; a lock keeps steps from several threads apart. A channel opened
+on a clock:
+
+* schedules `every()` as self-rescheduling ticks (first at once) instead of
+  a thread; stop, update and period changes apply at the next tick;
+* sends a paced message's first packet at once and schedules the rest at
+  their timestamp offsets (whole microseconds), so a revolution is spread
+  over the steps that cover it; a failed deferred send is reported by the
+  next send;
+* stamps messages to encode with the clock's time (codecs use
+  `Message::timestamp` for the times they write) and received packets with
+  the time of reception.
+
 ## Pluggability
 
 `transport::register(scheme, factory)` and `codec::register(name, factory)`

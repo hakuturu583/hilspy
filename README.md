@@ -59,7 +59,7 @@ The whole public API:
 
 | Name | |
 | --- | --- |
-| `hilspy.open(url, codec="raw", **codec_options) -> Channel` | open a channel |
+| `hilspy.open(url, codec="raw", *, clock=None, **codec_options) -> Channel` | open a channel (on a virtual clock with `clock=`) |
 | `Channel.send(message)` / `send(name, fields)` | encode and send |
 | `Channel.recv(timeout=None) -> Message \| None` | next message (iterate the channel for all) |
 | `Channel.every(period, message_or_name, fields=None, *, duration=None) -> Periodic` | cyclic send from a Rust thread; `update()`, `stop()`, `period`, `sent_count` |
@@ -67,8 +67,41 @@ The whole public API:
 | `await Channel.asend(...)`, `await Channel.arecv(timeout=None)`, `async for msg in channel` | asyncio |
 | `hilspy.merge(*channels)` | `(channel, message)` from several buses as they arrive (`for` / `async for`) |
 | `hilspy.Message(name=None, fields=None, *, data=None, id=None, extended=None, fd=False)` | `.name`, `.fields`, `msg["field"]`, `.data`, `.id`, `.timestamp` |
+| `hilspy.Clock(start=0.0)` | simulated time: `advance(dt)`, `advance_to(t)`, `now`, `next_due` |
 | `hilspy.register_transport(scheme, factory)` / `register_codec(name, factory)` | plugins |
 | `hilspy.Error` | bad URL/codec/option, encode/decode failure, closed channel |
+
+### Synchronous simulation (virtual clock)
+
+Devices that do I/O on a fixed period (cyclic CAN frames, a GNSS receiver at
+10 Hz, a LiDAR streaming packets through each revolution) can run on
+simulated time instead of the wall clock. Open their channels with a shared
+`hilspy.Clock`; every send then happens inside `clock.advance(dt)`, in time
+order, when the simulation steps past it:
+
+```python
+clock = hilspy.Clock(start=carla_world_time)
+ecu = hilspy.open("can://vcan0", "dbc:vehicle.dbc", clock=clock)
+lidar = hilspy.open("udp://192.168.1.100:2368", "lidar:pandar_xt32", clock=clock)
+speed = ecu.every(0.01, "VehicleSpeed", {"Speed": 0.0, "Gear": "D"})
+scans = lidar.every(0.1, "scan", first_scan)
+
+while running:
+    world.tick()  # e.g. CARLA synchronous mode, 50 ms
+    speed.update("VehicleSpeed", {"Speed": ego_speed(), "Gear": "D"})
+    scans.update("scan", raycast_points())
+    clock.advance(0.05)  # 5 speed frames, half a revolution of packets
+```
+
+On a clock:
+
+- `every()` sends at once, then each period as the clock passes it (no
+  thread, nothing between steps).
+- A paced message's packets (a LiDAR revolution) go out as the clock reaches
+  their times, so a 50 ms step sends the packets of 50 ms.
+- Messages are stamped with the clock's time. Codecs write that time (the
+  SBF TOW, a LiDAR scan's timestamps), and received messages carry the time
+  they arrived at.
 
 ### asyncio and several buses at once
 

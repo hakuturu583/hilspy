@@ -22,13 +22,31 @@ Several buses at once, with asyncio::
 
 or per channel: ``await ch.arecv()``, ``await ch.asend(...)``,
 ``async for msg in ch``.
+
+Synchronous simulation on a virtual clock (periodic sends happen as the
+simulator steps it)::
+
+    clock = hilspy.Clock()
+    ecu = hilspy.open("can://vcan0", "dbc:vehicle.dbc", clock=clock)
+    ecu.every(0.01, "VehicleSpeed", {"Speed": 0.0})
+    while simulating:
+        clock.advance(0.05)  # sends the 5 frames due in this step
 """
 
 from hilspy._channel import Channel, merge, open
-from hilspy._hilspy import Error, Message, Periodic, __version__, register_codec, register_transport
+from hilspy._hilspy import (
+    Clock,
+    Error,
+    Message,
+    Periodic,
+    __version__,
+    register_codec,
+    register_transport,
+)
 
 __all__ = [
     "Channel",
+    "Clock",
     "Error",
     "Message",
     "Periodic",

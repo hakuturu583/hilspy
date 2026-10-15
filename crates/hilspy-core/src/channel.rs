@@ -7,9 +7,10 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
+use crate::clock::{to_ns, Clock};
 use crate::codec::{self, Codec};
 use crate::error::{Error, Result};
-use crate::message::Message;
+use crate::message::{Message, Packet};
 use crate::transport::{self, Transport};
 use crate::value::Options;
 
@@ -21,14 +22,31 @@ struct Inner {
     sending: Mutex<()>,
     pending: Mutex<VecDeque<Message>>,
     closed: AtomicBool,
+    /// The error of a packet sent on the clock after its message's send
+    /// returned, reported by the next send.
+    deferred_error: Mutex<Option<Error>>,
+    /// Virtual time the channel runs on, if any.
+    clock: Option<Clock>,
 }
 
 impl Inner {
-    fn send(&self, message: &Message) -> Result<()> {
+    fn send(self: &Arc<Self>, message: &Message) -> Result<()> {
         if self.closed.load(Ordering::Acquire) {
             return Err(Error::Closed);
         }
         let _sending = self.sending.lock().unwrap();
+        // On a clock, a message to encode is stamped with its time, which
+        // codecs use for the times they write (SBF TOW, a LiDAR scan).
+        let stamped;
+        let message = match (&self.clock, &message.name) {
+            (Some(clock), Some(_)) => {
+                let mut m = message.clone();
+                m.packet.get_or_insert_with(Packet::default).timestamp = Some(clock.now());
+                stamped = m;
+                &stamped
+            }
+            _ => message,
+        };
         let (packets, paced) = match (&message.name, &message.packet) {
             (None, Some(p)) => (vec![p.clone()], false),
             (None, None) => {
@@ -39,8 +57,43 @@ impl Inner {
                 (codec.encode(message)?, codec.paced())
             }
         };
-        let start = Instant::now();
         let first = packets.first().and_then(|p| p.timestamp);
+        if let (Some(clock), true) = (&self.clock, paced) {
+            // Later packets are sent as the clock passes their times.
+            let now = clock.now_ns();
+            for p in packets {
+                let delay = match (first, p.timestamp) {
+                    // Whole microseconds: the difference of two absolute
+                    // Unix times in f64 is only good to a fraction of one.
+                    (Some(t0), Some(t)) if (t - t0).is_finite() => {
+                        to_ns(((t - t0).clamp(0.0, 3600.0) * 1e6).round() * 1e-6)?
+                    }
+                    _ => 0,
+                };
+                if delay == 0 {
+                    self.transport.send(&p)?;
+                } else {
+                    let inner = Arc::clone(self);
+                    clock.schedule(
+                        now + delay,
+                        Box::new(move |_: &Clock, _| {
+                            if !inner.closed.load(Ordering::Acquire) {
+                                // A failure has no caller to report to;
+                                // it is recorded for the next send.
+                                if let Err(e) = inner.transport.send(&p) {
+                                    *inner.deferred_error.lock().unwrap() = Some(e);
+                                }
+                            }
+                        }),
+                    );
+                }
+            }
+            return match self.deferred_error.lock().unwrap().take() {
+                Some(e) => Err(e),
+                None => Ok(()),
+            };
+        }
+        let start = Instant::now();
         for p in &packets {
             if let (true, Some(t0), Some(t)) = (paced, first, p.timestamp) {
                 let delay = t - t0;
@@ -81,12 +134,25 @@ impl Channel {
     /// Open the transport `url` with the codec `codec` (`raw`, `sbf`,
     /// `dbc:FILE`, ...) configured by `options`.
     pub fn open(url: &str, codec: &str, options: Options) -> Result<Self> {
+        Self::open_on(url, codec, options, None)
+    }
+
+    /// [`Channel::open`] on a virtual clock (see [`crate::clock`]).
+    pub fn open_on(url: &str, codec: &str, options: Options, clock: Option<Clock>) -> Result<Self> {
         let codec = codec::open(codec, options)?;
         let transport = transport::open(url)?;
-        Ok(Self::new(transport, codec))
+        Ok(Self::with_clock(transport, codec, clock))
     }
 
     pub fn new(transport: Arc<dyn Transport>, codec: Box<dyn Codec>) -> Self {
+        Self::with_clock(transport, codec, None)
+    }
+
+    pub fn with_clock(
+        transport: Arc<dyn Transport>,
+        codec: Box<dyn Codec>,
+        clock: Option<Clock>,
+    ) -> Self {
         Self {
             inner: Arc::new(Inner {
                 transport,
@@ -94,8 +160,15 @@ impl Channel {
                 sending: Mutex::new(()),
                 pending: Mutex::new(VecDeque::new()),
                 closed: AtomicBool::new(false),
+                deferred_error: Mutex::new(None),
+                clock,
             }),
         }
+    }
+
+    /// The virtual clock the channel runs on.
+    pub fn clock(&self) -> Option<&Clock> {
+        self.inner.clock.as_ref()
     }
 
     /// Encode and send a message (a nameless one sends its packet as is).
@@ -118,9 +191,12 @@ impl Channel {
                 return Err(Error::Closed);
             }
             let remaining = deadline.map(|d| d.saturating_duration_since(Instant::now()));
-            let Some(packet) = inner.transport.recv(remaining)? else {
+            let Some(mut packet) = inner.transport.recv(remaining)? else {
                 return Ok(None);
             };
+            if let Some(clock) = &inner.clock {
+                packet.timestamp = Some(clock.now());
+            }
             let mut messages: VecDeque<Message> =
                 inner.codec.lock().unwrap().decode(packet)?.into();
             if let Some(first) = messages.pop_front() {
@@ -135,7 +211,8 @@ impl Channel {
 
     /// Send `message` every `period` from a background thread (for
     /// `duration`, or until stopped). It is encoded on every send, so
-    /// time-stamping codecs stamp each one.
+    /// time-stamping codecs stamp each one. On a virtual clock the sends
+    /// happen as the clock advances past them instead (the first at once).
     pub fn every(
         &self,
         period: Duration,
@@ -285,6 +362,8 @@ struct Shared {
 /// Dropping it stops it.
 pub struct Periodic {
     shared: Arc<Shared>,
+    /// Driven by a virtual clock rather than a thread.
+    on_clock: bool,
     /// Taken by the first `stop`, which joins it outside the lock.
     thread: Mutex<Option<JoinHandle<()>>>,
 }
@@ -313,12 +392,24 @@ impl Periodic {
             }),
             wake: Condvar::new(),
         });
+        if let Some(clock) = inner.clock.clone() {
+            let now = clock.now_ns();
+            let end = duration
+                .map(|d| now.saturating_add(i64::try_from(d.as_nanos()).unwrap_or(i64::MAX)));
+            tick(&clock, inner, Arc::clone(&shared), end, now);
+            return Ok(Self {
+                shared,
+                on_clock: true,
+                thread: Mutex::new(None),
+            });
+        }
         let worker = Arc::clone(&shared);
         let thread = std::thread::Builder::new()
             .name("hilspy-periodic".into())
             .spawn(move || run(inner, worker, duration))?;
         Ok(Self {
             shared,
+            on_clock: false,
             thread: Mutex::new(Some(thread)),
         })
     }
@@ -356,12 +447,13 @@ impl Periodic {
 
     pub fn is_running(&self) -> bool {
         !self.shared.state.lock().unwrap().stopped
-            && self
-                .thread
-                .lock()
-                .unwrap()
-                .as_ref()
-                .is_some_and(|t| !t.is_finished())
+            && (self.on_clock
+                || self
+                    .thread
+                    .lock()
+                    .unwrap()
+                    .as_ref()
+                    .is_some_and(|t| !t.is_finished()))
     }
 
     /// Stop and wait for the sender thread (idempotent). No lock is held
@@ -380,6 +472,30 @@ impl Drop for Periodic {
     fn drop(&mut self) {
         self.stop();
     }
+}
+
+/// One send of a periodic message on a virtual clock, due at `at` (ns); it
+/// schedules the next.
+fn tick(clock: &Clock, inner: Arc<Inner>, shared: Arc<Shared>, end: Option<i64>, at: i64) {
+    let mut state = shared.state.lock().unwrap();
+    if state.stopped || inner.closed.load(Ordering::Acquire) || end.is_some_and(|e| at >= e) {
+        state.stopped = true;
+        return;
+    }
+    let message = state.message.clone();
+    drop(state);
+    let result = inner.send(&message);
+    let mut state = shared.state.lock().unwrap();
+    match result {
+        Ok(()) => state.sent += 1,
+        Err(e) => state.last_error = Some(e.to_string()),
+    }
+    let next = at.saturating_add(i64::try_from(state.period.as_nanos()).unwrap_or(i64::MAX));
+    drop(state);
+    clock.schedule(
+        next,
+        Box::new(move |c: &Clock, due| tick(c, inner, shared, end, due)),
+    );
 }
 
 fn run(inner: Arc<Inner>, shared: Arc<Shared>, duration: Option<Duration>) {
@@ -432,6 +548,122 @@ mod tests {
             "dbc:{}/../../tests/data/vehicle.dbc",
             env!("CARGO_MANIFEST_DIR")
         )
+    }
+
+    fn scan() -> Message {
+        use crate::value::Array;
+        Message::new(
+            "scan",
+            ["x", "y", "z"]
+                .iter()
+                .map(|k| ((*k).to_owned(), Value::Array(Array::F64(vec![10.0]))))
+                .collect(),
+        )
+    }
+
+    fn drain(rx: &Channel) -> Vec<Message> {
+        let mut out = Vec::new();
+        while let Some(m) = rx.recv(Some(Duration::from_millis(20))).unwrap() {
+            out.push(m);
+        }
+        out
+    }
+
+    #[test]
+    fn periodic_sends_follow_a_virtual_clock() {
+        let clock = Clock::new(100.0).unwrap();
+        let tx = Channel::open_on(
+            "mem://t-clock-every",
+            "raw",
+            Options::new(),
+            Some(clock.clone()),
+        )
+        .unwrap();
+        let rx = Channel::open_on(
+            "mem://t-clock-every",
+            "raw",
+            Options::new(),
+            Some(clock.clone()),
+        )
+        .unwrap();
+        let p = tx
+            .every(
+                Duration::from_millis(100),
+                Message::raw(Packet::bytes(vec![1])),
+                Some(Duration::from_millis(500)),
+            )
+            .unwrap();
+        // The first send is immediate; nothing else happens until a step.
+        assert_eq!(p.sent_count(), 1);
+        std::thread::sleep(Duration::from_millis(150));
+        assert_eq!(p.sent_count(), 1);
+        clock.advance(0.35).unwrap();
+        assert_eq!(p.sent_count(), 4);
+        // Received messages carry the virtual time they arrived at.
+        let got = drain(&rx);
+        assert_eq!(got.len(), 4);
+        assert!(got
+            .iter()
+            .all(|m| (m.timestamp().unwrap() - 100.35).abs() < 1e-9));
+        clock.advance(10.0).unwrap();
+        // The duration ends it: sends at 100.0 .. 100.4.
+        assert_eq!(p.sent_count(), 5);
+        assert!(!p.is_running());
+        assert_eq!(clock.pending(), 0);
+    }
+
+    #[test]
+    fn paced_packets_follow_a_virtual_clock() {
+        let clock = Clock::new(0.0).unwrap();
+        let tx = Channel::open_on(
+            "mem://t-clock-pace",
+            "lidar:vlp16",
+            Options::new(),
+            Some(clock.clone()),
+        )
+        .unwrap();
+        let rx = Channel::open("mem://t-clock-pace", "raw", Options::new()).unwrap();
+        let start = Instant::now();
+        tx.send(&scan()).unwrap();
+        assert!(
+            start.elapsed() < Duration::from_millis(50),
+            "does not block"
+        );
+        // 75 packets 1.327 ms apart: the first goes at once, the rest as
+        // the clock passes them.
+        assert_eq!(drain(&rx).len(), 1);
+        clock.advance(0.05).unwrap();
+        assert_eq!(drain(&rx).len(), 37);
+        clock.advance(0.05).unwrap();
+        assert_eq!(drain(&rx).len(), 37);
+        assert_eq!(clock.pending(), 0);
+    }
+
+    #[test]
+    fn codecs_stamp_with_the_clock() {
+        // 2024-01-01T00:00:00Z: GPS week 2295, TOW Monday 00:00:18.
+        let clock = Clock::new(1_704_067_200.0).unwrap();
+        let tx = Channel::open_on(
+            "mem://t-clock-sbf",
+            "sbf",
+            Options::new(),
+            Some(clock.clone()),
+        )
+        .unwrap();
+        let rx = Channel::open("mem://t-clock-sbf", "sbf", Options::new()).unwrap();
+        tx.send(&Message::new("AttEuler", vec![])).unwrap();
+        clock.advance(0.5).unwrap();
+        tx.send(&Message::new("AttEuler", vec![])).unwrap();
+        let got = drain(&rx);
+        assert_eq!(got[0].field("wnc"), Some(&Value::Int(2295)));
+        assert_eq!(
+            got[0].field("tow"),
+            Some(&Value::Int((24 * 3600 + 18) * 1000))
+        );
+        assert_eq!(
+            got[1].field("tow"),
+            Some(&Value::Int((24 * 3600 + 18) * 1000 + 500))
+        );
     }
 
     #[test]

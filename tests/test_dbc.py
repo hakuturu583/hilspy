@@ -99,7 +99,7 @@ def test_matches_cantools(mem: str, reference: Any, name: str) -> None:
     """Payloads agree with cantools for random raw values, both directions."""
     rng = random.Random(name)
     theirs = reference.get_message_by_name(name)
-    raw_values = {"scaling": False, "strict": False, "decode_choices": False}
+    raw_values: dict[str, Any] = {"scaling": False, "strict": False, "decode_choices": False}
     spec = f"dbc:{DBC}"
     encode_bus, decode_bus = f"{mem}-encode", f"{mem}-decode"
     with (
