@@ -51,3 +51,14 @@ def test_message_validation() -> None:
         Message(data="text")  # type: ignore[arg-type]
     with pytest.raises(TypeError):
         Message("x", {"v": object()})  # type: ignore[dict-item]
+
+
+def test_annotations_resolve_at_run_time() -> None:
+    """Documentation and validation tools evaluate the annotations."""
+    import inspect
+    import typing
+
+    for cls in (hilspy.Channel, hilspy.merge):
+        for _, member in inspect.getmembers(cls, inspect.isfunction):
+            typing.get_type_hints(member)  # raises NameError on an unknown name
+    typing.get_type_hints(hilspy.open)
