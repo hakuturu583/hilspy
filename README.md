@@ -77,7 +77,7 @@ The whole public API:
 | `Channel.close()` | also via `with` / `async with` |
 | `await Channel.asend(...)`, `await Channel.arecv(timeout=None)`, `async for msg in channel` | asyncio |
 | `hilspy.merge(*channels)` | `(channel, message)` from several buses as they arrive (`for` / `async for`) |
-| `hilspy.Message(name=None, fields=None, *, data=None, id=None, bus=None, extended=None, fd=False, enhanced=None, checksum=None, cycle=None, channel=None)` | `.name`, `.fields`, `msg["field"]`, `.data`, `.id`, `.timestamp`; frame headers `.bus`, `.extended`, `.fd` (CAN), `.enhanced`, `.checksum` (LIN), `.cycle`, `.channel` (FlexRay); see [Frames](#can-lin-and-flexray-frames) |
+| `hilspy.Message(name=None, fields=None, *, data=None, id=None, bus=None, extended=None, fd=False, enhanced=None, checksum=None, cycle=None, channel=None)` | `.name`, `.fields`, `msg["field"]`, `.data`, `.id`, `.timestamp`; `data` is bytes, a uint8 numpy array (any shape, C order) or memoryview, or a sequence of ints; frame headers `.bus`, `.extended`, `.fd` (CAN), `.enhanced`, `.checksum` (LIN), `.cycle`, `.channel` (FlexRay); see [Frames](#can-lin-and-flexray-frames) |
 | `hilspy.Clock(start=0.0)` | simulated time: `advance(dt)`, `advance_to(t)`, `now`, `next_due` |
 | `hilspy.register_transport(scheme, factory)` / `register_codec(name, factory)` | plugins |
 | `hilspy.Error` | bad URL/codec/option, encode/decode failure, closed channel |
@@ -498,7 +498,7 @@ is one frame, pushed through `appsrc ! videoconvert ! videoscale ! v4l2sink`
 
 ```python
 camera = hilspy.open("v4l2:///dev/video10?width=640&height=480&fps=30")
-camera.send(hilspy.Message(data=rgb.tobytes()))  # an (480, 640, 3) uint8 array
+camera.send(hilspy.Message(data=rgb))  # an (480, 640, 3) uint8 numpy array
 jpeg_camera = hilspy.open("v4l2:///dev/video11?format=jpeg")
 jpeg_camera.send(hilspy.Message(data=open("frame.jpg", "rb").read()))
 ```
@@ -510,7 +510,7 @@ jpeg_camera.send(hilspy.Message(data=open("frame.jpg", "rb").read()))
 | `fps` | nominal rate in the caps (`30`, `30000/1001`); frames go out as sent, so the caller (or `every()`) paces them |
 | `output` | the raw format the device receives (default `YUY2`) |
 
-Raw frames are tightly packed (`ndarray.tobytes()`) or in GStreamer's padded
+Raw frames are tightly packed (a numpy image as is) or in GStreamer's padded
 layout; a frame of another size raises `hilspy.Error`, and so does the send
 after a pipeline error (a device that refuses the format, an image that does
 not decode). The channel receives nothing.

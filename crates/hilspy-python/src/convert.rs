@@ -6,7 +6,9 @@ use hilspy_core::{
 };
 use pyo3::exceptions::{PyKeyError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::{PyBool, PyBytes, PyDict, PyFloat, PyInt, PyList, PyString, PyTuple};
+use pyo3::types::{
+    PyBool, PyByteArray, PyBytes, PyDict, PyFloat, PyInt, PyList, PyString, PyTuple,
+};
 
 const SFF_MASK: u32 = 0x7FF;
 
@@ -210,8 +212,34 @@ fn bytes_from_py(obj: &Bound<'_, PyAny>) -> PyResult<Vec<u8>> {
     if let Ok(b) = obj.cast::<PyBytes>() {
         return Ok(b.as_bytes().to_vec());
     }
+    if let Ok(b) = obj.cast::<PyByteArray>() {
+        return Ok(b.to_vec());
+    }
     if obj.is_instance_of::<PyString>() {
         return Err(PyTypeError::new_err("data must be bytes-like, not str"));
+    }
+    // A numpy array (any shape; an image is its pixels in C order), a
+    // memoryview or an array.array of bytes: one copy through tobytes()
+    // instead of an element at a time.
+    let kind: Option<String> = if !obj.hasattr("tobytes")? {
+        None
+    } else if obj.hasattr("dtype")? {
+        Some(obj.getattr("dtype")?.str()?.to_string())
+    } else if obj.hasattr("format")? {
+        Some(obj.getattr("format")?.extract()?)
+    } else if obj.hasattr("typecode")? {
+        Some(obj.getattr("typecode")?.extract()?)
+    } else {
+        None
+    };
+    if let Some(kind) = kind {
+        if !matches!(kind.as_str(), "uint8" | "B") {
+            return Err(PyTypeError::new_err(format!(
+                "data arrays must hold bytes (uint8), not {kind}"
+            )));
+        }
+        let bytes = obj.call_method0("tobytes")?;
+        return Ok(bytes.cast::<PyBytes>()?.as_bytes().to_vec());
     }
     obj.extract::<Vec<u8>>().map_err(|_| {
         PyTypeError::new_err("data must be bytes-like or a sequence of ints in 0..=255")
