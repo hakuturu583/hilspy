@@ -44,6 +44,12 @@ the `Labels` workflow; checked by `PR Check`):
    test suite runs against them.
 3. **github-release**: the Release `vX` with the wheels and sdist attached.
 4. **publish**: uploads to PyPI with Trusted Publishing.
+5. **dashboard** (`dashboard.yml`, also built and smoke-tested by CI on
+   every PR): the dashboard image for linux/amd64 and linux/arm64, pushed to
+   `ghcr.io/<owner>/hilspy-dashboard` as `X.Y.Z`, `X.Y` and `latest`.
+   `tools/setup_host.py --dashboard` pulls the tag of the checkout's version.
+   *Run workflow* on `Dashboard image` with a version pushes it again from
+   the tag `vX`.
 
 A failed later step is finished with *Run workflow* on `Release` with the
 version (e.g. `0.2.0`): it builds from the tag `v0.2.0` (or the bump commit)
@@ -58,7 +64,10 @@ and every step reuses what already exists, so it never bumps twice.
    under *Settings → Environments*.
 3. If a ruleset blocks direct pushes to the default branch, add a secret
    `GH_PAT` (a token allowed to bypass it) for the bump commit and tag.
-4. Run the `Labels` workflow once if the labels are missing (it also runs
+4. After the first release that pushes the dashboard image, make the
+   `hilspy-dashboard` package public (*Packages → hilspy-dashboard →
+   Package settings → Change visibility*) so `docker pull` needs no login.
+5. Run the `Labels` workflow once if the labels are missing (it also runs
    whenever `.github/labels.json` changes).
 
 ## Installing

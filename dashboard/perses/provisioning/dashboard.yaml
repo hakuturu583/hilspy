@@ -1,0 +1,505 @@
+# The hilspy dashboard (Perses). Metrics: crates/hilspy-core/src/telemetry/mod.rs.
+kind: Dashboard
+metadata:
+  name: hilspy
+  project: hilspy
+spec:
+  display:
+    name: 'hilspy: buses and ECU load'
+  duration: 15m
+  refreshInterval: 10s
+  variables:
+  - kind: ListVariable
+    spec:
+      name: job
+      display:
+        name: Service
+        description: service.name of the process (OTEL_SERVICE_NAME)
+        hidden: false
+      allowAllValue: true
+      allowMultiple: true
+      customAllValue: .*
+      defaultValue: $__all
+      plugin:
+        kind: PrometheusLabelValuesVariable
+        spec:
+          labelName: job
+          matchers:
+          - '{__name__=~"hilspy_.+"}'
+  - kind: ListVariable
+    spec:
+      name: instance
+      display:
+        name: Instance
+        description: host:pid of the process
+        hidden: false
+      allowAllValue: true
+      allowMultiple: true
+      customAllValue: .*
+      defaultValue: $__all
+      plugin:
+        kind: PrometheusLabelValuesVariable
+        spec:
+          labelName: instance
+          matchers:
+          - '{__name__=~"hilspy_.+", job=~"$job"}'
+  - kind: ListVariable
+    spec:
+      name: bus
+      display:
+        name: Bus
+        description: Transport URL without its query
+        hidden: false
+      allowAllValue: true
+      allowMultiple: true
+      customAllValue: .*
+      defaultValue: $__all
+      plugin:
+        kind: PrometheusLabelValuesVariable
+        spec:
+          labelName: bus
+          matchers:
+          - hilspy_packets_total{job=~"$job", instance=~"$instance"}
+  - kind: TextVariable
+    spec:
+      name: bitrate
+      display:
+        name: CAN bit rate (bit/s)
+        hidden: false
+      value: '500000'
+  panels:
+    frames:
+      kind: Panel
+      spec:
+        display:
+          name: Frames per second
+          description: Packets (CAN frames, datagrams, chunks) through each bus's transport.
+        plugin:
+          kind: TimeSeriesChart
+          spec:
+            legend:
+              position: bottom
+              mode: table
+              values:
+              - last
+              - max
+            yAxis:
+              format:
+                unit: packets/sec
+        queries:
+        - kind: TimeSeriesQuery
+          spec:
+            plugin:
+              kind: PrometheusTimeSeriesQuery
+              spec:
+                query: sum by (bus, direction) (rate(hilspy_packets_total{job=~"$job", instance=~"$instance",
+                  bus=~"$bus"}[$__rate_interval]))
+                seriesNameFormat: '{{bus}} {{direction}}'
+    bytes:
+      kind: Panel
+      spec:
+        display:
+          name: Throughput
+          description: Payload bytes per second.
+        plugin:
+          kind: TimeSeriesChart
+          spec:
+            legend:
+              position: bottom
+              mode: table
+              values:
+              - last
+              - max
+            yAxis:
+              format:
+                unit: bytes/sec
+        queries:
+        - kind: TimeSeriesQuery
+          spec:
+            plugin:
+              kind: PrometheusTimeSeriesQuery
+              spec:
+                query: sum by (bus, direction) (rate(hilspy_bytes_total{job=~"$job", instance=~"$instance",
+                  bus=~"$bus"}[$__rate_interval]))
+                seriesNameFormat: '{{bus}} {{direction}}'
+    canload:
+      kind: Panel
+      spec:
+        display:
+          name: CAN bus load
+          description: Nominal frame bits (no stuff bits) sent and received, over the bit rate above.
+            A node sees the frames of others as received ones.
+        plugin:
+          kind: TimeSeriesChart
+          spec:
+            legend:
+              position: bottom
+              mode: table
+              values:
+              - last
+              - max
+            yAxis:
+              format:
+                unit: percent
+              min: 0
+        queries:
+        - kind: TimeSeriesQuery
+          spec:
+            plugin:
+              kind: PrometheusTimeSeriesQuery
+              spec:
+                query: 100 * sum by (bus) (rate(hilspy_can_bits_total{job=~"$job", instance=~"$instance",
+                  bus=~"$bus"}[$__rate_interval])) / $bitrate
+                seriesNameFormat: '{{bus}}'
+    errors:
+      kind: Panel
+      spec:
+        display:
+          name: Errors per second
+          description: Failed sends and receives by kind (encode, decode, io, ...).
+        plugin:
+          kind: TimeSeriesChart
+          spec:
+            legend:
+              position: bottom
+              mode: table
+              values:
+              - last
+              - max
+            yAxis:
+              format:
+                unit: decimal
+        queries:
+        - kind: TimeSeriesQuery
+          spec:
+            plugin:
+              kind: PrometheusTimeSeriesQuery
+              spec:
+                query: sum by (bus, direction, error) (rate(hilspy_errors_total{job=~"$job", instance=~"$instance",
+                  bus=~"$bus"}[$__rate_interval]))
+                seriesNameFormat: '{{bus}} {{direction}} {{error}}'
+    messages:
+      kind: Panel
+      spec:
+        display:
+          name: Message rate
+          description: Messages sent or decoded per second (Hz), by name or CAN identifier.
+        plugin:
+          kind: TimeSeriesChart
+          spec:
+            legend:
+              position: bottom
+              mode: table
+              values:
+              - last
+              - max
+            yAxis:
+              format:
+                unit: decimal
+        queries:
+        - kind: TimeSeriesQuery
+          spec:
+            plugin:
+              kind: PrometheusTimeSeriesQuery
+              spec:
+                query: sum by (bus, direction, message) (rate(hilspy_messages_total{job=~"$job", instance=~"$instance",
+                  bus=~"$bus"}[$__rate_interval]))
+                seriesNameFormat: '{{bus}} {{direction}} {{message}}'
+    lateness:
+      kind: Panel
+      spec:
+        display:
+          name: Periodic lateness (p99)
+          description: How late periodic sends start after their deadline (every() on threads).
+        plugin:
+          kind: TimeSeriesChart
+          spec:
+            legend:
+              position: bottom
+              mode: table
+              values:
+              - last
+              - max
+            yAxis:
+              format:
+                unit: seconds
+        queries:
+        - kind: TimeSeriesQuery
+          spec:
+            plugin:
+              kind: PrometheusTimeSeriesQuery
+              spec:
+                query: histogram_quantile(0.99, sum by (le, bus, message) (rate(hilspy_periodic_lateness_seconds_bucket{job=~"$job",
+                  instance=~"$instance", bus=~"$bus"}[$__rate_interval])))
+                seriesNameFormat: '{{bus}} {{message}}'
+    skipped:
+      kind: Panel
+      spec:
+        display:
+          name: Skipped deadlines
+          description: Periodic deadlines skipped per second after falling more than a period behind.
+        plugin:
+          kind: TimeSeriesChart
+          spec:
+            legend:
+              position: bottom
+              mode: table
+              values:
+              - last
+              - max
+            yAxis:
+              format:
+                unit: decimal
+        queries:
+        - kind: TimeSeriesQuery
+          spec:
+            plugin:
+              kind: PrometheusTimeSeriesQuery
+              spec:
+                query: sum by (bus, message) (rate(hilspy_periodic_skipped_total{job=~"$job", instance=~"$instance",
+                  bus=~"$bus"}[$__rate_interval]))
+                seriesNameFormat: '{{bus}} {{message}}'
+    senddur:
+      kind: Panel
+      spec:
+        display:
+          name: Transport send time (p99)
+          description: Time a transport takes to accept one packet; it grows when a CAN queue fills or
+            TCP pushes back.
+        plugin:
+          kind: TimeSeriesChart
+          spec:
+            legend:
+              position: bottom
+              mode: table
+              values:
+              - last
+              - max
+            yAxis:
+              format:
+                unit: seconds
+        queries:
+        - kind: TimeSeriesQuery
+          spec:
+            plugin:
+              kind: PrometheusTimeSeriesQuery
+              spec:
+                query: histogram_quantile(0.99, sum by (le, bus) (rate(hilspy_transport_send_duration_seconds_bucket{job=~"$job",
+                  instance=~"$instance", bus=~"$bus"}[$__rate_interval])))
+                seriesNameFormat: '{{bus}}'
+    pcpu:
+      kind: Panel
+      spec:
+        display:
+          name: Process CPU
+          description: CPU time of each hilspy process, percent of all the host's CPUs.
+        plugin:
+          kind: TimeSeriesChart
+          spec:
+            legend:
+              position: bottom
+              mode: table
+              values:
+              - last
+              - max
+            yAxis:
+              format:
+                unit: percent
+              min: 0
+        queries:
+        - kind: TimeSeriesQuery
+          spec:
+            plugin:
+              kind: PrometheusTimeSeriesQuery
+              spec:
+                query: 100 * process_cpu_utilization_ratio{job=~"$job", instance=~"$instance"}
+                seriesNameFormat: '{{job}} {{instance}}'
+    cores:
+      kind: Panel
+      spec:
+        display:
+          name: CPU per core
+          description: Busy percent of each logical CPU of the hosts.
+        plugin:
+          kind: TimeSeriesChart
+          spec:
+            legend:
+              position: bottom
+              mode: table
+              values:
+              - last
+              - max
+            yAxis:
+              format:
+                unit: percent
+              min: 0
+              max: 100
+        queries:
+        - kind: TimeSeriesQuery
+          spec:
+            plugin:
+              kind: PrometheusTimeSeriesQuery
+              spec:
+                query: 100 * max by (host_name, cpu_logical_number) (system_cpu_utilization_ratio{job=~"$job",
+                  instance=~"$instance"})
+                seriesNameFormat: '{{host_name}} cpu{{cpu_logical_number}}'
+    pmem:
+      kind: Panel
+      spec:
+        display:
+          name: Process memory
+          description: Resident memory of each hilspy process.
+        plugin:
+          kind: TimeSeriesChart
+          spec:
+            legend:
+              position: bottom
+              mode: table
+              values:
+              - last
+              - max
+            yAxis:
+              format:
+                unit: bytes
+        queries:
+        - kind: TimeSeriesQuery
+          spec:
+            plugin:
+              kind: PrometheusTimeSeriesQuery
+              spec:
+                query: process_memory_usage_bytes{job=~"$job", instance=~"$instance"}
+                seriesNameFormat: '{{job}} {{instance}}'
+    load:
+      kind: Panel
+      spec:
+        display:
+          name: Host load
+          description: Memory used (percent) and the one-minute load average of the hosts.
+        plugin:
+          kind: TimeSeriesChart
+          spec:
+            legend:
+              position: bottom
+              mode: table
+              values:
+              - last
+              - max
+            yAxis:
+              format:
+                unit: decimal
+        queries:
+        - kind: TimeSeriesQuery
+          spec:
+            plugin:
+              kind: PrometheusTimeSeriesQuery
+              spec:
+                query: 100 * max by (host_name) (system_memory_utilization_ratio{job=~"$job", instance=~"$instance"})
+                seriesNameFormat: '{{host_name}} memory %'
+        - kind: TimeSeriesQuery
+          spec:
+            plugin:
+              kind: PrometheusTimeSeriesQuery
+              spec:
+                query: max by (host_name) (system_cpu_load_average_1m{job=~"$job", instance=~"$instance"})
+                seriesNameFormat: '{{host_name}} load 1m'
+  layouts:
+  - kind: Grid
+    spec:
+      display:
+        title: Buses
+        collapse:
+          open: true
+      items:
+      - x: 0
+        y: 0
+        width: 12
+        height: 8
+        content:
+          $ref: '#/spec/panels/frames'
+      - x: 12
+        y: 0
+        width: 12
+        height: 8
+        content:
+          $ref: '#/spec/panels/bytes'
+      - x: 0
+        y: 8
+        width: 12
+        height: 8
+        content:
+          $ref: '#/spec/panels/canload'
+      - x: 12
+        y: 8
+        width: 12
+        height: 8
+        content:
+          $ref: '#/spec/panels/errors'
+  - kind: Grid
+    spec:
+      display:
+        title: Messages
+        collapse:
+          open: true
+      items:
+      - x: 0
+        y: 0
+        width: 24
+        height: 8
+        content:
+          $ref: '#/spec/panels/messages'
+  - kind: Grid
+    spec:
+      display:
+        title: Timing
+        collapse:
+          open: true
+      items:
+      - x: 0
+        y: 0
+        width: 8
+        height: 8
+        content:
+          $ref: '#/spec/panels/lateness'
+      - x: 8
+        y: 0
+        width: 8
+        height: 8
+        content:
+          $ref: '#/spec/panels/skipped'
+      - x: 16
+        y: 0
+        width: 8
+        height: 8
+        content:
+          $ref: '#/spec/panels/senddur'
+  - kind: Grid
+    spec:
+      display:
+        title: ECU load
+        collapse:
+          open: true
+      items:
+      - x: 0
+        y: 0
+        width: 12
+        height: 8
+        content:
+          $ref: '#/spec/panels/pcpu'
+      - x: 12
+        y: 0
+        width: 12
+        height: 8
+        content:
+          $ref: '#/spec/panels/cores'
+      - x: 0
+        y: 8
+        width: 12
+        height: 8
+        content:
+          $ref: '#/spec/panels/pmem'
+      - x: 12
+        y: 8
+        width: 12
+        height: 8
+        content:
+          $ref: '#/spec/panels/load'

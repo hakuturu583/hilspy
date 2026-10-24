@@ -42,6 +42,24 @@ pub enum Error {
 }
 
 impl Error {
+    /// A short name of the variant (the `error` attribute of the
+    /// `hilspy.errors` metric).
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Error::Io(_) => "io",
+            Error::Config(_) => "config",
+            Error::InvalidPacket(_) => "invalid_packet",
+            Error::Closed => "closed",
+            Error::DbcParse(_) => "dbc",
+            Error::FibexParse(_) => "fibex",
+            Error::NotFound(_) => "not_found",
+            Error::Encode(_) => "encode",
+            Error::Decode(_) => "decode",
+            Error::Sbf(_) => "sbf",
+            Error::External(_) => "external",
+        }
+    }
+
     pub(crate) fn encode(msg: impl fmt::Display) -> Self {
         Error::Encode(msg.to_string())
     }

@@ -1,14 +1,20 @@
-"""Prepare this Linux host for ``v4l2://``: GStreamer, v4l2loopback cameras.
+"""Prepare this host for hilspy: ``v4l2://`` cameras and the metrics dashboard.
 
 Runs ``tools/ansible/v4l2loopback.yml`` on localhost through ansible-runner::
 
     uv run --group setup tools/setup_host.py                 # /dev/video10
     uv run --group setup tools/setup_host.py --devices 2 --build
+    uv run --group setup tools/setup_host.py --dashboard     # and docker pull
+    uv run tools/setup_host.py --dashboard --no-v4l2         # only docker pull
 
 It installs GStreamer and v4l2loopback (Debian / Ubuntu), creates the
 devices now and at every boot, adds you to the ``video`` group and, with
 ``--build``, rebuilds this checkout with the ``v4l2`` feature. ``sudo`` is
 used for the system changes; its password is asked for when needed.
+
+``--dashboard`` pulls the dashboard image (Prometheus receiving hilspy's
+OTLP metrics, Perses showing them) tagged with this checkout's version, so
+the dashboard matches the metrics this hilspy exports.
 """
 
 from __future__ import annotations
@@ -16,6 +22,7 @@ from __future__ import annotations
 import argparse
 import getpass
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -25,6 +32,8 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parent.parent
 PLAYBOOK = ROOT / "tools" / "ansible" / "v4l2loopback.yml"
+#: Built and pushed for every release by .github/workflows/dashboard.yml.
+DASHBOARD_IMAGE = "ghcr.io/hakuturu583/hilspy-dashboard"
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -40,9 +49,24 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--build", action="store_true", help="rebuild this checkout with `v4l2`")
     p.add_argument("--check", action="store_true", help="show what would change, change nothing")
     p.add_argument("--skip-tags", help="ansible tags to skip: packages, module")
+    p.add_argument(
+        "--dashboard",
+        action="store_true",
+        help=f"docker pull {DASHBOARD_IMAGE}:<this checkout's version>",
+    )
+    p.add_argument(
+        "--dashboard-version", help="pull this version's dashboard instead (e.g. 0.15.0, latest)"
+    )
+    p.add_argument("--no-v4l2", action="store_true", help="skip the v4l2loopback setup")
     args = p.parse_args(argv)
     if not 1 <= args.devices <= 8 or args.first < 0:
         p.error("--devices is 1..8 and --first a device number")
+    if args.no_v4l2 and not args.dashboard:
+        p.error("--no-v4l2 leaves nothing to do without --dashboard")
+    if args.no_v4l2 and args.build:
+        p.error("--build needs the v4l2 setup (GStreamer), drop --no-v4l2")
+    if args.dashboard_version and not args.dashboard:
+        p.error("--dashboard-version goes with --dashboard")
     return args
 
 
@@ -68,6 +92,45 @@ def build() -> int:
     ).returncode
 
 
+def version() -> str:
+    """This checkout's hilspy version (pyproject.toml), the dashboard's tag."""
+    text = (ROOT / "pyproject.toml").read_text()
+    match = re.search(r'^version = "([^"]+)"', text, re.MULTILINE)
+    if not match:
+        sys.exit("no version in pyproject.toml")
+    return match.group(1)
+
+
+def dashboard_image(tag: str | None = None) -> str:
+    return f"{DASHBOARD_IMAGE}:{tag or version()}"
+
+
+def pull_dashboard(image: str, check: bool = False) -> int:
+    """``docker pull`` the dashboard and say how to run it."""
+    if check:
+        print(f"would pull {image}")
+        return 0
+    docker = shutil.which("docker")
+    if not docker:
+        sys.exit("--dashboard needs docker (https://docs.docker.com/engine/install/)")
+    rc = subprocess.run([docker, "pull", image]).returncode
+    if rc != 0:
+        print(
+            f"could not pull {image}: is that version released? "
+            "--dashboard-version picks another (latest: the newest release)",
+            file=sys.stderr,
+        )
+        return rc
+    print(
+        "\ndashboard ready:\n"
+        "  docker run -d --name hilspy-dashboard -p 9090:9090 -p 8080:8080 \\\n"
+        f"    -v hilspy-prometheus:/prometheus {image}\n"
+        "  export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:9090/api/v1/otlp\n"
+        "  open http://localhost:8080/projects/hilspy/dashboards/hilspy"
+    )
+    return 0
+
+
 def become_password() -> str | None:
     """The sudo password, or None when root or sudo needs none."""
     if os.geteuid() == 0:
@@ -78,6 +141,15 @@ def become_password() -> str | None:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    if not args.no_v4l2 and (rc := setup_v4l2(args)) != 0:
+        return rc
+    if args.dashboard:
+        return pull_dashboard(dashboard_image(args.dashboard_version), check=args.check)
+    return 0
+
+
+def setup_v4l2(args: argparse.Namespace) -> int:
+    """Run the v4l2loopback playbook (and with ``--build``, rebuild)."""
     if sys.platform != "linux":
         sys.exit("v4l2:// and v4l2loopback are Linux-only")
     import ansible_runner

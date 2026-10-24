@@ -20,6 +20,7 @@ pub mod lidar;
 pub mod message;
 mod queue;
 pub mod sbf;
+pub mod telemetry;
 mod time;
 pub mod transport;
 pub mod url;

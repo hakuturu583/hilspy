@@ -4,8 +4,9 @@ name: Release
 # default branch bumps the version by the highest label among the PRs merged
 # since the last release tag (tools/bump_version.py: pyproject.toml,
 # Cargo.toml and both lockfiles), commits "chore: bump version to X", tags
-# vX, builds the wheels and the sdist, creates the GitHub Release and
-# publishes to PyPI (Trusted Publishing, environment "pypi").
+# vX, builds the wheels and the sdist, creates the GitHub Release,
+# publishes to PyPI (Trusted Publishing, environment "pypi") and pushes the
+# dashboard image to ghcr.io (dashboard.yml).
 #
 # workflow_dispatch finishes the release of a version that was already bumped
 # (when a later step failed): it builds from the tag vX, or else from the
@@ -181,6 +182,19 @@ jobs:
     uses: ./.github/workflows/build-dist.yml
     with:
       ref: ${{ needs.bump.outputs.sha }}
+
+  dashboard:
+    # ghcr.io/<owner>/hilspy-dashboard:<version>, pulled by
+    # `tools/setup_host.py --dashboard`. Pushing again replaces the tags.
+    needs: bump
+    if: needs.bump.outputs.release == 'true'
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/dashboard.yml
+    with:
+      ref: ${{ needs.bump.outputs.sha }}
+      version: ${{ needs.bump.outputs.version }}
 
   github-release:
     needs: [bump, dist]

@@ -18,6 +18,7 @@ fn _hilspy(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<api::Periodic>()?;
     m.add_class::<api::Clock>()?;
     m.add_function(wrap_pyfunction!(api::open, m)?)?;
+    m.add_function(wrap_pyfunction!(api::shutdown_telemetry, m)?)?;
     m.add_function(wrap_pyfunction!(plugins::register_transport, m)?)?;
     m.add_function(wrap_pyfunction!(plugins::register_codec, m)?)?;
     Ok(())

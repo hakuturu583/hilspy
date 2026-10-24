@@ -126,6 +126,7 @@ class _Channel:
 def _open(
     url: str, codec: str = "raw", *, clock: Clock | None = None, **options: Value
 ) -> _Channel: ...
+def _shutdown_telemetry() -> None: ...
 
 class Clock:
     """Simulated time; channels opened with ``clock=`` run on it."""

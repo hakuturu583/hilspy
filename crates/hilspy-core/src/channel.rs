@@ -11,6 +11,7 @@ use crate::clock::{to_ns, Clock};
 use crate::codec::{self, Codec};
 use crate::error::{Error, Result};
 use crate::message::{Message, Packet};
+use crate::telemetry::{self, ChannelMetrics, Direction, Instruments, PeriodicMetrics};
 use crate::transport::{self, Transport};
 use crate::value::Options;
 
@@ -27,10 +28,29 @@ struct Inner {
     deferred_error: Mutex<Option<Error>>,
     /// Virtual time the channel runs on, if any.
     clock: Option<Clock>,
+    metrics: ChannelMetrics,
 }
 
 impl Inner {
     fn send(self: &Arc<Self>, message: &Message) -> Result<()> {
+        let result = self.send_unrecorded(message);
+        match &result {
+            Ok(()) => self.metrics.message(Direction::Tx, message),
+            Err(e) => self.metrics.error(Direction::Tx, e),
+        }
+        result
+    }
+
+    /// One packet into the transport, recorded.
+    fn send_packet(&self, packet: &Packet) -> Result<()> {
+        let start = Instant::now();
+        self.transport.send(packet)?;
+        self.metrics.send_duration(start.elapsed().as_secs_f64());
+        self.metrics.packet(Direction::Tx, packet);
+        Ok(())
+    }
+
+    fn send_unrecorded(self: &Arc<Self>, message: &Message) -> Result<()> {
         if self.closed.load(Ordering::Acquire) {
             return Err(Error::Closed);
         }
@@ -71,7 +91,7 @@ impl Inner {
                     _ => 0,
                 };
                 if delay == 0 {
-                    self.transport.send(&p)?;
+                    self.send_packet(&p)?;
                 } else {
                     let inner = Arc::clone(self);
                     clock.schedule(
@@ -80,7 +100,7 @@ impl Inner {
                             if !inner.closed.load(Ordering::Acquire) {
                                 // A failure has no caller to report to;
                                 // it is recorded for the next send.
-                                if let Err(e) = inner.transport.send(&p) {
+                                if let Err(e) = inner.send_packet(&p) {
                                     *inner.deferred_error.lock().unwrap() = Some(e);
                                 }
                             }
@@ -101,7 +121,7 @@ impl Inner {
                     self.wait_until(start + Duration::from_secs_f64(delay.clamp(0.0, 3600.0)))?;
                 }
             }
-            self.transport.send(p)?;
+            self.send_packet(p)?;
         }
         Ok(())
     }
@@ -138,20 +158,38 @@ impl Channel {
     }
 
     /// [`Channel::open`] on a virtual clock (see [`crate::clock`]).
+    ///
+    /// The first channel opened sets up metrics export from the environment
+    /// ([`telemetry::init_from_env`]); a channel's metrics carry its URL
+    /// (without the query) as `bus` and the codec's name as `codec`.
     pub fn open_on(url: &str, codec: &str, options: Options, clock: Option<Clock>) -> Result<Self> {
-        let codec = codec::open(codec, options)?;
+        telemetry::init_from_env()?;
+        let metrics = ChannelMetrics::new(Instruments::global(), url, codec);
+        let codec_impl = codec::open(codec, options)?;
         let transport = transport::open(url)?;
-        Ok(Self::with_clock(transport, codec, clock))
+        Ok(Self::build(transport, codec_impl, clock, metrics))
     }
 
     pub fn new(transport: Arc<dyn Transport>, codec: Box<dyn Codec>) -> Self {
         Self::with_clock(transport, codec, None)
     }
 
+    /// A channel over a transport and a codec made by hand; its metrics
+    /// carry empty `bus` and `codec` attributes.
     pub fn with_clock(
         transport: Arc<dyn Transport>,
         codec: Box<dyn Codec>,
         clock: Option<Clock>,
+    ) -> Self {
+        let metrics = ChannelMetrics::new(Instruments::global(), "", "");
+        Self::build(transport, codec, clock, metrics)
+    }
+
+    pub(crate) fn build(
+        transport: Arc<dyn Transport>,
+        codec: Box<dyn Codec>,
+        clock: Option<Clock>,
+        metrics: ChannelMetrics,
     ) -> Self {
         Self {
             inner: Arc::new(Inner {
@@ -162,6 +200,7 @@ impl Channel {
                 closed: AtomicBool::new(false),
                 deferred_error: Mutex::new(None),
                 clock,
+                metrics,
             }),
         }
     }
@@ -178,6 +217,14 @@ impl Channel {
 
     /// The next decoded message, or `None` once `timeout` passes.
     pub fn recv(&self, timeout: Option<Duration>) -> Result<Option<Message>> {
+        let result = self.recv_unrecorded(timeout);
+        if let Err(e) = &result {
+            self.inner.metrics.error(Direction::Rx, e);
+        }
+        result
+    }
+
+    fn recv_unrecorded(&self, timeout: Option<Duration>) -> Result<Option<Message>> {
         let inner = &self.inner;
         if inner.closed.load(Ordering::Acquire) {
             return Err(Error::Closed);
@@ -197,8 +244,12 @@ impl Channel {
             if let Some(clock) = &inner.clock {
                 packet.timestamp = Some(clock.now());
             }
+            inner.metrics.packet(Direction::Rx, &packet);
             let mut messages: VecDeque<Message> =
                 inner.codec.lock().unwrap().decode(packet)?.into();
+            for m in &messages {
+                inner.metrics.message(Direction::Rx, m);
+            }
             if let Some(first) = messages.pop_front() {
                 inner.pending.lock().unwrap().extend(messages);
                 return Ok(Some(first));
@@ -427,9 +478,12 @@ impl Periodic {
             });
         }
         let worker = Arc::clone(&shared);
+        let metrics = inner
+            .metrics
+            .periodic(&shared.state.lock().unwrap().message);
         let thread = std::thread::Builder::new()
             .name("hilspy-periodic".into())
-            .spawn(move || run(inner, worker, start, duration))?;
+            .spawn(move || run(inner, worker, metrics, start, duration))?;
         Ok(Self {
             shared,
             on_clock: false,
@@ -534,7 +588,13 @@ fn schedule_next(clock: &Clock, inner: Arc<Inner>, shared: Arc<Shared>, end: Opt
 }
 
 /// The sender thread; the first send (at `start`) is already made.
-fn run(inner: Arc<Inner>, shared: Arc<Shared>, start: Instant, duration: Option<Duration>) {
+fn run(
+    inner: Arc<Inner>,
+    shared: Arc<Shared>,
+    metrics: PeriodicMetrics,
+    start: Instant,
+    duration: Option<Duration>,
+) {
     let end = duration.map(|d| start + d);
     let mut state = shared.state.lock().unwrap();
     let mut next = start + state.period;
@@ -547,6 +607,7 @@ fn run(inner: Arc<Inner>, shared: Arc<Shared>, start: Instant, duration: Option<
             break;
         }
         if now >= next {
+            metrics.lateness((now - next).as_secs_f64());
             let message = state.message.clone();
             drop(state);
             let result = inner.send(&message);
@@ -558,6 +619,9 @@ fn run(inner: Arc<Inner>, shared: Arc<Shared>, start: Instant, duration: Option<
             next += state.period;
             let now = Instant::now();
             if next + state.period < now {
+                // The deadlines up to now are skipped.
+                let behind = (now - next).as_nanos() / state.period.as_nanos();
+                metrics.skipped(u64::try_from(behind).unwrap_or(u64::MAX));
                 next = now;
             }
             continue;

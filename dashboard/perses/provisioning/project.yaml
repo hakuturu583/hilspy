@@ -1,0 +1,7 @@
+kind: Project
+metadata:
+  name: hilspy
+spec:
+  display:
+    name: hilspy
+    description: HILS buses and ECU load exported by hilspy over OTLP
