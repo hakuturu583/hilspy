@@ -95,9 +95,8 @@ fn registry() -> &'static RwLock<HashMap<String, Factory>> {
             Arc::new(|_| {
                 Err(Error::Config(
                     if cfg!(target_os = "linux") {
-                        "v4l2:// needs hilspy built with the `v4l2` feature (GStreamer): \
-                     uv run --group setup tools/setup_host.py --build, or \
-                     MATURIN_PEP517_ARGS=\"--features v4l2\" pip install hilspy --no-binary hilspy"
+                        "v4l2:// needs hilspy built with the `v4l2` feature (GStreamer); \
+                         see the README, Cameras"
                     } else {
                         "v4l2:// (Video4Linux) is only available on Linux"
                     }

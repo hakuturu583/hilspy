@@ -91,22 +91,22 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: "3.12"
-      - run: uv sync
+      # Only ansible-runner here: --build then builds the extension once,
+      # with the feature.
+      - run: uv sync --only-group setup
       - name: Set up the host (ansible-runner) and build with the v4l2 feature
-        run: uv run --group setup tools/setup_host.py --build
+        run: uv run --no-sync tools/setup_host.py --build
       - name: Show the device
         # -d: without it v4l2-ctl also opens /dev/video0, which is not there.
-        # sudo: this shell predates the runner joining `video`.
-        run: |
-          ls -l /dev/video*
-          sudo v4l2-ctl -d /dev/video10 --info
-      - run: cargo clippy --all-targets --features hilspy-core/v4l2 -- -D warnings
+        # sg: the setup added the runner to `video`; sg applies it without a new login.
+        run: sg video -c "v4l2-ctl -d /dev/video10 --info"
+      - if: matrix.arch == 'amd64'  # same code on arm64
+        run: cargo clippy --all-targets --features hilspy-core/v4l2 -- -D warnings
       - run: cargo test -p hilspy-core --features v4l2
       - name: Run the v4l2 tests (and fail if they were skipped)
         env:
           HILSPY_TEST_V4L2: /dev/video10
         run: |
-          # The setup added the runner to `video`; sg applies it without a new login.
           sg video -c "uv run --no-sync pytest -v -rs tests/test_v4l2.py" | tee result.txt
           ! grep -qi skipped result.txt
 

@@ -39,7 +39,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     p.add_argument("--build", action="store_true", help="rebuild this checkout with `v4l2`")
     p.add_argument("--check", action="store_true", help="show what would change, change nothing")
-    p.add_argument("--skip-tags", default="", help="ansible tags to skip: packages, module, build")
+    p.add_argument("--skip-tags", help="ansible tags to skip: packages, module")
     args = p.parse_args(argv)
     if not 1 <= args.devices <= 8 or args.first < 0:
         p.error("--devices is 1..8 and --first a device number")
@@ -47,9 +47,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def extravars(args: argparse.Namespace) -> dict[str, Any]:
-    uv = os.environ.get("UV") or shutil.which("uv")
-    if args.build and not uv:
-        sys.exit("--build needs uv (https://docs.astral.sh/uv/)")
     return {
         "v4l2loopback_count": args.devices,
         "v4l2loopback_first": args.first,
@@ -57,9 +54,18 @@ def extravars(args: argparse.Namespace) -> dict[str, Any]:
         "v4l2loopback_exclusive_caps": not args.no_exclusive_caps,
         "hilspy_user": os.environ.get("SUDO_USER") or getpass.getuser(),
         "hilspy_build": args.build,
-        "hilspy_source": str(ROOT),
-        "hilspy_uv": uv or "uv",
     }
+
+
+def build() -> int:
+    """Rebuild this checkout's extension with the `v4l2` feature."""
+    uv = os.environ.get("UV") or shutil.which("uv")
+    if not uv:
+        sys.exit("--build needs uv (https://docs.astral.sh/uv/)")
+    env = {**os.environ, "MATURIN_PEP517_ARGS": "--features v4l2"}
+    return subprocess.run(
+        [uv, "sync", "--reinstall-package", "hilspy"], cwd=ROOT, env=env
+    ).returncode
 
 
 def become_password() -> str | None:
@@ -103,14 +109,18 @@ def main(argv: list[str] | None = None) -> int:
             extravars=extravars(args),
             cmdline=" ".join(cmdline) or None,
             passwords=passwords,
-            skip_tags=args.skip_tags or None,
+            skip_tags=args.skip_tags,
             quiet=False,
         )
-    if result.rc == 0 and not args.check:
-        first = f"/dev/video{args.first}"
-        print(f"\nready: hilspy.open('v4l2://{first}?width=640&height=480')")
-        print("log out and in (or run `newgrp video`) if you were just added to `video`")
-    return int(result.rc)
+    if result.rc != 0 or args.check:
+        return int(result.rc)
+    # After the playbook: it installed the GStreamer development packages.
+    if args.build and (rc := build()) != 0:
+        return rc
+    first = f"/dev/video{args.first}"
+    print(f"\nready: hilspy.open('v4l2://{first}?width=640&height=480')")
+    print("log out and in (or run `newgrp video`) if you were just added to `video`")
+    return 0
 
 
 if __name__ == "__main__":

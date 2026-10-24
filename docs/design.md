@@ -137,7 +137,9 @@ deadlocking. A Python exception raised in a plugin travels through the core as
   of `linux-headers-<release>`, `nvidia-l4t-kernel-headers` (Jetson),
   `raspberrypi-kernel-headers` that apt knows) before DKMS, packages, the
   persistent v4l2loopback configuration (reloaded only when the loaded
-  devices' labels differ), the `video` group and the feature build.
+  devices' labels differ) and the `video` group; with `--build` the script
+  then rebuilds the checkout with the feature (`uv sync`, outside the
+  playbook, which only provisions the host).
 * `file://`: replay in 64 KiB chunks (ends at EOF, or `?follow`), or record
   packet bytes (`?write`, `?append`).
 

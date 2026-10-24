@@ -23,7 +23,8 @@
 //! strides and plane offsets. It receives nothing. A pipeline error (the device refuses the
 //! caps, a JPEG that does not decode) fails the send that reports it.
 
-use std::sync::{Condvar, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 use std::time::Duration;
 
 use gstreamer as gst;
@@ -34,6 +35,7 @@ use gstreamer_video as gst_video;
 use super::Transport;
 use crate::error::{Error, Result};
 use crate::message::Packet;
+use crate::queue::Queue;
 use crate::url::Endpoint;
 use crate::value::Options;
 
@@ -59,8 +61,8 @@ fn packed_planes(info: &gst_video::VideoInfo) -> Vec<(usize, usize)> {
 /// What a packet holds.
 enum Input {
     Raw(gst_video::VideoInfo),
-    Jpeg,
-    Png,
+    /// An image: its caps name and decoder.
+    Encoded(&'static str, &'static str),
 }
 
 pub(crate) struct V4l2 {
@@ -69,8 +71,9 @@ pub(crate) struct V4l2 {
     input: Input,
     /// The first pipeline error, reported by every later send.
     failed: Mutex<Option<String>>,
-    closed: Mutex<bool>,
-    wake: Condvar,
+    closed: AtomicBool,
+    /// Never filled: `recv` waits on it until the timeout or `close`.
+    idle: Queue,
 }
 
 fn take_u32(o: &mut Options, key: &str) -> Result<Option<u32>> {
@@ -103,7 +106,7 @@ fn element(factory: &str) -> Result<gst::Element> {
     gst::ElementFactory::make(factory).build().map_err(|_| {
         Error::Config(format!(
             "GStreamer element {factory} is missing: install the GStreamer base and good \
-             plugins (tools/setup_host.py does)"
+             plugins"
         ))
     })
 }
@@ -125,9 +128,9 @@ impl V4l2 {
         Self::with_sink(endpoint.options, sink)
     }
 
-    /// The pipeline into `sink` (`v4l2sink`, or an `appsink` in tests).
+    /// The pipeline into `sink` (`v4l2sink`, or an `appsink` in tests);
+    /// GStreamer is initialised, as making `sink` needs.
     fn with_sink(mut o: Options, sink: gst::Element) -> Result<Self> {
-        gst::init().map_err(gst_error)?;
         let format = o.take_str("format")?.unwrap_or_else(|| "RGB".into());
         let width = take_u32(&mut o, "width")?;
         let height = take_u32(&mut o, "height")?;
@@ -145,19 +148,9 @@ impl V4l2 {
         )?;
         o.finish("v4l2://")?;
 
-        let (input, caps) = match format.to_ascii_lowercase().as_str() {
-            "jpeg" | "jpg" => (
-                Input::Jpeg,
-                gst::Caps::builder("image/jpeg")
-                    .field("framerate", fps)
-                    .build(),
-            ),
-            "png" => (
-                Input::Png,
-                gst::Caps::builder("image/png")
-                    .field("framerate", fps)
-                    .build(),
-            ),
+        let input = match format.to_ascii_lowercase().as_str() {
+            "jpeg" | "jpg" => Input::Encoded("image/jpeg", "jpegdec"),
+            "png" => Input::Encoded("image/png", "pngdec"),
             _ => {
                 let (Some(w), Some(h)) = (width, height) else {
                     return Err(Error::Config(format!(
@@ -168,9 +161,12 @@ impl V4l2 {
                     .fps(fps)
                     .build()
                     .map_err(gst_error)?;
-                let caps = info.to_caps().map_err(gst_error)?;
-                (Input::Raw(info), caps)
+                Input::Raw(info)
             }
+        };
+        let caps = match &input {
+            Input::Raw(info) => info.to_caps().map_err(gst_error)?,
+            Input::Encoded(name, _) => gst::Caps::builder(*name).field("framerate", fps).build(),
         };
         let mut out = gst::Caps::builder("video/x-raw")
             .field("format", output.to_str())
@@ -199,14 +195,10 @@ impl V4l2 {
             .build();
         let filter = element("capsfilter")?;
         filter.set_property("caps", out.build());
-        if sink.has_property("sync") {
-            sink.set_property("sync", false);
-        }
+        sink.set_property("sync", false);
         let mut chain = vec![src.clone().upcast::<gst::Element>()];
-        match input {
-            Input::Jpeg => chain.push(element("jpegdec")?),
-            Input::Png => chain.push(element("pngdec")?),
-            Input::Raw(_) => {}
+        if let Input::Encoded(_, decoder) = input {
+            chain.push(element(decoder)?);
         }
         chain.extend([
             element("videoconvert")?,
@@ -223,8 +215,8 @@ impl V4l2 {
             src,
             input,
             failed: Mutex::new(None),
-            closed: Mutex::new(false),
-            wake: Condvar::new(),
+            closed: AtomicBool::new(false),
+            idle: Queue::default(),
         };
         if this.pipeline.set_state(gst::State::Playing).is_err() {
             // Opening the device fails here; the bus says why.
@@ -264,12 +256,10 @@ impl V4l2 {
 
     /// The packet as a buffer of the input caps.
     fn buffer(&self, data: &[u8]) -> Result<gst::Buffer> {
-        let Input::Raw(info) = &self.input else {
-            return Ok(gst::Buffer::from_slice(data.to_vec()));
+        let info = match &self.input {
+            Input::Raw(info) if data.len() != info.size() => info,
+            _ => return Ok(gst::Buffer::from_slice(data.to_vec())),
         };
-        if data.len() == info.size() {
-            return Ok(gst::Buffer::from_slice(data.to_vec()));
-        }
         // Tightly packed planes (rows not padded, planes back to back), as
         // numpy and most image libraries lay frames out: copied into
         // GStreamer's strides and plane offsets.
@@ -305,7 +295,7 @@ impl V4l2 {
 
 impl Transport for V4l2 {
     fn send(&self, packet: &Packet) -> Result<()> {
-        if *self.closed.lock().unwrap() {
+        if self.closed.load(Ordering::Acquire) {
             return Err(Error::Closed);
         }
         self.check()?;
@@ -313,7 +303,7 @@ impl Transport for V4l2 {
         match self.src.push_buffer(buffer) {
             Ok(_) => self.check(),
             Err(gst::FlowError::Flushing) | Err(gst::FlowError::Eos)
-                if *self.closed.lock().unwrap() =>
+                if self.closed.load(Ordering::Acquire) =>
             {
                 Err(Error::Closed)
             }
@@ -326,25 +316,14 @@ impl Transport for V4l2 {
 
     /// A V4L2 output receives nothing: wait out the timeout.
     fn recv(&self, timeout: Option<Duration>) -> Result<Option<Packet>> {
-        let closed = self.closed.lock().unwrap();
-        let closed = match timeout {
-            None => self.wake.wait_while(closed, |c| !*c).unwrap(),
-            Some(t) => self.wake.wait_timeout_while(closed, t, |c| !*c).unwrap().0,
-        };
-        if *closed {
-            Err(Error::Closed)
-        } else {
-            Ok(None)
-        }
+        self.idle.pop(timeout)
     }
 
     fn close(&self) {
-        let mut closed = self.closed.lock().unwrap();
-        if !*closed {
-            *closed = true;
+        if !self.closed.swap(true, Ordering::AcqRel) {
             let _ = self.pipeline.set_state(gst::State::Null);
         }
-        self.wake.notify_all();
+        self.idle.close();
     }
 }
 

@@ -1,6 +1,6 @@
 # Prepares a Debian / Ubuntu host for hilspy's v4l2:// transport:
 # GStreamer, v4l2loopback devices (now and at every boot), the video group,
-# and optionally a build of this checkout with the `v4l2` feature.
+# and optionally what building hilspy with the `v4l2` feature needs.
 # Run it through tools/setup_host.py (ansible-runner); the variables below
 # are its options.
 - name: v4l2loopback cameras for hilspy
@@ -13,11 +13,8 @@
     v4l2loopback_exclusive_caps: true
     hilspy_user: ""
     hilspy_build: false
-    hilspy_source: ""
-    hilspy_uv: uv
     v4l2loopback_numbers: "{{ range(v4l2loopback_first | int, v4l2loopback_first | int + v4l2loopback_count | int) | list }}"
-    v4l2loopback_labels: "{{ v4l2loopback_numbers | map('string') | map('regex_replace', '^', v4l2loopback_label ~ ' ') | list }}"
-    v4l2loopback_urls: "{{ v4l2loopback_numbers | map('string') | map('regex_replace', '^', 'v4l2:///dev/video') | list }}"
+    v4l2loopback_labels: "{{ [v4l2loopback_label ~ ' '] | product(v4l2loopback_numbers | map('string')) | map('join') | list }}"
   tasks:
     - name: Check the platform
       ansible.builtin.assert:
@@ -135,7 +132,6 @@
       tags: [module]
       when: >-
         v4l2loopback_conf is changed or
-        (v4l2loopback_names.results | rejectattr('rc', 'eq', 0) | list | length > 0) or
         (v4l2loopback_names.results | map(attribute='stdout') | list) != v4l2loopback_labels
       block:
         - name: Unload v4l2loopback
@@ -171,19 +167,8 @@
         groups: video
         append: true
 
-    - name: Build this checkout with the v4l2 feature
-      tags: [build]
-      when: hilspy_build | bool
-      become: false
-      ansible.builtin.command:
-        # --inexact keeps the packages running this playbook (ansible-runner).
-        argv: ["{{ hilspy_uv }}", "sync", "--inexact", "--reinstall-package", "hilspy"]
-        chdir: "{{ hilspy_source }}"
-      environment:
-        MATURIN_PEP517_ARGS: --features v4l2
-      changed_when: true
-
     - name: Summary
       ansible.builtin.debug:
         msg: >-
-          {{ v4l2loopback_urls | join(', ') }} ready ({{ v4l2loopback_labels | join(', ') }}).
+          v4l2:///dev/video{{ v4l2loopback_numbers | join(', v4l2:///dev/video') }}
+          ready ({{ v4l2loopback_labels | join(', ') }}).

@@ -31,6 +31,7 @@ def test_a_missing_device_or_feature_is_an_error() -> None:
 def read_frame(device: str, size: int, timeout: float = 5.0) -> bytes:
     """One frame read as a V4L2 capture client (read() I/O) would."""
     deadline = time.monotonic() + timeout
+    error: OSError | None = None
     while True:
         try:
             fd = os.open(device, os.O_RDONLY | os.O_NONBLOCK)
@@ -41,12 +42,10 @@ def read_frame(device: str, size: int, timeout: float = 5.0) -> bytes:
                     return data
             finally:
                 os.close(fd)
-        except (BlockingIOError, OSError):
-            # exclusive_caps: no capture side until the writer streams.
-            if time.monotonic() > deadline:
-                raise
+        except OSError as e:
+            error = e  # exclusive_caps: no capture side until the writer streams
         if time.monotonic() > deadline:
-            raise TimeoutError(f"no frame from {device}")
+            raise error or TimeoutError(f"no frame from {device}")
         time.sleep(0.05)
 
 

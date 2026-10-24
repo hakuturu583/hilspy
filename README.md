@@ -540,7 +540,7 @@ amd64 and arm64, Ubuntu for Raspberry Pi, Raspberry Pi OS bookworm),
 `/lib/modules/$(uname -r)/build` (a vendor BSP) are used as they are.
 `sudo` does the system changes (its password is asked for when needed).
 After `--build`, use `uv run --no-sync` (or rebuild with
-`MATURIN_PEP517_ARGS="--features v4l2" uv sync --inexact --reinstall-package hilspy`):
+`MATURIN_PEP517_ARGS="--features v4l2" uv sync --reinstall-package hilspy`):
 a plain `uv sync` after a Rust change builds without the feature. Outside a
 checkout: `MATURIN_PEP517_ARGS="--features v4l2" pip install hilspy --no-binary hilspy`.
 
