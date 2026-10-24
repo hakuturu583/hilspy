@@ -516,7 +516,8 @@ after a pipeline error (a device that refuses the format, an image that does
 not decode). The channel receives nothing.
 
 The feature links the system GStreamer, so it is not in the published
-wheels. `tools/setup_host.py` sets a Debian / Ubuntu host up with
+wheels. It works on amd64 and arm64 Linux alike (CI tests both).
+`tools/setup_host.py` sets a Debian / Ubuntu host (x86_64 or aarch64) up with
 [ansible-runner](https://ansible.readthedocs.io/projects/runner/) (playbook
 `tools/ansible/v4l2loopback.yml`): GStreamer and v4l2loopback (DKMS) are
 installed, the devices are created now and at every boot
@@ -531,6 +532,12 @@ uv run --group setup tools/setup_host.py --check              # show what would 
 uv run --no-sync python examples/camera_simulator.py v4l2:///dev/video10
 ```
 
+The module is built by DKMS against the running kernel's headers:
+`linux-headers-$(uname -r)` on distribution kernels (Ubuntu and Debian on
+amd64 and arm64, Ubuntu for Raspberry Pi, Raspberry Pi OS bookworm),
+`nvidia-l4t-kernel-headers` on NVIDIA Jetson (L4T) and
+`raspberrypi-kernel-headers` on older Raspberry Pi OS; headers already at
+`/lib/modules/$(uname -r)/build` (a vendor BSP) are used as they are.
 `sudo` does the system changes (its password is asked for when needed).
 After `--build`, use `uv run --no-sync` (or rebuild with
 `MATURIN_PEP517_ARGS="--features v4l2" uv sync --inexact --reinstall-package hilspy`):

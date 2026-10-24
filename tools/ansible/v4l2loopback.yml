@@ -24,11 +24,57 @@
         that: ansible_facts["system"] == "Linux" and ansible_facts["os_family"] == "Debian"
         fail_msg: v4l2loopback setup supports Debian and Ubuntu hosts only
 
-    - name: Install GStreamer and v4l2loopback
-      tags: [packages]
+    - name: Update the apt cache
+      tags: [packages, module]
       ansible.builtin.apt:
         update_cache: true
         cache_valid_time: 3600
+
+    # Before v4l2loopback-dkms, so DKMS builds the module as it is installed.
+    # Distribution kernels (amd64, arm64, Ubuntu raspi, Raspberry Pi OS
+    # bookworm) have linux-headers-<release>; Jetson (L4T) and older Raspberry
+    # Pi OS kernels ship their headers under a fixed package name.
+    - name: Look for the running kernel's headers
+      tags: [packages, module]
+      ansible.builtin.stat:
+        path: "/lib/modules/{{ ansible_facts['kernel'] }}/build"
+      register: kernel_build
+
+    - name: Find a headers package for the running kernel
+      tags: [packages, module]
+      when: not kernel_build.stat.exists
+      ansible.builtin.command: "apt-cache show --no-all-versions {{ item }}"
+      loop:
+        - "linux-headers-{{ ansible_facts['kernel'] }}"
+        - nvidia-l4t-kernel-headers
+        - raspberrypi-kernel-headers
+      register: kernel_headers
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Install the kernel headers the v4l2loopback module builds against
+      tags: [packages, module]
+      when: not kernel_build.stat.exists
+      vars:
+        found: "{{ kernel_headers.results | selectattr('rc', 'eq', 0) | map(attribute='item') | list }}"
+      block:
+        - name: Check that a headers package exists
+          ansible.builtin.assert:
+            that: found | length > 0
+            fail_msg: >-
+              No headers package for kernel {{ ansible_facts['kernel'] }}
+              ({{ ansible_facts['architecture'] }}), so DKMS cannot build v4l2loopback.
+              Install the headers your kernel vendor provides (/lib/modules/{{
+              ansible_facts['kernel'] }}/build), or boot a distribution kernel, then run again.
+            quiet: true
+        - name: Install {{ found | first | default('the headers') }}
+          ansible.builtin.apt:
+            name: "{{ found | first }}"
+
+    - name: Install GStreamer and v4l2loopback
+      tags: [packages]
+      ansible.builtin.apt:
         name:
           - v4l2loopback-dkms
           - v4l2loopback-utils
@@ -36,19 +82,6 @@
           - gstreamer1.0-tools
           - gstreamer1.0-plugins-base
           - gstreamer1.0-plugins-good
-
-    - name: Install the kernel headers the v4l2loopback module builds against
-      tags: [packages, module]
-      block:
-        - name: Install linux-headers for the running kernel
-          ansible.builtin.apt:
-            name: "linux-headers-{{ ansible_facts['kernel'] }}"
-      rescue:
-        - name: Explain the missing headers
-          ansible.builtin.fail:
-            msg: >-
-              No headers package for kernel {{ ansible_facts['kernel'] }}, so DKMS cannot build
-              v4l2loopback. Boot a distribution kernel (or install its headers), then run again.
 
     - name: Look for the videodev module v4l2loopback needs
       tags: [packages, module]

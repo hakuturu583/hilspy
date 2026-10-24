@@ -132,7 +132,10 @@ deadlocking. A Python exception raised in a plugin travels through the core as
   receives nothing. The feature is off by default because it links the
   system GStreamer, which manylinux wheels cannot carry; without it the
   scheme reports how to build it. `tools/setup_host.py` (ansible-runner,
-  `tools/ansible/v4l2loopback.yml`) prepares a host: packages, the
+  `tools/ansible/v4l2loopback.yml`) prepares an amd64 or arm64 host: the
+  running kernel's headers (`/lib/modules/<release>/build`, else the first
+  of `linux-headers-<release>`, `nvidia-l4t-kernel-headers` (Jetson),
+  `raspberrypi-kernel-headers` that apt knows) before DKMS, packages, the
   persistent v4l2loopback configuration (reloaded only when the loaded
   devices' labels differ), the `video` group and the feature build.
 * `file://`: replay in 64 KiB chunks (ends at EOF, or `?follow`), or record
