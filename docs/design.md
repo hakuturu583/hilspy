@@ -272,3 +272,33 @@ observations.
 A simulated LiDAR is `udp://driver:2368` + `lidar:MODEL`, sending the
 raycast point cloud of each revolution. A simulated camera is
 `v4l2:///dev/videoN` (v4l2loopback), sending each rendered image.
+
+## Telemetry
+
+`telemetry` (`src/telemetry/`) records OpenTelemetry metrics through the
+global meter provider, so without one they cost a no-op call. `Channel::open`
+first calls `telemetry::init_from_env` (once per process, feature `otlp`,
+default on): when `OTEL_EXPORTER_OTLP_(METRICS_)ENDPOINT` is set it installs
+an `SdkMeterProvider` with a `PeriodicReader` (its own thread; 5 s unless
+`OTEL_METRIC_EXPORT_INTERVAL`) and the OTLP/HTTP protobuf exporter
+(`opentelemetry-otlp` over blocking `reqwest`, no TLS so the wheels link no
+OpenSSL), plus the host gauges (`sysinfo`, sampled on collection). A
+variable it cannot honour (gRPC, another exporter) fails `open` with a
+`Config` error. A Rust program may install its own provider first instead.
+
+Each channel keeps a `ChannelMetrics` with its attributes (`bus` = URL
+without the query, `scheme`, `codec`, `direction`) made once: `Inner::send`
+counts messages and errors around the whole send and every packet (and its
+send time) as it enters the transport, deferred clock sends included; `recv`
+counts every packet the transport returns and every message the codec
+decodes. A periodic thread records how late each send starts and the
+deadlines it skips. Counters are cumulative, which is what Prometheus's OTLP
+receiver takes. Python registers `_shutdown_telemetry` with `atexit` so the
+last interval is exported.
+
+`dashboard/` is the image the release pushes to ghcr.io: `prom/prometheus`
+with the `perses` binary and plugin archives copied in (no `RUN`, so the
+arm64 build needs no emulation), a shell entrypoint that runs both and stops
+when either ends, and Perses provisioning (project, global Prometheus data
+source, dashboard). `tests/test_dashboard.py` checks the dashboard queries
+only metrics the core defines.

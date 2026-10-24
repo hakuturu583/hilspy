@@ -544,6 +544,50 @@ After `--build`, use `uv run --no-sync` (or rebuild with
 a plain `uv sync` after a Rust change builds without the feature. Outside a
 checkout: `MATURIN_PEP517_ARGS="--features v4l2" pip install hilspy --no-binary hilspy`.
 
+### Metrics and dashboard (OpenTelemetry, Prometheus, Perses)
+
+The Rust core records OpenTelemetry metrics for every channel and exports
+them over OTLP/HTTP once `OTEL_EXPORTER_OTLP_ENDPOINT` (or
+`OTEL_EXPORTER_OTLP_METRICS_ENDPOINT`) is set; without it nothing is
+exported. No code changes: the standard variables configure it.
+
+| Metric (Prometheus name) | What |
+| --- | --- |
+| `hilspy_packets_total`, `hilspy_bytes_total` | packets and payload bytes per `bus` (the URL without its query), `scheme`, `codec`, `direction` (`tx` / `rx`) |
+| `hilspy_messages_total` | messages sent or decoded, per `message` (the name, or `0x1A0` for a nameless CAN frame): the send / receive rate of each |
+| `hilspy_can_bits_total` | nominal CAN frame bits (no stuff bits); over the bit rate it is the bus load |
+| `hilspy_errors_total` | failed sends and receives per `error` (`encode`, `decode`, `io`, ...) |
+| `hilspy_periodic_lateness_seconds`, `hilspy_periodic_skipped_total` | how late `every()` sends start, deadlines skipped |
+| `hilspy_transport_send_duration_seconds` | time a transport takes one packet (a full CAN queue, TCP back-pressure) |
+| `process_cpu_utilization_ratio`, `process_memory_usage_bytes` | load of the process (the ECU it plays) |
+| `system_cpu_utilization_ratio` (per core), `system_memory_utilization_ratio`, `system_cpu_load_average_1m` | load of the host |
+
+`OTEL_SERVICE_NAME` (default `hilspy`) names the process (Prometheus `job`),
+`OTEL_RESOURCE_ATTRIBUTES` adds attributes, `OTEL_METRIC_EXPORT_INTERVAL`
+sets the export period (default here 5000 ms); the `instance` is
+`host:pid`. Only `http/protobuf` is supported (gRPC and TLS are not built
+in; put an OpenTelemetry Collector in between for those).
+
+The dashboard is a container image for amd64 and arm64,
+`ghcr.io/hakuturu583/hilspy-dashboard:<version>`: Prometheus with its OTLP
+receiver on port 9090 and Perses with the hilspy dashboard (buses, message
+rates, CAN bus load, periodic timing, CPU and memory) on port 8080. The setup
+command pulls the image of your hilspy version:
+
+```sh
+uv run tools/setup_host.py --dashboard --no-v4l2      # docker pull <image>:<this version>
+docker run -d --name hilspy-dashboard -p 9090:9090 -p 8080:8080 \
+  -v hilspy-prometheus:/prometheus ghcr.io/hakuturu583/hilspy-dashboard:<version>
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:9090/api/v1/otlp OTEL_SERVICE_NAME=brake-ecu \
+  python my_simulation.py
+# http://localhost:8080/projects/hilspy/dashboards/hilspy
+```
+
+Arguments after the image go to Prometheus (`--storage.tsdb.retention.time=30d`).
+`--dashboard-version` pulls another release (`latest`). The image is built
+from `dashboard/` by `.github/workflows/dashboard.yml` (on every PR; pushed
+on release).
+
 ### Plugins
 
 A transport is any object with `send(packet)` and `recv(timeout)` (and

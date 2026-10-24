@@ -1,0 +1,15 @@
+# The Prometheus in the same container; Perses proxies the queries to it.
+kind: GlobalDatasource
+metadata:
+  name: prometheus
+spec:
+  default: true
+  display:
+    name: Prometheus
+  plugin:
+    kind: PrometheusDatasource
+    spec:
+      proxy:
+        kind: HTTPProxy
+        spec:
+          url: http://localhost:9090

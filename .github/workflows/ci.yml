@@ -112,3 +112,10 @@ jobs:
 
   dist:
     uses: ./.github/workflows/build-dist.yml
+
+  dashboard:
+    # Built for amd64 and arm64 and smoke-tested; pushed only by the release.
+    permissions:
+      contents: read
+      packages: write  # what the reusable workflow declares; CI never pushes
+    uses: ./.github/workflows/dashboard.yml

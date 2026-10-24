@@ -21,6 +21,10 @@ serde_json.workspace = true
 autosar-e2e.workspace = true
 blf_asc.workspace = true
 thiserror.workspace = true
+opentelemetry.workspace = true
+opentelemetry_sdk = { workspace = true, optional = true }
+opentelemetry-otlp = { workspace = true, optional = true }
+sysinfo = { workspace = true, optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 socketcan.workspace = true
@@ -30,6 +34,11 @@ gstreamer-app = { workspace = true, optional = true }
 gstreamer-video = { workspace = true, optional = true }
 
 [features]
+default = ["otlp"]
+# Export the metrics over OTLP/HTTP when OTEL_EXPORTER_OTLP_ENDPOINT is set,
+# with the host's CPU and memory load (see `telemetry`). Without it the
+# metrics go to whatever global meter provider the program installs.
+otlp = ["dep:opentelemetry_sdk", "dep:opentelemetry-otlp", "dep:sysinfo"]
 # v4l2:// on Linux: frames through GStreamer into a V4L2 device
 # (v4l2loopback). Off by default: it links the system GStreamer libraries,
 # which the manylinux wheels cannot carry.
@@ -47,3 +56,4 @@ rand.workspace = true
 rtcm-rs = { workspace = true, features = ["test_gen"] }
 prost-reflect.workspace = true
 protox.workspace = true
+opentelemetry_sdk = { workspace = true, features = ["testing"] }

@@ -34,7 +34,14 @@ simulator steps it)::
     ecu.every(0.01, "VehicleSpeed", {"Speed": 0.0})
     while simulating:
         clock.advance(0.05)  # sends the 5 frames due in this step
+
+Metrics (packets, bytes and messages per bus and direction, errors, periodic
+lateness, CPU and memory load) are exported over OTLP/HTTP when
+``OTEL_EXPORTER_OTLP_ENDPOINT`` is set, e.g. to the Prometheus of the
+``hilspy-dashboard`` image: ``http://localhost:9090/api/v1/otlp``.
 """
+
+import atexit as _atexit
 
 from hilspy._channel import Channel, merge, open
 from hilspy._hilspy import (
@@ -43,9 +50,13 @@ from hilspy._hilspy import (
     Message,
     Periodic,
     __version__,
+    _shutdown_telemetry,
     register_codec,
     register_transport,
 )
+
+# Export what the last interval recorded before the process ends.
+_atexit.register(_shutdown_telemetry)
 
 __all__ = [
     "Channel",

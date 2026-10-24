@@ -35,6 +35,12 @@ protox = "0.10"
 gstreamer = "0.24"
 gstreamer-app = "0.24"
 gstreamer-video = "0.24"
+# Metrics (telemetry). The SDK and the OTLP/HTTP exporter (blocking reqwest,
+# no TLS: the wheels link no OpenSSL) are behind hilspy-core's `otlp`.
+opentelemetry = { version = "0.33", default-features = false, features = ["metrics"] }
+opentelemetry_sdk = { version = "0.33", default-features = false, features = ["metrics"] }
+opentelemetry-otlp = { version = "0.33", default-features = false, features = ["metrics", "http-proto", "reqwest-blocking-client"] }
+sysinfo = { version = "0.36", default-features = false, features = ["system"] }
 
 [profile.release]
 lto = "thin"

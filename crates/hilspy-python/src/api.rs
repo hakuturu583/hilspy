@@ -47,6 +47,14 @@ pub(crate) fn open(
     Ok(Channel { inner, url, codec })
 }
 
+/// Export the metrics recorded so far and stop exporting (`atexit`; see
+/// `hilspy_core::telemetry`). A no-op unless `OTEL_EXPORTER_OTLP_*` turned
+/// exporting on.
+#[pyfunction(name = "_shutdown_telemetry")]
+pub(crate) fn shutdown_telemetry(py: Python<'_>) {
+    py.detach(hilspy_core::telemetry::shutdown);
+}
+
 /// A transport and a codec composed: send and receive messages.
 #[pyclass(module = "hilspy._hilspy", name = "_Channel", frozen)]
 pub(crate) struct Channel {

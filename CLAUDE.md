@@ -17,6 +17,8 @@ HILSPY_TEST_VCAN=vcan0 uv run pytest tests/test_socketcan.py   # needs vcan0 (CI
 uv run --group setup tools/setup_host.py --build   # GStreamer, v4l2loopback /dev/video10, `v4l2` build
 cargo test -p hilspy-core --features v4l2
 HILSPY_TEST_V4L2=/dev/video10 uv run --no-sync pytest tests/test_v4l2.py   # CI job `v4l2`
+docker build -t hilspy-dashboard dashboard   # Prometheus + Perses image (CI job `dashboard`)
+uv run tools/setup_host.py --dashboard --no-v4l2   # docker pull the image of this version
 ```
 
 `uv sync` rebuilds the extension when Rust sources change (`tool.uv.cache-keys`).
@@ -49,6 +51,12 @@ HILSPY_TEST_V4L2=/dev/video10 uv run --no-sync pytest tests/test_v4l2.py   # CI 
   and commit the regenerated `lidar/profiles.binpb` (`tests/lidar_profiles.rs`
   checks it). Extend the schema and the generic engine (`src/lidar/`) only for
   a layout no profile can express.
+- Metrics are OpenTelemetry instruments in `hilspy-core` (`src/telemetry/`),
+  configured by the standard `OTEL_*` variables only (no Python API). A new
+  or renamed metric updates the table in `telemetry/mod.rs`, the README and,
+  if shown, `dashboard/perses/provisioning/dashboard.yaml`
+  (`tests/test_dashboard.py`). The dashboard image's Prometheus and Perses
+  versions are the `ARG`s in `dashboard/Dockerfile`; it keeps no `RUN` step.
 - New behaviour gets a Rust unit test in the core and a Python test; DBC
   bit-layout changes must keep `tests/test_dbc.py::test_matches_cantools` green.
 - The Python package supports 3.10+ (abi3 wheel); write 3.10-compatible code.

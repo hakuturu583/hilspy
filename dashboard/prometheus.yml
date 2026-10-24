@@ -1,0 +1,23 @@
+# Prometheus of the hilspy dashboard image. hilspy pushes its metrics over
+# OTLP (--web.enable-otlp-receiver):
+#   OTEL_EXPORTER_OTLP_ENDPOINT=http://<host>:9090/api/v1/otlp
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+otlp:
+  # Resource attributes as labels (service.name and service.instance.id
+  # already become `job` and `instance`).
+  promote_resource_attributes:
+    - host.name
+    - deployment.environment.name
+
+storage:
+  tsdb:
+    # Pushed samples may arrive late (a paused simulation, a retried export).
+    out_of_order_time_window: 30m
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]

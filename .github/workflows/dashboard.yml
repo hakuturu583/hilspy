@@ -1,0 +1,112 @@
+name: Dashboard image
+
+# The dashboard image (dashboard/: Prometheus with the OTLP receiver and
+# Perses with the hilspy dashboard) for linux/amd64 and linux/arm64. CI builds
+# and smoke-tests it on every PR; the release pushes it to
+# ghcr.io/<owner>/hilspy-dashboard:<version> (and <major>.<minor>, latest),
+# which `tools/setup_host.py --dashboard` pulls for the installed version.
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: "Commit to build (default: the triggering commit)"
+        type: string
+        default: ""
+      version:
+        description: "hilspy version to tag the image with (pushes when set)"
+        type: string
+        default: ""
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Released version to (re)push, e.g. 0.15.0 (built from tag vX)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('v{0}', inputs.version) || inputs.ref }}
+
+      - name: Name the image and its tags
+        id: meta
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/hilspy-dashboard"
+          if [ -z "$VERSION" ]; then
+            {
+              echo "push=false"
+              echo "tags=${image}:ci"
+              echo "version=dev"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if ! [[ "$VERSION" =~ ^([0-9]+)\.([0-9]+)\.[0-9]+$ ]]; then
+            echo "::error::'$VERSION' is not a version like 0.15.0"; exit 1
+          fi
+          {
+            echo "push=true"
+            echo "version=${VERSION}"
+            echo "tags=${image}:${VERSION},${image}:${BASH_REMATCH[1]}.${BASH_REMATCH[2]},${image}:latest"
+          } >> "$GITHUB_OUTPUT"
+
+      # The image has no RUN step, so the arm64 variant needs no emulation.
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build for amd64 and load it for the smoke test
+        uses: docker/build-push-action@v6
+        with:
+          context: dashboard
+          platforms: linux/amd64
+          load: true
+          tags: hilspy-dashboard:smoke
+          build-args: HILSPY_VERSION=${{ steps.meta.outputs.version }}
+
+      - name: Smoke test (Prometheus ready, dashboard provisioned, data source reachable)
+        run: |
+          docker run -d --name dashboard -p 9090:9090 -p 8080:8080 hilspy-dashboard:smoke
+          for _ in $(seq 60); do
+            curl -fsS http://localhost:9090/-/ready > /dev/null 2>&1 \
+              && curl -fsS http://localhost:8080/api/v1/projects/hilspy/dashboards/hilspy > /dev/null 2>&1 \
+              && break
+            sleep 1
+          done
+          curl -fsS http://localhost:8080/api/v1/projects/hilspy/dashboards/hilspy | grep -q hilspy_packets_total
+          curl -fsS -X POST http://localhost:8080/proxy/globaldatasources/prometheus/api/v1/query \
+            --data-urlencode 'query=up' | grep -q '"status":"success"'
+          # The OTLP receiver is on (an empty request is accepted).
+          curl -fsS -X POST -H 'Content-Type: application/x-protobuf' --data-binary '' \
+            http://localhost:9090/api/v1/otlp/v1/metrics
+          docker stop dashboard
+          test "$(docker inspect dashboard --format '{{.State.ExitCode}}')" = 0
+
+      - name: Show the logs
+        if: failure()
+        run: docker logs dashboard || true
+
+      - uses: docker/login-action@v3
+        if: steps.meta.outputs.push == 'true'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build for amd64 and arm64 (and push on a release)
+        uses: docker/build-push-action@v6
+        with:
+          context: dashboard
+          platforms: linux/amd64,linux/arm64
+          push: ${{ steps.meta.outputs.push == 'true' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          build-args: HILSPY_VERSION=${{ steps.meta.outputs.version }}
+          labels: org.opencontainers.image.revision=${{ github.sha }}

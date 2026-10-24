@@ -1,0 +1,22 @@
+# Perses of the hilspy dashboard image: the dashboard and its Prometheus
+# data source are provisioned from /etc/perses/provisioning.
+database:
+  file:
+    folder: /perses
+    extension: yaml
+
+plugin:
+  path: /etc/perses/plugins
+  archive_paths:
+    - /etc/perses/plugins-archive
+
+datasource:
+  proxy:
+    # The Prometheus beside it; the proxy denies loopback by default.
+    allowed_networks:
+      - 127.0.0.0/8
+      - ::1/128
+
+provisioning:
+  folders:
+    - /etc/perses/provisioning
