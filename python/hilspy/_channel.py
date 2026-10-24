@@ -349,7 +349,9 @@ def open(url: str, codec: str = "raw", *, clock: Clock | None = None, **options:
     ``tcp://host:port`` (``?listen``), ``mem://name`` (in-process),
     ``file://path`` (``?write``; ``.blf``/``.asc``/``?format=candump`` CAN
     logs, ``?realtime``), ``serial:///dev/ttyUSB0`` (``?baud=``,
-    ``parity``, ...). Codecs: ``raw``, ``dbc:FILE`` (options
+    ``parity``, ...), ``v4l2:///dev/video10`` (frames into a V4L2 device
+    through GStreamer; ``?width=``, ``height``, ``format``, ``fps``,
+    ``output``; Linux, built with the ``v4l2`` feature). Codecs: ``raw``, ``dbc:FILE`` (options
     ``strict``, ``scaling``, ``decode_choices``, ``e2e``), ``fibex:FILE``
     (ASAM FIBEX CAN / CAN FD frames; option ``channel`` and the ``dbc:``
     options), ``someip:FILE`` (SOME/IP methods, events and fields of

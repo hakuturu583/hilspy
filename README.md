@@ -25,6 +25,7 @@ with hilspy.open("can://vcan0", "dbc:vehicle.dbc") as ecu:
 | `file://path` | replay a recording; `?write` / `?append` records one |
 | `file://drive.blf`, `drive.asc`, `drive.log?format=candump` | CAN logs (Vector BLF/ASC, candump) with identifiers and times; `?realtime` replays them as recorded, `?write` records |
 | `serial:///dev/ttyUSB0` | serial port (`?baud=115200`, `data_bits`, `parity`, `stop_bits`, `flow`); `serial://COM3` on Windows |
+| `v4l2:///dev/video10` | camera frames into a V4L2 device (v4l2loopback) through GStreamer (`?width=`, `height`, `format`, `fps`, `output`); Linux, built with the `v4l2` feature, see [Cameras](#cameras-v4l2loopback) |
 
 | Codec | |
 | --- | --- |
@@ -43,6 +44,9 @@ with hilspy.open("can://vcan0", "dbc:vehicle.dbc") as ecu:
 Python 3.10+. One abi3 wheel per platform serves every Python version; wheels
 are built for Linux (x86_64, aarch64), macOS (arm64, x86_64) and Windows x64.
 `can://` (SocketCAN) is Linux-only; every other transport and codec works everywhere.
+`v4l2://` (Linux) links the system GStreamer, so the published wheels leave it
+out: build from source with the `v4l2` feature
+([Cameras](#cameras-v4l2loopback) has a setup command that does it).
 
 ```sh
 pip install hilspy
@@ -484,6 +488,62 @@ defaults. Channel angles are
 nominal values from [tier4/nebula](https://github.com/tier4/nebula)'s
 calibration files; per-unit calibration is not applied.
 
+### Cameras (v4l2loopback)
+
+`v4l2://DEVICE` turns sent frames into a camera that any V4L2 client sees
+(a browser, OpenCV, a ROS camera driver, `ffplay /dev/video10`): each packet
+is one frame, pushed through `appsrc ! videoconvert ! videoscale ! v4l2sink`
+([gstreamer-rs](https://crates.io/crates/gstreamer)) into a
+[v4l2loopback](https://github.com/umlaeute/v4l2loopback) device.
+
+```python
+camera = hilspy.open("v4l2:///dev/video10?width=640&height=480&fps=30")
+camera.send(hilspy.Message(data=rgb.tobytes()))  # an (480, 640, 3) uint8 array
+jpeg_camera = hilspy.open("v4l2:///dev/video11?format=jpeg")
+jpeg_camera.send(hilspy.Message(data=open("frame.jpg", "rb").read()))
+```
+
+| Option | |
+| --- | --- |
+| `format` | what a packet holds: a GStreamer raw format (`RGB`, the default, `BGR`, `RGBA`, `BGRA`, `GRAY8`, `I420`, `NV12`, `YUY2`, ...), or `jpeg` / `png` |
+| `width`, `height` | frame size; required for raw formats, a size to scale to for `jpeg` / `png` |
+| `fps` | nominal rate in the caps (`30`, `30000/1001`); frames go out as sent, so the caller (or `every()`) paces them |
+| `output` | the raw format the device receives (default `YUY2`) |
+
+Raw frames are tightly packed (`ndarray.tobytes()`) or in GStreamer's padded
+layout; a frame of another size raises `hilspy.Error`, and so does the send
+after a pipeline error (a device that refuses the format, an image that does
+not decode). The channel receives nothing.
+
+The feature links the system GStreamer, so it is not in the published
+wheels. It works on amd64 and arm64 Linux alike (CI tests both).
+`tools/setup_host.py` sets a Debian / Ubuntu host (x86_64 or aarch64) up with
+[ansible-runner](https://ansible.readthedocs.io/projects/runner/) (playbook
+`tools/ansible/v4l2loopback.yml`): GStreamer and v4l2loopback (DKMS) are
+installed, the devices are created now and at every boot
+(`/etc/modprobe.d/hilspy-v4l2loopback.conf`, labels `hilspy camera N`,
+`exclusive_caps=1` so browsers list them), you join the `video` group and,
+with `--build`, this checkout is rebuilt with the feature:
+
+```sh
+uv run --group setup tools/setup_host.py --build              # /dev/video10
+uv run --group setup tools/setup_host.py --devices 2 --first 20 --label "sim camera"
+uv run --group setup tools/setup_host.py --check              # show what would change
+uv run --no-sync python examples/camera_simulator.py v4l2:///dev/video10
+```
+
+The module is built by DKMS against the running kernel's headers:
+`linux-headers-$(uname -r)` on distribution kernels (Ubuntu and Debian on
+amd64 and arm64, Ubuntu for Raspberry Pi, Raspberry Pi OS bookworm),
+`nvidia-l4t-kernel-headers` on NVIDIA Jetson (L4T) and
+`raspberrypi-kernel-headers` on older Raspberry Pi OS; headers already at
+`/lib/modules/$(uname -r)/build` (a vendor BSP) are used as they are.
+`sudo` does the system changes (its password is asked for when needed).
+After `--build`, use `uv run --no-sync` (or rebuild with
+`MATURIN_PEP517_ARGS="--features v4l2" uv sync --reinstall-package hilspy`):
+a plain `uv sync` after a Rust change builds without the feature. Outside a
+checkout: `MATURIN_PEP517_ARGS="--features v4l2" pip install hilspy --no-binary hilspy`.
+
 ### Plugins
 
 A transport is any object with `send(packet)` and `recv(timeout)` (and
@@ -529,6 +589,7 @@ uv run python examples/gnss_simulator.py "tcp://127.0.0.1:28784?listen"
 uv run python examples/gnss_simulator.py "file://sim.sbf?write" --seconds 5
 uv run python examples/sbf_dump.py file://sim.sbf
 uv run python examples/multi_bus.py                                # asyncio: CAN + GNSS at once
+uv run --no-sync python examples/camera_simulator.py v4l2:///dev/video10   # see Cameras
 ```
 
 ## Development
@@ -538,6 +599,8 @@ uv sync                                 # build + dev dependencies (cantools for
 cargo test -p hilspy-core               # Rust unit tests
 uv run pytest                           # Python tests
 HILSPY_TEST_VCAN=vcan0 uv run pytest tests/test_socketcan.py   # needs a vcan interface
+cargo test -p hilspy-core --features v4l2                      # needs the GStreamer dev packages
+HILSPY_TEST_V4L2=/dev/video10 uv run --no-sync pytest tests/test_v4l2.py  # after setup_host.py --build
 uv run pre-commit run --all-files       # ruff, mypy, cargo fmt, clippy
 ```
 

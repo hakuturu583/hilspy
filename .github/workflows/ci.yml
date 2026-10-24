@@ -71,5 +71,44 @@ jobs:
           uv run pytest -v -rs tests/test_socketcan.py | tee result.txt
           ! grep -qi skipped result.txt
 
+  v4l2:
+    # v4l2:// into a v4l2loopback device, the host set up by the setup command.
+    # amd64 and arm64: in-vehicle computers are often ARM.
+    name: v4l2 (v4l2loopback, GStreamer, ${{ matrix.arch }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: amd64, os: ubuntu-latest }
+          - { arch: arm64, os: ubuntu-24.04-arm }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      # Only ansible-runner here: --build then builds the extension once,
+      # with the feature.
+      - run: uv sync --only-group setup
+      - name: Set up the host (ansible-runner) and build with the v4l2 feature
+        run: uv run --no-sync tools/setup_host.py --build
+      - name: Show the device
+        # -d: without it v4l2-ctl also opens /dev/video0, which is not there.
+        # sg: the setup added the runner to `video`; sg applies it without a new login.
+        run: sg video -c "v4l2-ctl -d /dev/video10 --info"
+      - if: matrix.arch == 'amd64'  # same code on arm64
+        run: cargo clippy --all-targets --features hilspy-core/v4l2 -- -D warnings
+      - run: cargo test -p hilspy-core --features v4l2
+      - name: Run the v4l2 tests (and fail if they were skipped)
+        env:
+          HILSPY_TEST_V4L2: /dev/video10
+        run: |
+          sg video -c "uv run --no-sync pytest -v -rs tests/test_v4l2.py" | tee result.txt
+          ! grep -qi skipped result.txt
+
   dist:
     uses: ./.github/workflows/build-dist.yml

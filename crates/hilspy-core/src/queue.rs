@@ -1,5 +1,6 @@
 //! A blocking queue of received packets, shared by the transports that
-//! receive on background threads (mem, tcp).
+//! receive on background threads (mem, tcp); an empty one is a receive that
+//! waits for its timeout or `close` (v4l2).
 
 use std::collections::VecDeque;
 use std::sync::{Condvar, Mutex};
