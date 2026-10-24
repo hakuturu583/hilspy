@@ -226,14 +226,16 @@ impl ChannelMetrics {
     }
 
     pub(crate) fn periodic(&self, message: &Message) -> PeriodicMetrics {
-        let name = message_label(message).unwrap_or_default();
-        PeriodicMetrics {
+        let mut metrics = PeriodicMetrics {
             instruments: Arc::clone(&self.instruments),
             attributes: [
                 self.attributes(Direction::Tx)[0].clone(),
-                KeyValue::new("message", name),
+                KeyValue::new("message", ""),
             ],
-        }
+            follows: None,
+        };
+        metrics.follow(message);
+        metrics
     }
 }
 
@@ -251,9 +253,25 @@ pub(crate) struct PeriodicMetrics {
     instruments: Arc<Instruments>,
     /// `bus`, `message`.
     attributes: [KeyValue; 2],
+    /// The name and CAN identifier `message` was made from.
+    follows: Option<(Option<String>, Option<u32>)>,
 }
 
 impl PeriodicMetrics {
+    /// Label what follows with `message` (`Periodic::update` may replace
+    /// it); unchanged, it costs a comparison.
+    pub(crate) fn follow(&mut self, message: &Message) {
+        let id = message.packet.as_ref().and_then(|p| p.can).map(|h| h.id);
+        if let Some((name, can)) = &self.follows {
+            if *name == message.name && *can == id {
+                return;
+            }
+        }
+        let label = message_label(message).unwrap_or_default();
+        self.attributes[1] = KeyValue::new("message", label);
+        self.follows = Some((message.name.clone(), id));
+    }
+
     pub(crate) fn lateness(&self, seconds: f64) {
         self.instruments.lateness.record(seconds, &self.attributes);
     }

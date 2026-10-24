@@ -127,8 +127,9 @@ spec:
       spec:
         display:
           name: CAN bus load
-          description: Nominal frame bits (no stuff bits) sent and received, over the bit rate above.
-            A node sees the frames of others as received ones.
+          description: Nominal frame bits (no stuff bits) over the bit rate above. Each process sees
+            the bus as what it sent plus what it received; the busiest view is shown, so a frame seen
+            by several processes counts once.
         plugin:
           kind: TimeSeriesChart
           spec:
@@ -148,8 +149,8 @@ spec:
             plugin:
               kind: PrometheusTimeSeriesQuery
               spec:
-                query: 100 * sum by (bus) (rate(hilspy_can_bits_total{job=~"$job", instance=~"$instance",
-                  bus=~"$bus"}[$__rate_interval])) / $bitrate
+                query: 100 * max by (bus) (sum by (bus, instance) (rate(hilspy_can_bits_total{job=~"$job",
+                  instance=~"$instance", bus=~"$bus"}[$__rate_interval]))) / $bitrate
                 seriesNameFormat: '{{bus}}'
     errors:
       kind: Panel

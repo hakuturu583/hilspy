@@ -599,7 +599,7 @@ fn schedule_next(clock: &Clock, inner: Arc<Inner>, shared: Arc<Shared>, end: Opt
 fn run(
     inner: Arc<Inner>,
     shared: Arc<Shared>,
-    metrics: PeriodicMetrics,
+    mut metrics: PeriodicMetrics,
     start: Instant,
     duration: Option<Duration>,
 ) {
@@ -615,8 +615,9 @@ fn run(
             break;
         }
         if now >= next {
-            metrics.lateness((now - next).as_secs_f64());
             let message = state.message.clone();
+            metrics.follow(&message);
+            metrics.lateness((now - next).as_secs_f64());
             drop(state);
             let result = inner.send(&message);
             state = shared.state.lock().unwrap();

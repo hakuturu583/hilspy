@@ -164,6 +164,26 @@ fn periodic_sends_record_their_lateness() {
 }
 
 #[test]
+fn periodic_metrics_follow_updates() {
+    let r = Recorder::new();
+    let tx = r.channel("mem://t-otel-periodic-update", "raw");
+    let task = tx
+        .every(
+            Some(Duration::from_millis(5)),
+            Message::raw(Packet::can(0x100, vec![0; 8])),
+            None,
+        )
+        .unwrap();
+    std::thread::sleep(Duration::from_millis(30));
+    task.update(Message::raw(Packet::can(0x200, vec![0; 8])));
+    std::thread::sleep(Duration::from_millis(60));
+    task.stop();
+    let late = |id| r.value("hilspy.periodic.lateness", &[("message", id)]);
+    assert!(late("0x100").is_some_and(|n| n >= 1.0));
+    assert!(late("0x200").is_some_and(|n| n >= 5.0));
+}
+
+#[test]
 fn can_frame_bits() {
     let h = |extended, fd| CanHeader {
         id: 1,
