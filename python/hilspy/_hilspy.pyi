@@ -23,10 +23,15 @@ class Error(Exception): ...
 #: decode as ``array.array`` (``send`` also takes lists, tuples and numpy
 #: arrays of numbers); other sequences (satellite records, ...) as lists.
 Value: TypeAlias = None | bool | int | float | str | Mapping[str, Any] | array[Any] | Sequence[Any]
+
+class _ToBytes(Protocol):
+    # numpy arrays and array.array before Python 3.12, whose stubs are not Buffer.
+    def tobytes(self) -> bytes: ...
+
 #: ``data``: bytes, a bytearray, or a uint8 numpy array / memoryview /
 #: ``array.array("B")`` of any shape (its bytes in C order: an image's
 #: pixels), or a sequence of ints.
-BytesLike: TypeAlias = Buffer | Sequence[int]
+BytesLike: TypeAlias = Buffer | _ToBytes | Sequence[int]
 
 class Message:
     def __init__(
