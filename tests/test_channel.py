@@ -130,3 +130,21 @@ def test_file_record_and_replay(tmp_path: object, mem: str) -> None:
         rec.send(Message(data=b"def"))
     with hilspy.open(f"file://{path}") as replay:
         assert b"".join(m.data or b"" for m in replay) == b"abcdef"
+
+
+def test_data_from_numpy_and_buffers() -> None:
+    import array
+
+    import numpy as np
+
+    image = np.arange(4 * 6 * 3, dtype=np.uint8).reshape(4, 6, 3)
+    assert Message(data=image).data == image.tobytes()  # an image: pixels in C order
+    view = image[:, ::2]  # not contiguous
+    assert Message(data=view).data == view.tobytes()
+    assert Message(data=memoryview(b"abc")).data == b"abc"
+    assert Message(data=array.array("B", [1, 2])).data == b"\x01\x02"
+    assert Message(data=bytearray(b"xy")).data == b"xy"
+    assert Message(data=[1, 2, 255]).data == b"\x01\x02\xff"
+    for wrong in (np.zeros(4, np.float32), np.zeros(2, np.uint16), array.array("h", [1])):
+        with pytest.raises(TypeError, match="uint8"):
+            Message(data=wrong)

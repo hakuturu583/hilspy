@@ -45,7 +45,7 @@ def main() -> None:
         start = time.monotonic()
         for n in range(int(args.seconds * args.fps)):
             t = n / args.fps
-            camera.send(hilspy.Message(data=render(t, args.width, args.height).tobytes()))
+            camera.send(hilspy.Message(data=render(t, args.width, args.height)))
             time.sleep(max(0.0, start + t + 1 / args.fps - time.monotonic()))
 
 
