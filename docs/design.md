@@ -122,6 +122,19 @@ deadlocking. A Python exception raised in a plugin travels through the core as
 * `serial://`: the `serialport` crate (built without libudev, so wheels need
   no system library); a reader and a cloned writer handle, reads in 100 ms
   slices so close is noticed; packets are stream chunks like TCP's.
+* `v4l2://` (`transport/v4l2.rs`, Linux, feature `v4l2`): gstreamer-rs
+  `appsrc` (live, timestamped on push, blocking at two frames in flight) `!
+  [jpegdec|pngdec] ! videoconvert ! videoscale ! capsfilter(output) !
+  v4l2sink sync=false`, one packet per frame. Raw frames are checked against
+  `VideoInfo` (tight rows of single-plane formats are padded to its
+  strides). Opening the device fails at `open`; later pipeline errors are
+  popped from the bus and fail the next send, and every send after. It
+  receives nothing. The feature is off by default because it links the
+  system GStreamer, which manylinux wheels cannot carry; without it the
+  scheme reports how to build it. `tools/setup_host.py` (ansible-runner,
+  `tools/ansible/v4l2loopback.yml`) prepares a host: packages, the
+  persistent v4l2loopback configuration (reloaded only when the loaded
+  devices' labels differ), the `video` group and the feature build.
 * `file://`: replay in 64 KiB chunks (ends at EOF, or `?follow`), or record
   packet bytes (`?write`, `?append`).
 
@@ -252,4 +265,5 @@ step turns ground truth (CARLA ego pose and velocity) into device traffic
 messages via `every()`), and decodes the device under test's output back into
 observations.
 A simulated LiDAR is `udp://driver:2368` + `lidar:MODEL`, sending the
-raycast point cloud of each revolution.
+raycast point cloud of each revolution. A simulated camera is
+`v4l2:///dev/videoN` (v4l2loopback), sending each rendered image.

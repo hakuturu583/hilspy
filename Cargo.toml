@@ -31,6 +31,10 @@ prost = "0.14"
 prost-build = "0.14"
 prost-reflect = { version = "0.16", features = ["text-format"] }
 protox = "0.10"
+# v4l2:// (feature `v4l2`, Linux). 0.24: 0.25 needs Rust 1.92.
+gstreamer = "0.24"
+gstreamer-app = "0.24"
+gstreamer-video = "0.24"
 
 [profile.release]
 lto = "thin"

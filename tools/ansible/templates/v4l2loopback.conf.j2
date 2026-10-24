@@ -1,0 +1,2 @@
+# Managed by hilspy (tools/setup_host.py); edits are overwritten.
+options v4l2loopback devices={{ v4l2loopback_count }} video_nr={{ v4l2loopback_numbers | join(',') }} card_label={% for label in v4l2loopback_labels %}"{{ label }}"{{ "," if not loop.last }}{% endfor %} exclusive_caps={{ ([v4l2loopback_exclusive_caps | bool | int] * (v4l2loopback_count | int)) | join(',') }}

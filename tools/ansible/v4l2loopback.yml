@@ -1,0 +1,156 @@
+# Prepares a Debian / Ubuntu host for hilspy's v4l2:// transport:
+# GStreamer, v4l2loopback devices (now and at every boot), the video group,
+# and optionally a build of this checkout with the `v4l2` feature.
+# Run it through tools/setup_host.py (ansible-runner); the variables below
+# are its options.
+- name: v4l2loopback cameras for hilspy
+  hosts: all
+  become: true
+  vars:
+    v4l2loopback_count: 1
+    v4l2loopback_first: 10
+    v4l2loopback_label: hilspy camera
+    v4l2loopback_exclusive_caps: true
+    hilspy_user: ""
+    hilspy_build: false
+    hilspy_source: ""
+    hilspy_uv: uv
+    v4l2loopback_numbers: "{{ range(v4l2loopback_first | int, v4l2loopback_first | int + v4l2loopback_count | int) | list }}"
+    v4l2loopback_labels: "{{ v4l2loopback_numbers | map('string') | map('regex_replace', '^', v4l2loopback_label ~ ' ') | list }}"
+    v4l2loopback_urls: "{{ v4l2loopback_numbers | map('string') | map('regex_replace', '^', 'v4l2:///dev/video') | list }}"
+  tasks:
+    - name: Check the platform
+      ansible.builtin.assert:
+        that: ansible_facts["system"] == "Linux" and ansible_facts["os_family"] == "Debian"
+        fail_msg: v4l2loopback setup supports Debian and Ubuntu hosts only
+
+    - name: Install GStreamer and v4l2loopback
+      tags: [packages]
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+        name:
+          - v4l2loopback-dkms
+          - v4l2loopback-utils
+          - v4l-utils
+          - gstreamer1.0-tools
+          - gstreamer1.0-plugins-base
+          - gstreamer1.0-plugins-good
+
+    - name: Install the kernel headers the v4l2loopback module builds against
+      tags: [packages, module]
+      block:
+        - name: Install linux-headers for the running kernel
+          ansible.builtin.apt:
+            name: "linux-headers-{{ ansible_facts['kernel'] }}"
+      rescue:
+        - name: Explain the missing headers
+          ansible.builtin.fail:
+            msg: >-
+              No headers package for kernel {{ ansible_facts['kernel'] }}, so DKMS cannot build
+              v4l2loopback. Boot a distribution kernel (or install its headers), then run again.
+
+    - name: Look for the videodev module v4l2loopback needs
+      tags: [packages, module]
+      ansible.builtin.command: modinfo videodev
+      register: videodev
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Install the kernel's extra modules (cloud kernels leave videodev out)
+      tags: [packages, module]
+      when: videodev.rc != 0
+      ansible.builtin.apt:
+        name: "linux-modules-extra-{{ ansible_facts['kernel'] }}"
+
+    - name: Install what building hilspy with the v4l2 feature needs
+      tags: [packages, build]
+      when: hilspy_build | bool
+      ansible.builtin.apt:
+        name:
+          - build-essential
+          - pkg-config
+          - libgstreamer1.0-dev
+          - libgstreamer-plugins-base1.0-dev
+
+    - name: Configure the v4l2loopback devices
+      tags: [module]
+      ansible.builtin.template:
+        src: templates/v4l2loopback.conf.j2
+        dest: /etc/modprobe.d/hilspy-v4l2loopback.conf
+        mode: "0644"
+      register: v4l2loopback_conf
+
+    - name: Load v4l2loopback at boot
+      tags: [module]
+      ansible.builtin.copy:
+        content: "v4l2loopback\n"
+        dest: /etc/modules-load.d/hilspy-v4l2loopback.conf
+        mode: "0644"
+
+    - name: Read the loaded devices' names
+      tags: [module]
+      ansible.builtin.command: "cat /sys/devices/virtual/video4linux/video{{ item }}/name"
+      loop: "{{ v4l2loopback_numbers }}"
+      register: v4l2loopback_names
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Reload v4l2loopback when its devices differ from the configuration
+      tags: [module]
+      when: >-
+        v4l2loopback_conf is changed or
+        (v4l2loopback_names.results | rejectattr('rc', 'eq', 0) | list | length > 0) or
+        (v4l2loopback_names.results | map(attribute='stdout') | list) != v4l2loopback_labels
+      block:
+        - name: Unload v4l2loopback
+          ansible.builtin.command: modprobe -r v4l2loopback
+          register: v4l2loopback_unload
+          changed_when: true
+          failed_when: >-
+            v4l2loopback_unload.rc != 0 and 'not found' not in v4l2loopback_unload.stderr
+            and 'is not currently loaded' not in v4l2loopback_unload.stderr
+        - name: Load v4l2loopback
+          ansible.builtin.command: modprobe v4l2loopback
+          changed_when: true
+      rescue:
+        - name: Explain the failed reload
+          ansible.builtin.fail:
+            msg: >-
+              Could not reload v4l2loopback: {{ ansible_failed_result.stderr | default(ansible_failed_result.msg) }}.
+              Close every program using a /dev/video device (browsers, camera apps, hilspy channels) and run again.
+
+    - name: Check the devices
+      tags: [module]
+      ansible.builtin.stat:
+        path: "/dev/video{{ item }}"
+      loop: "{{ v4l2loopback_numbers }}"
+      register: v4l2loopback_devices
+      failed_when: not ansible_check_mode and not v4l2loopback_devices.stat.exists
+
+    - name: Let the user write to the devices (log in again for it to apply)
+      tags: [module]
+      when: hilspy_user | length > 0 and hilspy_user != "root"
+      ansible.builtin.user:
+        name: "{{ hilspy_user }}"
+        groups: video
+        append: true
+
+    - name: Build this checkout with the v4l2 feature
+      tags: [build]
+      when: hilspy_build | bool
+      become: false
+      ansible.builtin.command:
+        # --inexact keeps the packages running this playbook (ansible-runner).
+        argv: ["{{ hilspy_uv }}", "sync", "--inexact", "--reinstall-package", "hilspy"]
+        chdir: "{{ hilspy_source }}"
+      environment:
+        MATURIN_PEP517_ARGS: --features v4l2
+      changed_when: true
+
+    - name: Summary
+      ansible.builtin.debug:
+        msg: >-
+          {{ v4l2loopback_urls | join(', ') }} ready ({{ v4l2loopback_labels | join(', ') }}).

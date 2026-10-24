@@ -14,6 +14,9 @@ cargo test -p hilspy-core                 # Rust tests
 cargo fmt --all && cargo clippy --all-targets -- -D warnings
 uv run ruff check . && uv run ruff format . && uv run mypy
 HILSPY_TEST_VCAN=vcan0 uv run pytest tests/test_socketcan.py   # needs vcan0 (CI job `socketcan`)
+uv run --group setup tools/setup_host.py --build   # GStreamer, v4l2loopback /dev/video10, `v4l2` build
+cargo test -p hilspy-core --features v4l2
+HILSPY_TEST_V4L2=/dev/video10 uv run --no-sync pytest tests/test_v4l2.py   # CI job `v4l2`
 ```
 
 `uv sync` rebuilds the extension when Rust sources change (`tool.uv.cache-keys`).
@@ -37,6 +40,9 @@ HILSPY_TEST_VCAN=vcan0 uv run pytest tests/test_socketcan.py   # needs vcan0 (CI
   in strict mode over the package, tests and examples.
 - `socketcan` is Linux-only: keep it behind `cfg(target_os = "linux")` so the
   core builds elsewhere (`can://` then reports that it needs Linux).
+- `v4l2://` (GStreamer) is behind the `v4l2` feature as well as Linux: it
+  links the system GStreamer, which the wheels cannot carry. Host setup goes
+  in the ansible playbook `tools/ansible/v4l2loopback.yml`.
 - LiDAR sensors are data, not code: a model is a profile in
   `crates/hilspy-core/lidar/profiles/*.txtpb` (schema `lidar_profile.proto`).
   After editing either, run `cargo run -p hilspy-core --example lidar_profiles`

@@ -11,7 +11,8 @@ they mean)::
             print(msg.name, msg.fields)
 
 Transports: ``can://`` (SocketCAN), ``udp://``, ``tcp://``, ``mem://``
-(in-process), ``file://``, ``serial://``. Codecs: ``raw``, ``dbc:FILE``,
+(in-process), ``file://``, ``serial://``, ``v4l2://`` (camera frames into
+v4l2loopback; Linux, ``v4l2`` feature). Codecs: ``raw``, ``dbc:FILE``,
 ``fibex:FILE``, ``someip:FILE``, ``sbf``, ``nmea``, ``ubx``, ``rtcm``,
 ``lidar:MODEL``. Add more with :func:`register_transport` and
 :func:`register_codec`.

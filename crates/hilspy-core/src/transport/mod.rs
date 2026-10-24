@@ -11,6 +11,7 @@
 //! | `file://path` | replay a recording (`?follow`), or record one (`?write`, `?append`) |
 //! | `file://x.blf`, `x.asc`, `x.log?format=candump` | CAN logs with identifiers and times (`?realtime` replay, `?write`) |
 //! | `serial://PORT` | a serial port (`?baud=`, `data_bits`, `parity`, `stop_bits`, `flow`); packets are stream chunks |
+//! | `v4l2:///dev/video10` | video frames into a V4L2 device through GStreamer (Linux, feature `v4l2`; `?width=`, `height`, `format`, `fps`, `output`) |
 //!
 //! Other schemes are added with [`register`].
 
@@ -23,6 +24,8 @@ mod mem;
 mod serial;
 mod tcp;
 mod udp;
+#[cfg(all(target_os = "linux", feature = "v4l2"))]
+mod v4l2;
 
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock, RwLock};
@@ -81,6 +84,27 @@ fn registry() -> &'static RwLock<HashMap<String, Factory>> {
                 ))
             }),
         );
+        #[cfg(all(target_os = "linux", feature = "v4l2"))]
+        m.insert(
+            "v4l2".into(),
+            Arc::new(|e| Ok(Arc::new(v4l2::V4l2::open(e)?) as Arc<dyn Transport>)),
+        );
+        #[cfg(not(all(target_os = "linux", feature = "v4l2")))]
+        m.insert(
+            "v4l2".into(),
+            Arc::new(|_| {
+                Err(Error::Config(
+                    if cfg!(target_os = "linux") {
+                        "v4l2:// needs hilspy built with the `v4l2` feature (GStreamer): \
+                     uv run --group setup tools/setup_host.py --build, or \
+                     MATURIN_PEP517_ARGS=\"--features v4l2\" pip install hilspy --no-binary hilspy"
+                    } else {
+                        "v4l2:// (Video4Linux) is only available on Linux"
+                    }
+                    .into(),
+                ))
+            }),
+        );
         RwLock::new(m)
     })
 }
@@ -116,4 +140,24 @@ pub fn open(url: &str) -> Result<Arc<dyn Transport>> {
             ))
         })?;
     factory(endpoint)
+}
+
+#[cfg(test)]
+mod tests {
+    #[cfg(not(all(target_os = "linux", feature = "v4l2")))]
+    #[test]
+    fn v4l2_without_the_feature_says_how_to_get_it() {
+        let err = super::open("v4l2:///dev/video10")
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(
+            err.contains(if cfg!(target_os = "linux") {
+                "feature"
+            } else {
+                "Linux"
+            }),
+            "{err}"
+        );
+    }
 }
