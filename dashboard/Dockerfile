@@ -36,9 +36,8 @@ LABEL org.opencontainers.image.title="hilspy-dashboard" \
       org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.version="${HILSPY_VERSION}"
 
-USER nobody
-WORKDIR /prometheus
-EXPOSE 9090 8080
-VOLUME ["/prometheus", "/perses"]
+# The base image's user (nobody), working directory, port 9090 and
+# /prometheus volume stay; setting ENTRYPOINT drops its CMD.
+EXPOSE 8080
+VOLUME ["/perses"]
 ENTRYPOINT ["/bin/hilspy-dashboard"]
-CMD []

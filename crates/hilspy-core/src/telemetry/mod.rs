@@ -143,23 +143,31 @@ pub(crate) enum Direction {
     Rx,
 }
 
-/// One channel's view of the instruments, its attributes made once.
+/// One channel's view of the instruments, its attributes made once
+/// (`Arc<str>` values: cloning them for a message only counts references).
 pub(crate) struct ChannelMetrics {
     instruments: Arc<Instruments>,
-    bus: KeyValue,
     /// `bus`, `scheme`, `codec`, `direction`, for `Tx` and `Rx`.
-    attributes: [Vec<KeyValue>; 2],
+    attributes: [[KeyValue; 4]; 2],
 }
 
 impl ChannelMetrics {
-    /// `bus` is the transport URL (its query is dropped), `codec` the codec
-    /// specification (its argument, a file, is dropped).
-    pub(crate) fn new(instruments: Arc<Instruments>, bus: &str, codec: &str) -> Self {
-        let bus = bus.split('?').next().unwrap_or(bus).to_owned();
-        let scheme = bus.split_once("://").map_or("", |(s, _)| s).to_owned();
-        let codec = codec.split(':').next().unwrap_or(codec).to_owned();
+    /// `bus` is `scheme://address` (the URL without its query, empty without
+    /// a scheme); `codec` is the codec's name.
+    pub(crate) fn new(
+        instruments: Arc<Instruments>,
+        scheme: &str,
+        address: &str,
+        codec: &str,
+    ) -> Self {
+        let bus: Arc<str> = if scheme.is_empty() {
+            "".into()
+        } else {
+            format!("{scheme}://{address}").into()
+        };
+        let (scheme, codec): (Arc<str>, Arc<str>) = (scheme.into(), codec.into());
         let attributes = |direction: &'static str| {
-            vec![
+            [
                 KeyValue::new("bus", bus.clone()),
                 KeyValue::new("scheme", scheme.clone()),
                 KeyValue::new("codec", codec.clone()),
@@ -168,19 +176,17 @@ impl ChannelMetrics {
         };
         Self {
             attributes: [attributes("tx"), attributes("rx")],
-            bus: KeyValue::new("bus", bus),
             instruments,
         }
     }
 
-    fn attributes(&self, direction: Direction) -> &[KeyValue] {
+    fn attributes(&self, direction: Direction) -> &[KeyValue; 4] {
         &self.attributes[direction as usize]
     }
 
-    fn with(&self, direction: Direction, extra: KeyValue) -> Vec<KeyValue> {
-        let mut a = self.attributes(direction).to_vec();
-        a.push(extra);
-        a
+    fn with(&self, direction: Direction, extra: KeyValue) -> [KeyValue; 5] {
+        let [bus, scheme, codec, direction] = self.attributes(direction).clone();
+        [bus, scheme, codec, direction, extra]
     }
 
     pub(crate) fn packet(&self, direction: Direction, packet: &Packet) {
@@ -223,7 +229,10 @@ impl ChannelMetrics {
         let name = message_label(message).unwrap_or_default();
         PeriodicMetrics {
             instruments: Arc::clone(&self.instruments),
-            attributes: vec![self.bus.clone(), KeyValue::new("message", name)],
+            attributes: [
+                self.attributes(Direction::Tx)[0].clone(),
+                KeyValue::new("message", name),
+            ],
         }
     }
 }
@@ -240,7 +249,8 @@ fn message_label(message: &Message) -> Option<String> {
 /// A periodic message's punctuality.
 pub(crate) struct PeriodicMetrics {
     instruments: Arc<Instruments>,
-    attributes: Vec<KeyValue>,
+    /// `bus`, `message`.
+    attributes: [KeyValue; 2],
 }
 
 impl PeriodicMetrics {
@@ -249,9 +259,7 @@ impl PeriodicMetrics {
     }
 
     pub(crate) fn skipped(&self, deadlines: u64) {
-        if deadlines > 0 {
-            self.instruments.skipped.add(deadlines, &self.attributes);
-        }
+        self.instruments.skipped.add(deadlines, &self.attributes);
     }
 }
 

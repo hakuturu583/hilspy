@@ -13,6 +13,7 @@ use crate::error::{Error, Result};
 use crate::message::{Message, Packet};
 use crate::telemetry::{self, ChannelMetrics, Direction, Instruments, PeriodicMetrics};
 use crate::transport::{self, Transport};
+use crate::url::{CodecSpec, Endpoint};
 use crate::value::Options;
 
 struct Inner {
@@ -164,10 +165,17 @@ impl Channel {
     /// (without the query) as `bus` and the codec's name as `codec`.
     pub fn open_on(url: &str, codec: &str, options: Options, clock: Option<Clock>) -> Result<Self> {
         telemetry::init_from_env()?;
-        let metrics = ChannelMetrics::new(Instruments::global(), url, codec);
-        let codec_impl = codec::open(codec, options)?;
+        let endpoint = Endpoint::parse(url)?;
+        let spec = CodecSpec::parse(codec, Options::new())?;
+        let metrics = ChannelMetrics::new(
+            Instruments::global(),
+            &endpoint.scheme,
+            &endpoint.address,
+            &spec.name,
+        );
+        let codec = codec::open(codec, options)?;
         let transport = transport::open(url)?;
-        Ok(Self::build(transport, codec_impl, clock, metrics))
+        Ok(Self::build(transport, codec, clock, metrics))
     }
 
     pub fn new(transport: Arc<dyn Transport>, codec: Box<dyn Codec>) -> Self {
@@ -181,7 +189,7 @@ impl Channel {
         codec: Box<dyn Codec>,
         clock: Option<Clock>,
     ) -> Self {
-        let metrics = ChannelMetrics::new(Instruments::global(), "", "");
+        let metrics = ChannelMetrics::new(Instruments::global(), "", "", "");
         Self::build(transport, codec, clock, metrics)
     }
 

@@ -26,6 +26,8 @@ impl Recorder {
 
     fn channel(&self, url: &str, codec: &str) -> Channel {
         let instruments = Arc::new(Instruments::new(&self.provider.meter(SCOPE)));
+        let endpoint = crate::url::Endpoint::parse(url).unwrap();
+        let name = codec.split_once(':').map_or(codec, |(n, _)| n);
         let mut options = Options::new();
         if codec.starts_with("dbc:") {
             options.insert("strict", Value::Bool(false));
@@ -34,7 +36,7 @@ impl Recorder {
             transport::open(url).unwrap(),
             codec::open(codec, options).unwrap(),
             None,
-            ChannelMetrics::new(instruments, url, codec),
+            ChannelMetrics::new(instruments, &endpoint.scheme, &endpoint.address, name),
         )
     }
 

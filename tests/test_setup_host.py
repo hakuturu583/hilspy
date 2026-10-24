@@ -16,7 +16,8 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 @pytest.fixture
-def setup_host() -> ModuleType:
+def setup_host(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
+    monkeypatch.syspath_prepend(str(ROOT / "tools"))  # as when run as a script
     spec = importlib.util.spec_from_file_location("setup_host", ROOT / "tools" / "setup_host.py")
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
@@ -25,7 +26,6 @@ def setup_host() -> ModuleType:
 
 
 def test_the_image_is_tagged_with_this_version(setup_host: ModuleType) -> None:
-    assert setup_host.version() == hilspy.__version__
     assert setup_host.dashboard_image() == (
         f"ghcr.io/hakuturu583/hilspy-dashboard:{hilspy.__version__}"
     )

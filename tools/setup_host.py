@@ -22,13 +22,14 @@ from __future__ import annotations
 import argparse
 import getpass
 import os
-import re
 import shutil
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 from typing import Any
+
+from bump_version import current_version
 
 ROOT = Path(__file__).resolve().parent.parent
 PLAYBOOK = ROOT / "tools" / "ansible" / "v4l2loopback.yml"
@@ -92,17 +93,9 @@ def build() -> int:
     ).returncode
 
 
-def version() -> str:
-    """This checkout's hilspy version (pyproject.toml), the dashboard's tag."""
-    text = (ROOT / "pyproject.toml").read_text()
-    match = re.search(r'^version = "([^"]+)"', text, re.MULTILINE)
-    if not match:
-        sys.exit("no version in pyproject.toml")
-    return match.group(1)
-
-
 def dashboard_image(tag: str | None = None) -> str:
-    return f"{DASHBOARD_IMAGE}:{tag or version()}"
+    """The dashboard of ``tag``, by default of this checkout's version."""
+    return f"{DASHBOARD_IMAGE}:{tag or current_version()}"
 
 
 def pull_dashboard(image: str, check: bool = False) -> int:

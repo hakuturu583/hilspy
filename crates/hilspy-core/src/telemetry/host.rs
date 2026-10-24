@@ -2,17 +2,14 @@
 //! reader collects.
 
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use opentelemetry::metrics::Meter;
 use opentelemetry::KeyValue;
 use sysinfo::{
     CpuRefreshKind, MemoryRefreshKind, Pid, ProcessRefreshKind, ProcessesToUpdate, RefreshKind,
-    System,
+    System, MINIMUM_CPU_UPDATE_INTERVAL,
 };
-
-/// One refresh serves every gauge of a collection.
-const MIN_REFRESH: Duration = Duration::from_millis(200);
 
 #[derive(Default)]
 struct Sample {
@@ -49,7 +46,12 @@ impl Sampler {
     /// CPU usage is measured between two refreshes, so the first
     /// collection reads zero for it.
     fn sample(&mut self) -> Arc<Sample> {
-        if self.at.is_some_and(|t| t.elapsed() < MIN_REFRESH) {
+        // One refresh serves every gauge of a collection (and CPU usage needs
+        // this long between refreshes anyway).
+        if self
+            .at
+            .is_some_and(|t| t.elapsed() < MINIMUM_CPU_UPDATE_INTERVAL)
+        {
             return Arc::clone(&self.sample);
         }
         self.at = Some(Instant::now());
@@ -97,13 +99,36 @@ pub fn register_host_metrics(meter: &Meter) {
     let sampler = Arc::new(Mutex::new(Sampler::new()));
     let sample = move || sampler.lock().unwrap().sample();
 
-    let s = sample.clone();
-    meter
-        .f64_observable_gauge("process.cpu.utilization")
-        .with_unit("1")
-        .with_description("CPU time of this process over the last interval, a fraction of all CPUs")
-        .with_callback(move |o| o.observe(s().process_cpu, &[]))
-        .build();
+    let gauge = |name: &'static str,
+                 unit: &'static str,
+                 description: &'static str,
+                 value: fn(&Sample) -> f64| {
+        let s = sample.clone();
+        meter
+            .f64_observable_gauge(name)
+            .with_unit(unit)
+            .with_description(description)
+            .with_callback(move |o| o.observe(value(&s()), &[]))
+            .build();
+    };
+    gauge(
+        "process.cpu.utilization",
+        "1",
+        "CPU time of this process over the last interval, a fraction of all CPUs",
+        |s| s.process_cpu,
+    );
+    gauge(
+        "system.memory.utilization",
+        "1",
+        "Used fraction of the host's memory",
+        |s| s.memory,
+    );
+    gauge(
+        "system.cpu.load_average.1m",
+        "{thread}",
+        "Load average over one minute (0 on Windows)",
+        |s| s.load_1m,
+    );
     let s = sample.clone();
     meter
         .u64_observable_gauge("process.memory.usage")
@@ -111,28 +136,14 @@ pub fn register_host_metrics(meter: &Meter) {
         .with_description("Resident memory of this process")
         .with_callback(move |o| o.observe(s().process_memory, &[]))
         .build();
-    let s = sample.clone();
     meter
         .f64_observable_gauge("system.cpu.utilization")
         .with_unit("1")
         .with_description("Busy fraction of each logical CPU over the last interval")
         .with_callback(move |o| {
-            for (n, u) in s().cpus.iter().enumerate() {
+            for (n, u) in sample().cpus.iter().enumerate() {
                 o.observe(*u, &[KeyValue::new("cpu.logical_number", n as i64)]);
             }
         })
-        .build();
-    let s = sample.clone();
-    meter
-        .f64_observable_gauge("system.memory.utilization")
-        .with_unit("1")
-        .with_description("Used fraction of the host's memory")
-        .with_callback(move |o| o.observe(s().memory, &[]))
-        .build();
-    meter
-        .f64_observable_gauge("system.cpu.load_average.1m")
-        .with_unit("{thread}")
-        .with_description("Load average over one minute (0 on Windows)")
-        .with_callback(move |o| o.observe(sample().load_1m, &[]))
         .build();
 }

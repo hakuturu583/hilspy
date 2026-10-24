@@ -5,7 +5,11 @@ use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 use opentelemetry::KeyValue;
-use opentelemetry_otlp::MetricExporter;
+use opentelemetry_otlp::{
+    MetricExporter, OTEL_EXPORTER_OTLP_ENDPOINT, OTEL_EXPORTER_OTLP_METRICS_ENDPOINT,
+    OTEL_EXPORTER_OTLP_METRICS_PROTOCOL, OTEL_EXPORTER_OTLP_PROTOCOL,
+    OTEL_EXPORTER_OTLP_PROTOCOL_HTTP_PROTOBUF,
+};
 use opentelemetry_sdk::metrics::{PeriodicReader, SdkMeterProvider};
 use opentelemetry_sdk::resource::{EnvResourceDetector, TelemetryResourceDetector};
 use opentelemetry_sdk::Resource;
@@ -16,10 +20,8 @@ use crate::error::{Error, Result};
 /// dashboard of buses wants more than the SDK's 60 s.
 const DEFAULT_INTERVAL: Duration = Duration::from_secs(5);
 
-fn provider() -> &'static Mutex<Option<SdkMeterProvider>> {
-    static PROVIDER: Mutex<Option<SdkMeterProvider>> = Mutex::new(None);
-    &PROVIDER
-}
+/// The provider [`init_from_env`] installed, for [`shutdown`].
+static PROVIDER: Mutex<Option<SdkMeterProvider>> = Mutex::new(None);
 
 /// A set, non-blank environment variable.
 fn env_var(name: &str) -> Option<String> {
@@ -29,15 +31,14 @@ fn env_var(name: &str) -> Option<String> {
         .filter(|v| !v.is_empty())
 }
 
-/// What the environment (`var`) asks for: `None` to export nothing, else
-/// the endpoint variable that is set.
-fn requested(var: impl Fn(&str) -> Option<String>) -> Result<Option<&'static str>> {
+/// Whether the environment (`var`) asks for metrics to be exported.
+fn requested(var: impl Fn(&str) -> Option<String>) -> Result<bool> {
     if var("OTEL_SDK_DISABLED").is_some_and(|v| v.eq_ignore_ascii_case("true")) {
-        return Ok(None);
+        return Ok(false);
     }
     match var("OTEL_METRICS_EXPORTER").as_deref() {
         None | Some("otlp") => {}
-        Some("none") => return Ok(None),
+        Some("none") => return Ok(false),
         Some(other) => {
             return Err(Error::Config(format!(
                 "OTEL_METRICS_EXPORTER={other:?}: hilspy exports metrics with \"otlp\" or \"none\""
@@ -45,24 +46,25 @@ fn requested(var: impl Fn(&str) -> Option<String>) -> Result<Option<&'static str
         }
     }
     for name in [
-        "OTEL_EXPORTER_OTLP_METRICS_PROTOCOL",
-        "OTEL_EXPORTER_OTLP_PROTOCOL",
+        OTEL_EXPORTER_OTLP_METRICS_PROTOCOL,
+        OTEL_EXPORTER_OTLP_PROTOCOL,
     ] {
         if let Some(p) = var(name) {
-            if p != "http/protobuf" {
+            if p != OTEL_EXPORTER_OTLP_PROTOCOL_HTTP_PROTOBUF {
                 return Err(Error::Config(format!(
-                    "{name}={p:?}: hilspy exports OTLP over HTTP (\"http/protobuf\")"
+                    "{name}={p:?}: hilspy exports OTLP over HTTP \
+                     ({OTEL_EXPORTER_OTLP_PROTOCOL_HTTP_PROTOBUF:?})"
                 )));
             }
             break;
         }
     }
     Ok([
-        "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT",
-        "OTEL_EXPORTER_OTLP_ENDPOINT",
+        OTEL_EXPORTER_OTLP_METRICS_ENDPOINT,
+        OTEL_EXPORTER_OTLP_ENDPOINT,
     ]
     .into_iter()
-    .find(|name| var(name).is_some()))
+    .any(|name| var(name).is_some()))
 }
 
 /// Install a meter provider exporting over OTLP/HTTP (protobuf) if the
@@ -89,7 +91,7 @@ pub fn init_from_env() -> Result<bool> {
 }
 
 fn install() -> Result<bool> {
-    if requested(env_var)?.is_none() {
+    if !requested(env_var)? {
         return Ok(false);
     }
     let exporter = MetricExporter::builder()
@@ -106,7 +108,7 @@ fn install() -> Result<bool> {
         .build();
     opentelemetry::global::set_meter_provider(provider.clone());
     super::register_host_metrics(&opentelemetry::global::meter(super::SCOPE));
-    *self::provider().lock().unwrap() = Some(provider);
+    *PROVIDER.lock().unwrap() = Some(provider);
     Ok(true)
 }
 
@@ -137,7 +139,7 @@ fn resource(service: Option<String>) -> Resource {
 /// Export what is recorded and stop exporting (at exit; the Python package
 /// calls it from `atexit`). Idempotent; a no-op when nothing is exported.
 pub fn shutdown() {
-    if let Some(p) = provider().lock().unwrap().take() {
+    if let Some(p) = PROVIDER.lock().unwrap().take() {
         let _ = p.shutdown();
     }
 }
@@ -148,7 +150,7 @@ mod tests {
 
     use super::*;
 
-    fn ask(vars: &[(&str, &str)]) -> Result<Option<&'static str>> {
+    fn ask(vars: &[(&str, &str)]) -> Result<bool> {
         let vars: HashMap<String, String> = vars
             .iter()
             .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
@@ -158,35 +160,22 @@ mod tests {
 
     #[test]
     fn an_endpoint_turns_exporting_on() {
-        const BOTH: &str = "OTEL_EXPORTER_OTLP_ENDPOINT";
-        const METRICS: &str = "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT";
-        assert_eq!(ask(&[]).unwrap(), None);
-        assert_eq!(
-            ask(&[(BOTH, "http://h:9090/api/v1/otlp")]).unwrap(),
-            Some(BOTH)
-        );
-        assert_eq!(
-            ask(&[(BOTH, "http://a"), (METRICS, "http://b/v1/metrics")]).unwrap(),
-            Some(METRICS)
-        );
-        assert_eq!(
-            ask(&[(BOTH, "x"), ("OTEL_SDK_DISABLED", "TRUE")]).unwrap(),
-            None
-        );
-        assert_eq!(
-            ask(&[(BOTH, "x"), ("OTEL_METRICS_EXPORTER", "none")]).unwrap(),
-            None
-        );
+        const BOTH: &str = OTEL_EXPORTER_OTLP_ENDPOINT;
+        assert!(!ask(&[]).unwrap());
+        assert!(ask(&[(BOTH, "http://h:9090/api/v1/otlp")]).unwrap());
+        assert!(ask(&[(OTEL_EXPORTER_OTLP_METRICS_ENDPOINT, "http://b/v1/metrics")]).unwrap());
+        assert!(!ask(&[(BOTH, "x"), ("OTEL_SDK_DISABLED", "TRUE")]).unwrap());
+        assert!(!ask(&[(BOTH, "x"), ("OTEL_METRICS_EXPORTER", "none")]).unwrap());
         assert!(ask(&[(BOTH, "x"), ("OTEL_METRICS_EXPORTER", "prometheus")]).is_err());
-        let grpc = ask(&[(BOTH, "x"), ("OTEL_EXPORTER_OTLP_PROTOCOL", "grpc")]);
+        let grpc = ask(&[(BOTH, "x"), (OTEL_EXPORTER_OTLP_PROTOCOL, "grpc")]);
         assert!(grpc.unwrap_err().to_string().contains("http/protobuf"));
         // The metrics-specific variable wins.
         let ok = ask(&[
             (BOTH, "x"),
-            ("OTEL_EXPORTER_OTLP_PROTOCOL", "grpc"),
-            ("OTEL_EXPORTER_OTLP_METRICS_PROTOCOL", "http/protobuf"),
+            (OTEL_EXPORTER_OTLP_PROTOCOL, "grpc"),
+            (OTEL_EXPORTER_OTLP_METRICS_PROTOCOL, "http/protobuf"),
         ]);
-        assert_eq!(ok.unwrap(), Some(BOTH));
+        assert!(ok.unwrap());
     }
 
     #[test]
