@@ -94,7 +94,11 @@ jobs:
       - run: uv sync
       - name: Set up the host (ansible-runner) and build with the v4l2 feature
         run: uv run --group setup tools/setup_host.py --build
-      - run: v4l2-ctl --list-devices
+      - name: Show the devices
+        # sudo: this shell predates the runner joining `video`.
+        run: |
+          ls -l /dev/video*
+          sudo v4l2-ctl --list-devices
       - run: cargo clippy --all-targets --features hilspy-core/v4l2 -- -D warnings
       - run: cargo test -p hilspy-core --features v4l2
       - name: Run the v4l2 tests (and fail if they were skipped)
