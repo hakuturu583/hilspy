@@ -44,9 +44,11 @@ jobs:
         run: |
           image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/hilspy-dashboard"
           if [ -z "$VERSION" ]; then
-            echo "push=false" >> "$GITHUB_OUTPUT"
-            echo "tags=${image}:ci" >> "$GITHUB_OUTPUT"
-            echo "version=dev" >> "$GITHUB_OUTPUT"
+            {
+              echo "push=false"
+              echo "tags=${image}:ci"
+              echo "version=dev"
+            } >> "$GITHUB_OUTPUT"
             exit 0
           fi
           if ! [[ "$VERSION" =~ ^([0-9]+)\.([0-9]+)\.[0-9]+$ ]]; then
