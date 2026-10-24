@@ -18,9 +18,9 @@
 //! * `output`: the raw format the device receives (default `YUY2`, which
 //!   browsers, OpenCV and ROS camera drivers read).
 //!
-//! A raw frame is either tightly packed (`width * height * bytes per pixel`,
+//! A raw frame is either tightly packed (rows unpadded, planes back to back,
 //! as `numpy.ndarray.tobytes()` gives) or laid out with GStreamer's default
-//! strides. It receives nothing. A pipeline error (the device refuses the
+//! strides and plane offsets. It receives nothing. A pipeline error (the device refuses the
 //! caps, a JPEG that does not decode) fails the send that reports it.
 
 use std::sync::{Condvar, Mutex};
@@ -36,6 +36,25 @@ use crate::error::{Error, Result};
 use crate::message::Packet;
 use crate::url::Endpoint;
 use crate::value::Options;
+
+/// The appsrc queue limit for JPEG / PNG frames.
+const ENCODED_QUEUE: u64 = 8 << 20;
+
+/// The bytes per row and rows of each plane of a tightly packed frame.
+fn packed_planes(info: &gst_video::VideoInfo) -> Vec<(usize, usize)> {
+    let finfo = info.format_info();
+    (0..info.n_planes())
+        .map(|plane| {
+            // The plane's first component sets its width and height.
+            let c = (0..finfo.n_components())
+                .find(|&c| finfo.plane()[c as usize] == plane)
+                .unwrap_or(0);
+            let width = finfo.scale_width(c as u8, info.width()) as usize;
+            let row = width * finfo.pixel_stride()[c as usize] as usize;
+            (row, finfo.scale_height(c as u8, info.height()) as usize)
+        })
+        .collect()
+}
 
 /// What a packet holds.
 enum Input {
@@ -169,11 +188,13 @@ impl V4l2 {
             .is_live(true)
             .do_timestamp(true)
             // Back-pressure instead of an unbounded queue: a send waits
-            // while two frames are in flight.
+            // while two raw frames (or ENCODED_QUEUE bytes of images) are
+            // in flight. Bytes, not max-buffers: that needs GStreamer 1.20,
+            // newer than JetPack 5's.
             .block(true)
             .max_bytes(match &input {
                 Input::Raw(info) => 2 * info.size() as u64,
-                _ => 0,
+                _ => ENCODED_QUEUE,
             })
             .build();
         let filter = element("capsfilter")?;
@@ -249,28 +270,34 @@ impl V4l2 {
         if data.len() == info.size() {
             return Ok(gst::Buffer::from_slice(data.to_vec()));
         }
-        // Tightly packed rows of a single-plane format, padded to the strides.
-        let finfo = info.format_info();
-        let row = info.width() as usize * finfo.pixel_stride()[0] as usize;
-        let stride = info.stride()[0] as usize;
-        let rows = info.height() as usize;
-        if info.n_planes() != 1 || data.len() != row * rows {
+        // Tightly packed planes (rows not padded, planes back to back), as
+        // numpy and most image libraries lay frames out: copied into
+        // GStreamer's strides and plane offsets.
+        let planes = packed_planes(info);
+        let packed: usize = planes.iter().map(|(row, rows)| row * rows).sum();
+        if data.len() != packed {
             return Err(Error::InvalidPacket(format!(
-                "a {}x{} {} frame is {} bytes, not {}",
+                "a {}x{} {} frame is {}, not {} bytes",
                 info.width(),
                 info.height(),
                 info.format().to_str(),
-                if info.n_planes() == 1 && row != stride {
-                    format!("{} (or {})", row * rows, info.size())
+                if packed == info.size() {
+                    packed.to_string()
                 } else {
-                    info.size().to_string()
+                    format!("{packed} (or {})", info.size())
                 },
                 data.len()
             )));
         }
         let mut padded = vec![0u8; info.size()];
-        for (dst, src) in padded.chunks_mut(stride).zip(data.chunks(row)) {
-            dst[..row].copy_from_slice(src);
+        let mut src = data;
+        for (plane, (row, rows)) in planes.into_iter().enumerate() {
+            let (offset, stride) = (info.offset()[plane], info.stride()[plane] as usize);
+            for r in 0..rows {
+                let dst = offset + r * stride;
+                padded[dst..dst + row].copy_from_slice(&src[..row]);
+                src = &src[row..];
+            }
         }
         Ok(gst::Buffer::from_slice(padded))
     }
@@ -397,6 +424,30 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(err.contains("30 (or 32)"), "{err}");
+    }
+
+    #[test]
+    fn packed_planar_frames_are_padded() {
+        // 6x4: GStreamer pads I420 and NV12 rows to 8 bytes; packed is 36.
+        for (format, chroma) in [("I420", 2 * 3 * 2), ("NV12", 6 * 2)] {
+            let (t, sink) = open(&format!("format={format}&output={format}&width=6&height=4"));
+            let mut frame: Vec<u8> = (0..24).collect();
+            frame.extend(100..100 + chroma as u8);
+            t.send(&Packet::bytes(frame.clone())).unwrap();
+            let (caps, data) = pull(&sink);
+            let info = gst_video::VideoInfo::from_caps(&caps).unwrap();
+            assert_eq!(data.len(), info.size(), "{format}");
+            let mut packed = Vec::new();
+            for (plane, (row, rows)) in packed_planes(&info).into_iter().enumerate() {
+                for r in 0..rows {
+                    let at = info.offset()[plane] + r * info.stride()[plane] as usize;
+                    packed.extend_from_slice(&data[at..at + row]);
+                }
+            }
+            assert_eq!(packed, frame, "{format}");
+            let err = t.send(&Packet::bytes(vec![0; 35])).unwrap_err().to_string();
+            assert!(err.contains("36 (or 48)"), "{err}");
+        }
     }
 
     #[test]

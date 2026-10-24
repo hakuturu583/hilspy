@@ -126,8 +126,8 @@ deadlocking. A Python exception raised in a plugin travels through the core as
   `appsrc` (live, timestamped on push, blocking at two frames in flight) `!
   [jpegdec|pngdec] ! videoconvert ! videoscale ! capsfilter(output) !
   v4l2sink sync=false`, one packet per frame. Raw frames are checked against
-  `VideoInfo` (tight rows of single-plane formats are padded to its
-  strides). Opening the device fails at `open`; later pipeline errors are
+  `VideoInfo` (tightly packed planes are copied to its strides and
+  offsets); the appsrc queue is bounded for JPEG / PNG too (8 MiB). Opening the device fails at `open`; later pipeline errors are
   popped from the bus and fail the next send, and every send after. It
   receives nothing. The feature is off by default because it links the
   system GStreamer, which manylinux wheels cannot carry; without it the
