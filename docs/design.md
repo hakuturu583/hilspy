@@ -85,6 +85,21 @@ on a clock:
   `Message::timestamp` for the times they write) and received packets with
   the time of reception.
 
+## Link outages
+
+`Channel::disconnect(direction, duration)` (`src/outage.rs`) simulates a
+lost link above the transport, for fault injection. Each side (send, receive)
+holds an optional cut with its end: never (until `reconnect`), a wall-clock
+instant, or a virtual time, for which a task on the clock ends it as the clock
+passes, so the wall time it ended at is known. A send encodes as usual (codec
+state moves on) and drops its packets in `Inner::transmit`, which deferred
+paced packets and periodic ticks go through as well. A receive drops every
+packet it reads while the receive side is down and, afterwards, packets whose
+transport arrival stamp (a Unix time: the live transports stamp on arrival)
+falls in the last outage, so nothing queued meanwhile surfaces after
+reconnecting. The transport is not touched: a TCP connection stays up and
+goes quiet.
+
 ## Pluggability
 
 `transport::register(scheme, factory)` and `codec::register(name, factory)`

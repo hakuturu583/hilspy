@@ -16,11 +16,13 @@ import threading
 import weakref
 from collections.abc import AsyncIterator, Callable, Iterator, Mapping
 from types import TracebackType
-from typing import Any
+from typing import Any, Literal
 
 from hilspy._hilspy import Clock, Error, Message, Periodic, _Channel, _open, _Subscription
 
 Value = Any
+#: Which way of a link `Channel.disconnect` cuts.
+Direction = Literal["send", "recv", "both"]
 #: How long a blocking wait sleeps between checks for Ctrl-C.
 _POLL = 0.1
 _live: weakref.WeakSet[Channel] = weakref.WeakSet()
@@ -117,6 +119,28 @@ class Channel:
         ``CYCLIC-TIMING``); a message without one raises `Error`.
         """
         return self._inner.every(period, message, fields, duration=duration)
+
+    def disconnect(self, duration: float | None = None, *, direction: Direction = "both") -> None:
+        """Simulate losing the link (a cut wire, an unplugged connector).
+
+        Until `reconnect`, or for `duration` seconds (simulated ones on a
+        channel opened with ``clock=``), what travels in `direction` is lost:
+        ``"send"`` (what this channel sends), ``"recv"`` (what it receives)
+        or ``"both"``. Sends still succeed and periodic messages keep
+        ticking -- they encode, so a codec's counters move on, and then drop
+        their packets; received packets are dropped, along with those that
+        arrived meanwhile. The transport stays open. Cutting a side that is
+        down already gives it the new end.
+        """
+        self._inner.disconnect(duration, direction=direction)
+
+    def reconnect(self, *, direction: Direction = "both") -> None:
+        """Bring `direction` of the link back up (see `disconnect`)."""
+        self._inner.reconnect(direction=direction)
+
+    def disconnected(self, direction: Direction = "both") -> bool:
+        """Whether `direction` of the link is down (either side, for ``"both"``)."""
+        return self._inner.disconnected(direction)
 
     def close(self) -> None:
         """Close the channel: receivers (sync, async, merge) end."""

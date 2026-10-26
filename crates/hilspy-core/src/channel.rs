@@ -11,6 +11,7 @@ use crate::clock::{to_ns, Clock};
 use crate::codec::{self, Codec};
 use crate::error::{Error, Result};
 use crate::message::{Message, Packet};
+use crate::outage::{LinkDirection, Outage};
 use crate::telemetry::{self, ChannelMetrics, Direction, Instruments, PeriodicMetrics};
 use crate::transport::{self, Transport};
 use crate::url::{CodecSpec, Endpoint};
@@ -30,6 +31,8 @@ struct Inner {
     /// Virtual time the channel runs on, if any.
     clock: Option<Clock>,
     metrics: ChannelMetrics,
+    /// A simulated loss of the link ([`Channel::disconnect`]).
+    outage: Arc<Outage>,
 }
 
 impl Inner {
@@ -42,8 +45,12 @@ impl Inner {
         result
     }
 
-    /// One packet into the transport, recorded.
+    /// One packet into the transport, recorded, unless the send side of the
+    /// link is down: then it is lost, as on a cut line.
     fn send_packet(&self, packet: &Packet) -> Result<()> {
+        if self.outage.is_down(LinkDirection::Send) {
+            return Ok(());
+        }
         let start = Instant::now();
         self.transport.send(packet)?;
         self.metrics.send_duration(start.elapsed().as_secs_f64());
@@ -207,6 +214,7 @@ impl Channel {
                 pending: Mutex::new(VecDeque::new()),
                 closed: AtomicBool::new(false),
                 deferred_error: Mutex::new(None),
+                outage: Outage::new(clock.clone()),
                 clock,
                 metrics,
             }),
@@ -249,6 +257,14 @@ impl Channel {
             let Some(mut packet) = inner.transport.recv(remaining)? else {
                 return Ok(None);
             };
+            // Before the clock restamps it: the transport's arrival time
+            // says whether it came during an outage.
+            if inner.outage.drops(packet.timestamp) {
+                if deadline.is_some_and(|d| Instant::now() >= d) {
+                    return Ok(None);
+                }
+                continue;
+            }
             if let Some(clock) = &inner.clock {
                 packet.timestamp = Some(clock.now());
             }
@@ -356,6 +372,32 @@ impl Channel {
             stop,
             thread: Mutex::new(Some(thread)),
         })
+    }
+
+    /// Simulate losing the link (a cut wire, an unplugged connector): until
+    /// [`Channel::reconnect`], or for `duration` (on the channel's virtual
+    /// clock if it has one), what is sent in `direction` is lost. Sends
+    /// still encode and then drop their packets, and periodic messages keep
+    /// ticking, so a codec's counters move on as an ECU's would; received
+    /// packets are dropped as they are read, along with those that arrived
+    /// meanwhile. The transport stays open. Cutting a side that is down
+    /// already gives it the new end.
+    pub fn disconnect(&self, direction: LinkDirection, duration: Option<Duration>) -> Result<()> {
+        if self.is_closed() {
+            return Err(Error::Closed);
+        }
+        self.inner.outage.cut(direction, duration)
+    }
+
+    /// Bring `direction` of the link back up (see [`Channel::disconnect`]).
+    pub fn reconnect(&self, direction: LinkDirection) {
+        self.inner.outage.restore(direction);
+    }
+
+    /// Whether `direction` of the link is down (either side, for
+    /// [`LinkDirection::Both`]).
+    pub fn is_disconnected(&self, direction: LinkDirection) -> bool {
+        self.inner.outage.is_down(direction)
     }
 
     pub fn is_closed(&self) -> bool {
@@ -1074,6 +1116,78 @@ mod tests {
         // not millions.
         let n = errors.load(Ordering::Relaxed);
         assert!((2..=12).contains(&n), "{n} errors");
+    }
+
+    #[test]
+    fn a_disconnected_link_loses_what_it_carries() {
+        let a = Channel::open("mem://t-ch-outage", "raw", Options::new()).unwrap();
+        let b = Channel::open("mem://t-ch-outage", "raw", Options::new()).unwrap();
+        let send = |ch: &Channel, byte: u8| ch.send(&Message::raw(Packet::bytes(vec![byte])));
+        let got = |ch: &Channel| -> Vec<u8> {
+            drain(ch)
+                .into_iter()
+                .map(|m| m.packet.unwrap().data[0])
+                .collect()
+        };
+        // Send side: the send succeeds and the packet is lost.
+        a.disconnect(LinkDirection::Send, None).unwrap();
+        assert!(a.is_disconnected(LinkDirection::Send) && !a.is_disconnected(LinkDirection::Recv));
+        send(&a, 1).unwrap();
+        b.send(&Message::raw(Packet::bytes(vec![2]))).unwrap();
+        assert_eq!(got(&b), Vec::<u8>::new());
+        assert_eq!(got(&a), vec![2], "receiving still works");
+        a.reconnect(LinkDirection::Both);
+        send(&a, 3).unwrap();
+        assert_eq!(got(&b), vec![3]);
+        // Receive side: what is read while it is down is lost, and so is
+        // what arrived meanwhile, read or not.
+        send(&b, 0).unwrap();
+        a.disconnect(LinkDirection::Recv, None).unwrap();
+        send(&b, 4).unwrap();
+        assert!(a.recv(Some(Duration::from_millis(20))).unwrap().is_none());
+        send(&b, 5).unwrap();
+        std::thread::sleep(Duration::from_millis(2));
+        a.reconnect(LinkDirection::Recv);
+        send(&b, 6).unwrap();
+        assert_eq!(got(&a), vec![6]);
+        a.close();
+        assert!(matches!(
+            a.disconnect(LinkDirection::Both, None),
+            Err(Error::Closed)
+        ));
+    }
+
+    #[test]
+    fn outages_follow_a_virtual_clock() {
+        let clock = Clock::new(0.0).unwrap();
+        let tx = Channel::open_on(
+            "mem://t-clock-outage",
+            "raw",
+            Options::new(),
+            Some(clock.clone()),
+        )
+        .unwrap();
+        let rx = Channel::open("mem://t-clock-outage", "raw", Options::new()).unwrap();
+        let p = tx
+            .every(
+                Some(Duration::from_millis(100)),
+                Message::raw(Packet::bytes(vec![1])),
+                None,
+            )
+            .unwrap();
+        assert_eq!(drain(&rx).len(), 1);
+        // Down for 0.3 s of simulated time: the ticks at 0.1 and 0.2 are
+        // lost (still counted as sent), the one at 0.3 goes out.
+        tx.disconnect(LinkDirection::Both, Some(Duration::from_millis(250)))
+            .unwrap();
+        clock.advance(0.2).unwrap();
+        assert!(tx.is_disconnected(LinkDirection::Both));
+        assert_eq!(drain(&rx).len(), 0);
+        clock.advance(0.1).unwrap();
+        assert!(!tx.is_disconnected(LinkDirection::Both));
+        assert_eq!(drain(&rx).len(), 1);
+        assert_eq!(p.sent_count(), 4);
+        assert_eq!(p.last_error(), None);
     }
 
     #[test]

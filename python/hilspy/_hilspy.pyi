@@ -4,7 +4,7 @@ import sys
 from array import array
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from types import TracebackType
-from typing import Any, Protocol, TypeAlias
+from typing import Any, Literal, Protocol, TypeAlias
 
 if sys.version_info >= (3, 11):
     from typing import Self
@@ -117,6 +117,11 @@ class _Channel:
     def subscribe(
         self, callback: Callable[[Message | BaseException | None], object]
     ) -> _Subscription: ...
+    def disconnect(
+        self, duration: float | None = None, *, direction: Literal["send", "recv", "both"] = "both"
+    ) -> None: ...
+    def reconnect(self, *, direction: Literal["send", "recv", "both"] = "both") -> None: ...
+    def disconnected(self, direction: Literal["send", "recv", "both"] = "both") -> bool: ...
     def close(self) -> None: ...
     @property
     def closed(self) -> bool: ...

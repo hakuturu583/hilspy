@@ -3,8 +3,8 @@
 use std::time::{Duration, Instant};
 
 use hilspy_core::{
-    Channel as CoreChannel, Clock as CoreClock, Error as CoreError, Periodic as CorePeriodic,
-    Subscription as CoreSubscription,
+    Channel as CoreChannel, Clock as CoreClock, Error as CoreError, LinkDirection,
+    Periodic as CorePeriodic, Subscription as CoreSubscription,
 };
 use pyo3::exceptions::{PyStopIteration, PyValueError};
 use pyo3::prelude::*;
@@ -153,6 +153,34 @@ impl Channel {
         };
         let inner = py.detach(|| self.inner.subscribe(deliver)).py()?;
         Ok(Subscription { inner })
+    }
+
+    /// Simulate losing the link: what travels in `direction` (`"send"`,
+    /// `"recv"` or `"both"`) is lost until `reconnect()`, or for `duration`
+    /// seconds (on the channel's clock if it has one). The transport stays
+    /// open; sends and periodic messages still encode, then drop their packets.
+    #[pyo3(signature = (duration = None, *, direction = "both"))]
+    fn disconnect(&self, duration: Option<f64>, direction: &str) -> PyResult<()> {
+        let direction: LinkDirection = direction.parse().py()?;
+        let duration = duration
+            .map(|d| self::duration(d, "duration"))
+            .transpose()?;
+        self.inner.disconnect(direction, duration).py()
+    }
+
+    /// Bring `direction` of the link back up.
+    #[pyo3(signature = (*, direction = "both"))]
+    fn reconnect(&self, direction: &str) -> PyResult<()> {
+        let direction: LinkDirection = direction.parse().py()?;
+        self.inner.reconnect(direction);
+        Ok(())
+    }
+
+    /// Whether `direction` of the link is down (either side, for `"both"`).
+    #[pyo3(signature = (direction = "both"))]
+    fn disconnected(&self, direction: &str) -> PyResult<bool> {
+        let direction: LinkDirection = direction.parse().py()?;
+        Ok(self.inner.is_disconnected(direction))
     }
 
     /// Close the channel; blocked receivers stop, iteration ends.

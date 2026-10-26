@@ -123,3 +123,18 @@ def test_sbf_time_is_the_clock(mem: str) -> None:
         tows = [m["tow"] for m in drain(rx)]
         assert tows == [86_418_000, 86_418_100, 86_418_200]
         assert attitude.sent_count == 3
+
+
+def test_disconnect_follows_the_clock(mem: str) -> None:
+    clock = hilspy.Clock()
+    with hilspy.open(mem, clock=clock) as tx, hilspy.open(mem) as rx:
+        task = tx.every(0.1, hilspy.Message(data=b"\x01"))
+        assert rx.recv(timeout=1.0) is not None
+        # A 0.25 s outage of simulated time loses the sends at 0.1 and 0.2.
+        tx.disconnect(0.25)
+        clock.advance(0.2)
+        assert tx.disconnected() and rx.recv(timeout=0.05) is None
+        clock.advance(0.1)
+        assert not tx.disconnected()
+        assert rx.recv(timeout=1.0) is not None and rx.recv(timeout=0.05) is None
+        assert task.sent_count == 4

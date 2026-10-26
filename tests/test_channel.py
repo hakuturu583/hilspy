@@ -148,3 +148,48 @@ def test_data_from_numpy_and_buffers() -> None:
     for wrong in (np.zeros(4, np.float32), np.zeros(2, np.uint16), array.array("h", [1])):
         with pytest.raises(TypeError, match="uint8"):
             Message(data=wrong)
+
+
+def _drain(ch: hilspy.Channel) -> list[bytes]:
+    out = []
+    while (m := ch.recv(timeout=0.02)) is not None:
+        assert m.data is not None
+        out.append(m.data)
+    return out
+
+
+def test_disconnect_loses_what_the_link_carries(mem: str) -> None:
+    with hilspy.open(mem) as a, hilspy.open(mem) as b:
+        assert not a.disconnected()
+        a.disconnect(direction="send")
+        assert a.disconnected() and a.disconnected("send") and not a.disconnected("recv")
+        a.send(Message(data=b"lost"))  # succeeds; the packet is lost
+        b.send(Message(data=b"in"))
+        assert _drain(b) == [] and _drain(a) == [b"in"]
+        a.reconnect()
+        a.send(Message(data=b"out"))
+        assert _drain(b) == [b"out"]
+        # The receive side: what arrives meanwhile stays lost after reconnecting.
+        a.disconnect(direction="recv")
+        b.send(Message(data=b"meanwhile"))
+        time.sleep(0.01)
+        a.reconnect(direction="recv")
+        b.send(Message(data=b"after"))
+        assert _drain(a) == [b"after"]
+        with pytest.raises(hilspy.Error, match="send, recv or both"):
+            a.disconnect(direction="tx")  # type: ignore[arg-type]
+        with pytest.raises(ValueError):
+            a.disconnect(-1.0)
+    with pytest.raises(hilspy.Error):
+        a.disconnect()
+
+
+def test_disconnect_for_a_while(mem: str) -> None:
+    with hilspy.open(mem) as a, hilspy.open(mem) as b:
+        a.disconnect(0.1)
+        a.send(Message(data=b"lost"))
+        assert _drain(b) == []
+        time.sleep(0.12)
+        assert not a.disconnected()
+        a.send(Message(data=b"back"))
+        assert _drain(b) == [b"back"]
