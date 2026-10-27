@@ -1,16 +1,17 @@
 //! A channel: a transport and a codec composed, sending and receiving named
 //! messages.
 
-use std::collections::VecDeque;
+use std::collections::{BTreeSet, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use crate::clock::{to_ns, Clock};
+use crate::clock::{ns_after, to_ns, Clock};
 use crate::codec::{self, Codec};
 use crate::error::{Error, Result};
 use crate::message::{Message, Packet};
+use crate::outage::{LinkDirection, Loss, Outage};
 use crate::telemetry::{self, ChannelMetrics, Direction, Instruments, PeriodicMetrics};
 use crate::transport::{self, Transport};
 use crate::url::{CodecSpec, Endpoint};
@@ -30,6 +31,8 @@ struct Inner {
     /// Virtual time the channel runs on, if any.
     clock: Option<Clock>,
     metrics: ChannelMetrics,
+    /// A simulated loss of the link ([`Channel::disconnect`]).
+    outage: Outage,
 }
 
 impl Inner {
@@ -42,8 +45,12 @@ impl Inner {
         result
     }
 
-    /// One packet into the transport, recorded.
-    fn send_packet(&self, packet: &Packet) -> Result<()> {
+    /// One packet of the message `name` into the transport, recorded, unless
+    /// an outage stops the message: then it is lost, as on a cut line.
+    fn send_packet(&self, packet: &Packet, name: Option<&str>) -> Result<()> {
+        if self.outage.drops_sent(name) {
+            return Ok(());
+        }
         let start = Instant::now();
         self.transport.send(packet)?;
         self.metrics.send_duration(start.elapsed().as_secs_f64());
@@ -79,6 +86,8 @@ impl Inner {
             }
         };
         let first = packets.first().and_then(|p| p.timestamp);
+        // Shared by the packets sent later on the clock.
+        let name: Option<Arc<str>> = message.name.as_deref().map(Arc::from);
         if let (Some(clock), true) = (&self.clock, paced) {
             // Later packets are sent as the clock passes their times.
             let now = clock.now_ns();
@@ -92,16 +101,17 @@ impl Inner {
                     _ => 0,
                 };
                 if delay == 0 {
-                    self.send_packet(&p)?;
+                    self.send_packet(&p, name.as_deref())?;
                 } else {
                     let inner = Arc::clone(self);
+                    let name = name.clone();
                     clock.schedule(
                         now + delay,
                         Box::new(move |_: &Clock, _| {
                             if !inner.closed.load(Ordering::Acquire) {
                                 // A failure has no caller to report to;
                                 // it is recorded for the next send.
-                                if let Err(e) = inner.send_packet(&p) {
+                                if let Err(e) = inner.send_packet(&p, name.as_deref()) {
                                     *inner.deferred_error.lock().unwrap() = Some(e);
                                 }
                             }
@@ -122,7 +132,7 @@ impl Inner {
                     self.wait_until(start + Duration::from_secs_f64(delay.clamp(0.0, 3600.0)))?;
                 }
             }
-            self.send_packet(p)?;
+            self.send_packet(p, name.as_deref())?;
         }
         Ok(())
     }
@@ -207,6 +217,7 @@ impl Channel {
                 pending: Mutex::new(VecDeque::new()),
                 closed: AtomicBool::new(false),
                 deferred_error: Mutex::new(None),
+                outage: Outage::new(clock.clone()),
                 clock,
                 metrics,
             }),
@@ -237,6 +248,9 @@ impl Channel {
         if inner.closed.load(Ordering::Acquire) {
             return Err(Error::Closed);
         }
+        if let Some(drained) = inner.outage.take_drain() {
+            self.drain(&drained)?;
+        }
         if let Some(m) = inner.pending.lock().unwrap().pop_front() {
             return Ok(Some(m));
         }
@@ -246,18 +260,11 @@ impl Channel {
                 return Err(Error::Closed);
             }
             let remaining = deadline.map(|d| d.saturating_duration_since(Instant::now()));
-            let Some(mut packet) = inner.transport.recv(remaining)? else {
+            let Some(packet) = inner.transport.recv(remaining)? else {
                 return Ok(None);
             };
-            if let Some(clock) = &inner.clock {
-                packet.timestamp = Some(clock.now());
-            }
-            inner.metrics.packet(Direction::Rx, &packet);
             let mut messages: VecDeque<Message> =
-                inner.codec.lock().unwrap().decode(packet)?.into();
-            for m in &messages {
-                inner.metrics.message(Direction::Rx, m);
-            }
+                self.decode(packet, &inner.outage.received())?.into();
             if let Some(first) = messages.pop_front() {
                 inner.pending.lock().unwrap().extend(messages);
                 return Ok(Some(first));
@@ -266,6 +273,36 @@ impl Channel {
                 return Ok(None);
             }
         }
+    }
+
+    /// A received packet's messages, less what `loss` stops, stamped and
+    /// recorded.
+    fn decode(&self, mut packet: Packet, loss: &Loss) -> Result<Vec<Message>> {
+        let inner = &self.inner;
+        if matches!(loss, Loss::Everything) {
+            return Ok(Vec::new());
+        }
+        if let Some(clock) = &inner.clock {
+            packet.timestamp = Some(clock.now());
+        }
+        inner.metrics.packet(Direction::Rx, &packet);
+        let mut messages = inner.codec.lock().unwrap().decode(packet)?;
+        messages.retain(|m| !loss.drops(m.name.as_deref()));
+        for m in &messages {
+            inner.metrics.message(Direction::Rx, m);
+        }
+        Ok(messages)
+    }
+
+    /// Drop what `drained` stops of what the transport buffered while the
+    /// receive side was down; the rest joins the pending messages.
+    fn drain(&self, drained: &Loss) -> Result<()> {
+        let inner = &self.inner;
+        while let Some(packet) = inner.transport.recv(Some(Duration::ZERO))? {
+            let messages = self.decode(packet, drained)?;
+            inner.pending.lock().unwrap().extend(messages);
+        }
+        Ok(())
     }
 
     /// Send `message` every `period` from a background thread (for
@@ -356,6 +393,54 @@ impl Channel {
             stop,
             thread: Mutex::new(Some(thread)),
         })
+    }
+
+    /// Simulate losing the link (a cut wire, an unplugged connector): until
+    /// [`Channel::reconnect`], or for `duration` (on the channel's virtual
+    /// clock if it has one), what is sent in `direction` is lost. Sends
+    /// still encode and then drop their packets, and periodic messages keep
+    /// ticking, so a codec's counters move on as an ECU's would; received
+    /// packets are dropped as they are read, along with those that arrived
+    /// meanwhile. The transport stays open.
+    ///
+    /// With `messages`, only the messages of those names are lost (after
+    /// encoding on the way out, after decoding on the way in) and the
+    /// rest of the link carries on: one CAN frame of a bus, a LiDAR's
+    /// `scan`. Cutting a side that is down already gives it the new end and
+    /// messages.
+    pub fn disconnect(
+        &self,
+        direction: LinkDirection,
+        duration: Option<Duration>,
+        messages: Option<BTreeSet<String>>,
+    ) -> Result<()> {
+        if self.is_closed() {
+            return Err(Error::Closed);
+        }
+        let loss = self.inner.outage.cut(direction, duration, messages)?;
+        // Messages decoded before the cut and not yet returned are lost too,
+        // as the packets still queued in the transport are.
+        let mut pending = self.inner.pending.lock().unwrap();
+        pending.retain(|m| !loss.drops(m.name.as_deref()));
+        Ok(())
+    }
+
+    /// Bring `direction` of the link back up (see [`Channel::disconnect`]).
+    /// What the transport buffered while the receive side was down is
+    /// dropped now, so what arrives from here on is received; a cut that
+    /// ends by its duration leaves that to the next receive.
+    pub fn reconnect(&self, direction: LinkDirection) -> Result<()> {
+        self.inner.outage.restore(direction);
+        match self.inner.outage.take_drain() {
+            Some(drained) => self.drain(&drained),
+            None => Ok(()),
+        }
+    }
+
+    /// Whether `direction` of the link is down (either side, for
+    /// [`LinkDirection::Both`]).
+    pub fn is_disconnected(&self, direction: LinkDirection) -> bool {
+        self.inner.outage.is_down(direction)
     }
 
     pub fn is_closed(&self) -> bool {
@@ -476,8 +561,7 @@ impl Periodic {
             wake: Condvar::new(),
         });
         if let (Some(clock), Some(now)) = (inner.clock.clone(), now) {
-            let end = duration
-                .map(|d| now.saturating_add(i64::try_from(d.as_nanos()).unwrap_or(i64::MAX)));
+            let end = duration.map(|d| ns_after(now, d));
             schedule_next(&clock, inner, Arc::clone(&shared), end, now);
             return Ok(Self {
                 shared,
@@ -1074,6 +1158,134 @@ mod tests {
         // not millions.
         let n = errors.load(Ordering::Relaxed);
         assert!((2..=12).contains(&n), "{n} errors");
+    }
+
+    #[test]
+    fn a_disconnected_link_loses_what_it_carries() {
+        let a = Channel::open("mem://t-ch-outage", "raw", Options::new()).unwrap();
+        let b = Channel::open("mem://t-ch-outage", "raw", Options::new()).unwrap();
+        let send = |ch: &Channel, byte: u8| ch.send(&Message::raw(Packet::bytes(vec![byte])));
+        let got = |ch: &Channel| -> Vec<u8> {
+            drain(ch)
+                .into_iter()
+                .map(|m| m.packet.unwrap().data[0])
+                .collect()
+        };
+        // Send side: the send succeeds and the packet is lost.
+        a.disconnect(LinkDirection::Send, None, None).unwrap();
+        assert!(a.is_disconnected(LinkDirection::Send) && !a.is_disconnected(LinkDirection::Recv));
+        send(&a, 1).unwrap();
+        send(&b, 2).unwrap();
+        assert_eq!(got(&b), Vec::<u8>::new());
+        assert_eq!(got(&a), vec![2], "receiving still works");
+        a.reconnect(LinkDirection::Both).unwrap();
+        send(&a, 3).unwrap();
+        assert_eq!(got(&b), vec![3]);
+        // Receive side: what is read while it is down is lost, and so is
+        // what arrived meanwhile, read or not.
+        send(&b, 0).unwrap();
+        a.disconnect(LinkDirection::Recv, None, None).unwrap();
+        send(&b, 4).unwrap();
+        assert!(a.recv(Some(Duration::from_millis(20))).unwrap().is_none());
+        send(&b, 5).unwrap();
+        std::thread::sleep(Duration::from_millis(2));
+        a.reconnect(LinkDirection::Recv).unwrap();
+        send(&b, 6).unwrap();
+        assert_eq!(got(&a), vec![6]);
+        a.close();
+        assert!(matches!(
+            a.disconnect(LinkDirection::Both, None, None),
+            Err(Error::Closed)
+        ));
+    }
+
+    #[test]
+    fn a_cut_can_stop_only_named_messages() {
+        let mut lax = Options::new();
+        lax.insert("strict", Value::Bool(false));
+        let tx = Channel::open("mem://t-ch-outage-named", &dbc(), lax).unwrap();
+        let rx = Channel::open("mem://t-ch-outage-named", &dbc(), Options::new()).unwrap();
+        let names = |ch: &Channel| -> Vec<String> {
+            drain(ch).into_iter().filter_map(|m| m.name).collect()
+        };
+        let stop = Some(BTreeSet::from(["VehicleSpeed".to_owned()]));
+        let send_both = || {
+            tx.send(&Message::new("VehicleSpeed", vec![])).unwrap();
+            tx.send(&Message::new("SteeringCmd", vec![])).unwrap();
+        };
+        // On the way out: VehicleSpeed is lost, SteeringCmd goes through.
+        tx.disconnect(LinkDirection::Send, None, stop.clone())
+            .unwrap();
+        assert!(tx.is_disconnected(LinkDirection::Send));
+        send_both();
+        assert_eq!(names(&rx), ["SteeringCmd"]);
+        tx.reconnect(LinkDirection::Both).unwrap();
+        // On the way in, by decoded name.
+        rx.disconnect(LinkDirection::Recv, None, stop).unwrap();
+        send_both();
+        assert_eq!(names(&rx), ["SteeringCmd"]);
+        rx.reconnect(LinkDirection::Recv).unwrap();
+        send_both();
+        assert_eq!(names(&rx), ["VehicleSpeed", "SteeringCmd"]);
+    }
+
+    #[test]
+    fn what_was_buffered_during_a_timed_cut_is_dropped() {
+        // Read nothing during the outage: the transport buffers what comes,
+        // stamped or not, and the first receive after it drops that.
+        let clock = Clock::new(0.0).unwrap();
+        let rx = Channel::open_on(
+            "mem://t-ch-outage-drain",
+            "raw",
+            Options::new(),
+            Some(clock.clone()),
+        )
+        .unwrap();
+        let tx = Channel::open("mem://t-ch-outage-drain", "raw", Options::new()).unwrap();
+        let send = |byte: u8| tx.send(&Message::raw(Packet::bytes(vec![byte]))).unwrap();
+        rx.disconnect(LinkDirection::Recv, Some(Duration::from_millis(100)), None)
+            .unwrap();
+        send(1);
+        send(2);
+        clock.advance(0.2).unwrap();
+        assert!(!rx.is_disconnected(LinkDirection::Recv));
+        assert!(rx.recv(Some(Duration::from_millis(20))).unwrap().is_none());
+        send(3);
+        let got = rx.recv(Some(Duration::from_secs(1))).unwrap().unwrap();
+        assert_eq!(got.packet.unwrap().data, vec![3]);
+    }
+
+    #[test]
+    fn outages_follow_a_virtual_clock() {
+        let clock = Clock::new(0.0).unwrap();
+        let tx = Channel::open_on(
+            "mem://t-clock-outage",
+            "raw",
+            Options::new(),
+            Some(clock.clone()),
+        )
+        .unwrap();
+        let rx = Channel::open("mem://t-clock-outage", "raw", Options::new()).unwrap();
+        let p = tx
+            .every(
+                Some(Duration::from_millis(100)),
+                Message::raw(Packet::bytes(vec![1])),
+                None,
+            )
+            .unwrap();
+        assert_eq!(drain(&rx).len(), 1);
+        // Down for 0.3 s of simulated time: the ticks at 0.1 and 0.2 are
+        // lost (still counted as sent), the one at 0.3 goes out.
+        tx.disconnect(LinkDirection::Both, Some(Duration::from_millis(250)), None)
+            .unwrap();
+        clock.advance(0.2).unwrap();
+        assert!(tx.is_disconnected(LinkDirection::Both));
+        assert_eq!(drain(&rx).len(), 0);
+        clock.advance(0.1).unwrap();
+        assert!(!tx.is_disconnected(LinkDirection::Both));
+        assert_eq!(drain(&rx).len(), 1);
+        assert_eq!(p.sent_count(), 4);
+        assert_eq!(p.last_error(), None);
     }
 
     #[test]

@@ -18,6 +18,7 @@ pub mod error;
 pub mod fibex;
 pub mod lidar;
 pub mod message;
+mod outage;
 mod queue;
 pub mod sbf;
 pub mod telemetry;
@@ -34,6 +35,7 @@ pub use message::{
     is_lin_diagnostic, CanHeader, FlexRayChannel, FlexRayHeader, LinChecksum, LinHeader, Message,
     Packet,
 };
+pub use outage::LinkDirection;
 pub use transport::Transport;
 pub use url::{CodecSpec, Endpoint};
 pub use value::{Array, Options, Value};

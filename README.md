@@ -74,6 +74,7 @@ The whole public API:
 | `Channel.send(message)` / `send(name, fields)` | encode and send |
 | `Channel.recv(timeout=None) -> Message \| None` | next message (iterate the channel for all) |
 | `Channel.every(period, message_or_name, fields=None, *, duration=None) -> Periodic` | cyclic send from a Rust thread; `update()`, `stop()`, `period`, `sent_count`. `period=None`: the message's cycle time from the DBC / FIBEX (see [Cycle times](#cycle-times)) |
+| `Channel.disconnect(duration=None, *, direction="both", messages=None)`, `reconnect(*, direction="both")`, `disconnected(direction="both")` | simulate losing the link (`"send"`, `"recv"`, `"both"`); see [Link outages](#link-outages) |
 | `Channel.close()` | also via `with` / `async with` |
 | `await Channel.asend(...)`, `await Channel.arecv(timeout=None)`, `async for msg in channel` | asyncio |
 | `hilspy.merge(*channels)` | `(channel, message)` from several buses as they arrive (`for` / `async for`) |
@@ -376,6 +377,31 @@ On a clock:
 - Messages are stamped with the clock's time. Codecs write that time (the
   SBF TOW, a LiDAR scan's timestamps), and received messages carry the time
   they arrived at.
+
+### Link outages
+
+`disconnect()` simulates losing a channel's link -- a cut wire, an unplugged
+connector, a GNSS receiver that falls silent -- to see how the device under
+test copes:
+
+```python
+ecu.disconnect(2.0)  # both ways, for 2 s (simulated, on a clock)
+ecu.disconnect(direction="send")  # what we send is lost, until...
+ecu.reconnect()
+assert not ecu.disconnected()
+ecu.disconnect(messages=["VehicleSpeed"])  # only this frame; the bus carries on
+lidar.disconnect(messages=["scan"])
+```
+
+`messages` names what is lost (one name or several, as the codec names
+messages); without it the whole link goes. While a direction is down, sends
+succeed and periodic messages keep ticking: they are encoded (an E2E counter or
+a sequence number moves on, as an ECU's does when its bus is cut) and their
+packets dropped. Received packets are dropped as they are read, and what the
+transport buffered meanwhile is dropped when the receive side comes back. The
+transport stays open (a TCP client stays connected and just hears nothing).
+`duration` is measured on the channel's `Clock` if it has one, so the outage
+covers the same simulated time however fast the simulation runs.
 
 ### asyncio and several buses at once
 

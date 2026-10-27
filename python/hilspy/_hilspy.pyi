@@ -4,7 +4,7 @@ import sys
 from array import array
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from types import TracebackType
-from typing import Any, Protocol, TypeAlias
+from typing import Any, Literal, Protocol, TypeAlias
 
 if sys.version_info >= (3, 11):
     from typing import Self
@@ -23,6 +23,9 @@ class Error(Exception): ...
 #: decode as ``array.array`` (``send`` also takes lists, tuples and numpy
 #: arrays of numbers); other sequences (satellite records, ...) as lists.
 Value: TypeAlias = None | bool | int | float | str | Mapping[str, Any] | array[Any] | Sequence[Any]
+
+#: Which way of a link ``Channel.disconnect`` cuts.
+Direction: TypeAlias = Literal["send", "recv", "both"]
 
 class _ToBytes(Protocol):
     # numpy arrays and array.array before Python 3.12, whose stubs are not Buffer.
@@ -117,6 +120,15 @@ class _Channel:
     def subscribe(
         self, callback: Callable[[Message | BaseException | None], object]
     ) -> _Subscription: ...
+    def disconnect(
+        self,
+        duration: float | None = None,
+        *,
+        direction: Direction = "both",
+        messages: str | Iterable[str] | None = None,
+    ) -> None: ...
+    def reconnect(self, *, direction: Direction = "both") -> None: ...
+    def disconnected(self, direction: Direction = "both") -> bool: ...
     def close(self) -> None: ...
     @property
     def closed(self) -> bool: ...

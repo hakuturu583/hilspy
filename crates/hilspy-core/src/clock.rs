@@ -71,6 +71,11 @@ pub(crate) fn to_ns(seconds: f64) -> Result<i64> {
     Ok((seconds * 1e9).round() as i64)
 }
 
+/// `d` after the clock time `ns`, saturating far in the future.
+pub(crate) fn ns_after(ns: i64, d: std::time::Duration) -> i64 {
+    ns.saturating_add(i64::try_from(d.as_nanos()).unwrap_or(i64::MAX))
+}
+
 impl Clock {
     /// A clock at `start` seconds (e.g. 0, or a Unix time to stamp messages
     /// with realistic dates).
@@ -94,6 +99,11 @@ impl Clock {
 
     pub(crate) fn now_ns(&self) -> i64 {
         self.inner.state.lock().unwrap().now
+    }
+
+    /// The clock time (ns) `d` from now, saturating far in the future.
+    pub(crate) fn deadline_after(&self, d: std::time::Duration) -> i64 {
+        ns_after(self.now_ns(), d)
     }
 
     /// When the next scheduled work is due, seconds.

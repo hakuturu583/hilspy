@@ -1,14 +1,15 @@
 //! `open`, `Channel` and `Periodic`.
 
+use std::collections::BTreeSet;
 use std::time::{Duration, Instant};
 
 use hilspy_core::{
-    Channel as CoreChannel, Clock as CoreClock, Error as CoreError, Periodic as CorePeriodic,
-    Subscription as CoreSubscription,
+    Channel as CoreChannel, Clock as CoreClock, Error as CoreError, LinkDirection,
+    Periodic as CorePeriodic, Subscription as CoreSubscription,
 };
 use pyo3::exceptions::{PyStopIteration, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::PyDict;
+use pyo3::types::{PyDict, PyString};
 
 use crate::convert::{message_arg, options_from_py, Message};
 use crate::errors::{to_py, IntoPyResult};
@@ -20,6 +21,11 @@ const SIGNAL_CHECK: Duration = Duration::from_millis(50);
 fn duration(seconds: f64, what: &str) -> PyResult<Duration> {
     Duration::try_from_secs_f64(seconds)
         .map_err(|_| PyValueError::new_err(format!("invalid {what}: {seconds}")))
+}
+
+/// A direction argument: `"send"`, `"recv"` or `"both"`.
+fn link(direction: &str) -> PyResult<LinkDirection> {
+    direction.parse().py()
 }
 
 /// Open a channel: the transport `url` with the codec `codec`.
@@ -153,6 +159,49 @@ impl Channel {
         };
         let inner = py.detach(|| self.inner.subscribe(deliver)).py()?;
         Ok(Subscription { inner })
+    }
+
+    /// Simulate losing the link: what travels in `direction` (`"send"`,
+    /// `"recv"` or `"both"`) is lost until `reconnect()`, or for `duration`
+    /// seconds (on the channel's clock if it has one); with `messages`, only
+    /// the messages of those names. The transport stays open; sends and
+    /// periodic messages still encode, then drop their packets.
+    #[pyo3(signature = (duration = None, *, direction = "both", messages = None))]
+    fn disconnect(
+        &self,
+        duration: Option<f64>,
+        direction: &str,
+        messages: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<()> {
+        let direction = link(direction)?;
+        let duration = duration
+            .map(|d| self::duration(d, "duration"))
+            .transpose()?;
+        // One name, or an iterable of names.
+        let messages = match messages {
+            None => None,
+            Some(m) if m.is_instance_of::<PyString>() => Some(BTreeSet::from([m.extract()?])),
+            Some(m) => Some(
+                m.try_iter()?
+                    .map(|n| n?.extract::<String>())
+                    .collect::<PyResult<_>>()?,
+            ),
+        };
+        self.inner.disconnect(direction, duration, messages).py()
+    }
+
+    /// Bring `direction` of the link back up.
+    #[pyo3(signature = (*, direction = "both"))]
+    fn reconnect(&self, direction: &str) -> PyResult<()> {
+        let direction = link(direction)?;
+        self.inner.reconnect(direction).py()
+    }
+
+    /// Whether `direction` of the link is down (either side, for `"both"`).
+    #[pyo3(signature = (direction = "both"))]
+    fn disconnected(&self, direction: &str) -> PyResult<bool> {
+        let direction = link(direction)?;
+        Ok(self.inner.is_disconnected(direction))
     }
 
     /// Close the channel; blocked receivers stop, iteration ends.
