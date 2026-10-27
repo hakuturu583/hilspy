@@ -402,7 +402,20 @@ impl Channel {
         if self.is_closed() {
             return Err(Error::Closed);
         }
-        self.inner.outage.cut(direction, duration, messages)
+        self.inner.outage.cut(direction, duration, messages)?;
+        if direction.receives() {
+            // Messages decoded before the cut and not yet returned are lost
+            // too, as the packets still queued in the transport are.
+            let mut pending = self.inner.pending.lock().unwrap();
+            match self.inner.outage.received(None) {
+                Loss::Nothing => {}
+                Loss::Everything => pending.clear(),
+                Loss::Named(stopped) => {
+                    pending.retain(|m| !m.name.as_ref().is_some_and(|n| stopped.contains(n)));
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Bring `direction` of the link back up (see [`Channel::disconnect`]).

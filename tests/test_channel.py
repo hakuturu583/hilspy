@@ -180,6 +180,8 @@ def test_disconnect_loses_what_the_link_carries(mem: str) -> None:
             a.disconnect(direction="tx")  # type: ignore[arg-type]
         with pytest.raises(ValueError):
             a.disconnect(-1.0)
+        with pytest.raises(hilspy.Error, match="at least one"):
+            a.disconnect(messages=[])
     with pytest.raises(hilspy.Error):
         a.disconnect()
 

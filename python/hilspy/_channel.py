@@ -140,13 +140,9 @@ class Channel:
         that arrived meanwhile. The transport stays open. Cutting a side that
         is down already gives it the new end and messages.
         """
-        names = (
-            None
-            if messages is None
-            else [messages]
-            if isinstance(messages, str)
-            else list(messages)
-        )
+        if isinstance(messages, str):
+            messages = [messages]
+        names = None if messages is None else list(messages)
         self._inner.disconnect(duration, direction=direction, messages=names)
 
     def reconnect(self, *, direction: Direction = "both") -> None:

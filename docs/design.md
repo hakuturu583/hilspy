@@ -96,7 +96,7 @@ state moves on) and drops its packets in `Inner::transmit`, which deferred
 paced packets and periodic ticks go through as well. A receive drops every
 packet it reads while the receive side is down and, afterwards, packets whose
 transport arrival stamp (a Unix time: the live transports stamp on arrival)
-falls in the last outage, so nothing queued meanwhile surfaces after
+falls in one of the latest outages, so nothing queued meanwhile surfaces after
 reconnecting. The transport is not touched: a TCP connection stays up and
 goes quiet. A cut may name messages: a send drops the packets of a message
 of one of those names, and a receive decodes and drops the messages of those

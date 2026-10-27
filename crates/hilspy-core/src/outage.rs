@@ -7,13 +7,14 @@
 //! so the transport itself (a socket, a TCP connection) stays open and the
 //! peer sees the line go quiet. Once the receive side is back, packets the
 //! transport stamped with a wall-clock arrival time inside the outage are
-//! dropped too: they arrived while nobody was reading.
+//! dropped too (for the latest few outages): they arrived while nobody was
+//! reading.
 //!
 //! A cut may name the messages it stops (`VehicleSpeed`, a LiDAR's `scan`):
 //! then only those are lost, by name, before encoding and after decoding, and
 //! the rest of the link carries on.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, VecDeque};
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -33,11 +34,11 @@ pub enum LinkDirection {
 }
 
 impl LinkDirection {
-    fn sends(self) -> bool {
+    pub(crate) fn sends(self) -> bool {
         matches!(self, Self::Send | Self::Both)
     }
 
-    fn receives(self) -> bool {
+    pub(crate) fn receives(self) -> bool {
         matches!(self, Self::Recv | Self::Both)
     }
 }
@@ -67,6 +68,10 @@ enum End {
     /// When the virtual clock reaches this time (ns).
     Clock(i64),
 }
+
+/// How many ended receive outages are remembered, so packets that arrived
+/// during one and were not read before later ones ended stay lost.
+const WINDOWS: usize = 16;
 
 /// The messages a cut stops: by name, or (`None`) everything.
 pub(crate) type Only = Option<Arc<BTreeSet<String>>>;
@@ -102,9 +107,9 @@ struct State {
     recv: Option<Cut>,
     /// Unix time the receive side has been down since.
     recv_since: f64,
-    /// The last receive outage that ended, as Unix times `[from, to)`,
-    /// with what it stopped.
-    recv_window: Option<(f64, f64, Only)>,
+    /// The latest receive outages that ended (at most [`WINDOWS`]), as Unix
+    /// times `[from, to)`, with what each stopped.
+    recv_windows: VecDeque<(f64, f64, Only)>,
     next_id: u64,
 }
 
@@ -137,11 +142,20 @@ impl Outage {
             (Some(d), Some(clock)) => {
                 End::Clock(clock.now_ns().saturating_add(to_ns(d.as_secs_f64())?))
             }
-            (Some(d), None) => End::Wall {
-                at: Instant::now() + d,
-                unix: now_timestamp() + d.as_secs_f64(),
+            // A duration past what an `Instant` can hold never ends.
+            (Some(d), None) => match Instant::now().checked_add(d) {
+                Some(at) => End::Wall {
+                    at,
+                    unix: now_timestamp() + d.as_secs_f64(),
+                },
+                None => End::Never,
             },
         };
+        if only.as_ref().is_some_and(BTreeSet::is_empty) {
+            return Err(Error::Config(
+                "a cut's messages must name at least one message".into(),
+            ));
+        }
         let mut s = self.state.lock().unwrap();
         let id = s.next_id;
         s.next_id += 1;
@@ -193,7 +207,11 @@ impl Outage {
 
     fn end_recv(s: &mut State, unix: f64) {
         if let Some(cut) = s.recv.take() {
-            s.recv_window = Some((s.recv_since, unix, cut.only));
+            if s.recv_windows.len() == WINDOWS {
+                s.recv_windows.pop_front();
+            }
+            let since = s.recv_since;
+            s.recv_windows.push_back((since, unix, cut.only));
         }
     }
 
@@ -235,7 +253,7 @@ impl Outage {
 
     /// What a received packet stamped `arrival` (a Unix time, as live
     /// transports stamp packets) loses: what the receive side being down
-    /// stops, or else what the last receive outage stopped if it arrived
+    /// stops, or else what a recent receive outage stopped if it arrived
     /// during it.
     pub(crate) fn received(&self, arrival: Option<f64>) -> Loss {
         let mut s = self.state.lock().unwrap();
@@ -243,10 +261,14 @@ impl Outage {
         if let Some(cut) = &s.recv {
             return Loss::of(&cut.only);
         }
-        match (&s.recv_window, arrival) {
-            (Some((from, to, only)), Some(t)) if t >= *from && t < *to => Loss::of(only),
-            _ => Loss::Nothing,
-        }
+        let Some(t) = arrival else {
+            return Loss::Nothing;
+        };
+        s.recv_windows
+            .iter()
+            .rev()
+            .find(|(from, to, _)| t >= *from && t < *to)
+            .map_or(Loss::Nothing, |(_, _, only)| Loss::of(only))
     }
 }
 
@@ -310,6 +332,38 @@ mod tests {
         assert!(lost(&o, Some(during)));
         assert!(!lost(&o, Some(now_timestamp())));
         assert!(!lost(&o, None));
+    }
+
+    #[test]
+    fn earlier_outages_stay_lost_after_later_ones() {
+        let o = Outage::new(None);
+        let gap = || std::thread::sleep(Duration::from_millis(2));
+        o.cut(LinkDirection::Recv, None, None).unwrap();
+        gap();
+        let first = now_timestamp();
+        gap();
+        o.restore(LinkDirection::Recv);
+        gap();
+        let between = now_timestamp();
+        gap();
+        o.cut(LinkDirection::Recv, None, None).unwrap();
+        gap();
+        o.restore(LinkDirection::Recv);
+        assert!(lost(&o, Some(first)));
+        assert!(!lost(&o, Some(between)));
+    }
+
+    #[test]
+    fn a_cut_names_at_least_one_message_and_may_last_forever() {
+        let o = Outage::new(None);
+        let e = o
+            .cut(LinkDirection::Both, None, Some(BTreeSet::new()))
+            .unwrap_err();
+        assert!(e.to_string().contains("at least one"), "{e}");
+        assert!(!o.is_down(LinkDirection::Both));
+        o.cut(LinkDirection::Both, Some(Duration::MAX), None)
+            .unwrap();
+        assert!(o.is_down(LinkDirection::Both));
     }
 
     #[test]
