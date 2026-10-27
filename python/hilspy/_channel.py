@@ -125,7 +125,7 @@ class Channel:
         duration: float | None = None,
         *,
         direction: Direction = "both",
-        messages: Iterable[str] | None = None,
+        messages: str | Iterable[str] | None = None,
     ) -> None:
         """Simulate losing the link (a cut wire, an unplugged connector).
 
@@ -140,10 +140,7 @@ class Channel:
         that arrived meanwhile. The transport stays open. Cutting a side that
         is down already gives it the new end and messages.
         """
-        if isinstance(messages, str):
-            messages = [messages]
-        names = None if messages is None else list(messages)
-        self._inner.disconnect(duration, direction=direction, messages=names)
+        self._inner.disconnect(duration, direction=direction, messages=messages)
 
     def reconnect(self, *, direction: Direction = "both") -> None:
         """Bring `direction` of the link back up (see `disconnect`)."""

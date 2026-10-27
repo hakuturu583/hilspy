@@ -1,5 +1,6 @@
 //! `open`, `Channel` and `Periodic`.
 
+use std::collections::BTreeSet;
 use std::time::{Duration, Instant};
 
 use hilspy_core::{
@@ -8,7 +9,7 @@ use hilspy_core::{
 };
 use pyo3::exceptions::{PyStopIteration, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::PyDict;
+use pyo3::types::{PyDict, PyString};
 
 use crate::convert::{message_arg, options_from_py, Message};
 use crate::errors::{to_py, IntoPyResult};
@@ -20,6 +21,11 @@ const SIGNAL_CHECK: Duration = Duration::from_millis(50);
 fn duration(seconds: f64, what: &str) -> PyResult<Duration> {
     Duration::try_from_secs_f64(seconds)
         .map_err(|_| PyValueError::new_err(format!("invalid {what}: {seconds}")))
+}
+
+/// A direction argument: `"send"`, `"recv"` or `"both"`.
+fn link(direction: &str) -> PyResult<LinkDirection> {
+    direction.parse().py()
 }
 
 /// Open a channel: the transport `url` with the codec `codec`.
@@ -165,28 +171,36 @@ impl Channel {
         &self,
         duration: Option<f64>,
         direction: &str,
-        messages: Option<Vec<String>>,
+        messages: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<()> {
-        let direction: LinkDirection = direction.parse().py()?;
+        let direction = link(direction)?;
         let duration = duration
             .map(|d| self::duration(d, "duration"))
             .transpose()?;
-        let messages = messages.map(|names| names.into_iter().collect());
+        // One name, or an iterable of names.
+        let messages = match messages {
+            None => None,
+            Some(m) if m.is_instance_of::<PyString>() => Some(BTreeSet::from([m.extract()?])),
+            Some(m) => Some(
+                m.try_iter()?
+                    .map(|n| n?.extract::<String>())
+                    .collect::<PyResult<_>>()?,
+            ),
+        };
         self.inner.disconnect(direction, duration, messages).py()
     }
 
     /// Bring `direction` of the link back up.
     #[pyo3(signature = (*, direction = "both"))]
     fn reconnect(&self, direction: &str) -> PyResult<()> {
-        let direction: LinkDirection = direction.parse().py()?;
-        self.inner.reconnect(direction);
-        Ok(())
+        let direction = link(direction)?;
+        self.inner.reconnect(direction).py()
     }
 
     /// Whether `direction` of the link is down (either side, for `"both"`).
     #[pyo3(signature = (direction = "both"))]
     fn disconnected(&self, direction: &str) -> PyResult<bool> {
-        let direction: LinkDirection = direction.parse().py()?;
+        let direction = link(direction)?;
         Ok(self.inner.is_disconnected(direction))
     }
 

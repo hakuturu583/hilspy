@@ -393,16 +393,15 @@ ecu.disconnect(messages=["VehicleSpeed"])  # only this frame; the bus carries on
 lidar.disconnect(messages=["scan"])
 ```
 
-`messages` names what is lost (by name: before encoding on the way out, after
-decoding on the way in); without it the whole link goes. While a direction is
-down, sends succeed and periodic messages keep ticking:
-they are encoded (an E2E counter or a sequence number moves on, as an ECU's
-does when its bus is cut) and their packets dropped. Received packets are
-dropped as they are read, and once the receive side is back so are those that
-arrived meanwhile. The transport stays open (a TCP client stays connected and
-just hears nothing). `duration` is measured on the channel's `Clock` if it has
-one, so the outage covers the same simulated time however fast the
-simulation runs.
+`messages` names what is lost (one name or several, as the codec names
+messages); without it the whole link goes. While a direction is down, sends
+succeed and periodic messages keep ticking: they are encoded (an E2E counter or
+a sequence number moves on, as an ECU's does when its bus is cut) and their
+packets dropped. Received packets are dropped as they are read, and what the
+transport buffered meanwhile is dropped when the receive side comes back. The
+transport stays open (a TCP client stays connected and just hears nothing).
+`duration` is measured on the channel's `Clock` if it has one, so the outage
+covers the same simulated time however fast the simulation runs.
 
 ### asyncio and several buses at once
 

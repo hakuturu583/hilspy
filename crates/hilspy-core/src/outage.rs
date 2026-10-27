@@ -5,23 +5,22 @@
 //! after encoding (a codec's counters keep counting, as an ECU's do when its
 //! bus is cut) and received packets are dropped as the channel reads them,
 //! so the transport itself (a socket, a TCP connection) stays open and the
-//! peer sees the line go quiet. Once the receive side is back, packets the
-//! transport stamped with a wall-clock arrival time inside the outage are
-//! dropped too (for the latest few outages): they arrived while nobody was
-//! reading.
+//! peer sees the line go quiet. Once the receive side is back, the next
+//! receive first drains what the transport buffered meanwhile: it arrived
+//! while the line was down, whenever the transport stamped it.
 //!
 //! A cut may name the messages it stops (`VehicleSpeed`, a LiDAR's `scan`):
-//! then only those are lost, by name, before encoding and after decoding, and
-//! the rest of the link carries on.
+//! then only those are lost -- after encoding on the way out, after decoding
+//! on the way in -- and the rest of the link carries on.
 
-use std::collections::{BTreeSet, VecDeque};
+use std::collections::BTreeSet;
 use std::str::FromStr;
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
-use crate::clock::{to_ns, Clock};
+use crate::clock::Clock;
 use crate::error::{Error, Result};
-use crate::message::now_timestamp;
 
 /// Which way of a channel's link an outage cuts.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -58,33 +57,8 @@ impl FromStr for LinkDirection {
     }
 }
 
-/// When a cut ends.
-#[derive(Clone, Copy)]
-enum End {
-    /// At [`Outage::restore`].
-    Never,
-    /// On the wall clock; `unix` is the same instant as a Unix time.
-    Wall { at: Instant, unix: f64 },
-    /// When the virtual clock reaches this time (ns).
-    Clock(i64),
-}
-
-/// How many ended receive outages are remembered, so packets that arrived
-/// during one and were not read before later ones ended stay lost.
-const WINDOWS: usize = 16;
-
-/// The messages a cut stops: by name, or (`None`) everything.
-pub(crate) type Only = Option<Arc<BTreeSet<String>>>;
-
-#[derive(Clone)]
-struct Cut {
-    end: End,
-    only: Only,
-    /// Tells a cut from the one it replaced, for the clock task ending it.
-    id: u64,
-}
-
-/// What a received packet loses to an outage.
+/// What an outage stops.
+#[derive(Clone, Debug)]
 pub(crate) enum Loss {
     Nothing,
     Everything,
@@ -93,105 +67,109 @@ pub(crate) enum Loss {
 }
 
 impl Loss {
-    fn of(only: &Only) -> Self {
-        match only {
-            None => Self::Everything,
-            Some(names) => Self::Named(Arc::clone(names)),
+    /// Whether a message named `name` is lost.
+    pub(crate) fn drops(&self, name: Option<&str>) -> bool {
+        match self {
+            Self::Nothing => false,
+            Self::Everything => true,
+            Self::Named(names) => name.is_some_and(|n| names.contains(n)),
+        }
+    }
+
+    /// What `self` and `other` stop together.
+    fn and(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::Nothing, l) | (l, Self::Nothing) => l,
+            (Self::Named(a), Self::Named(b)) => {
+                Self::Named(Arc::new(a.union(&b).cloned().collect()))
+            }
+            _ => Self::Everything,
         }
     }
 }
 
-#[derive(Default)]
+/// When a cut ends.
+#[derive(Clone, Copy)]
+enum End {
+    /// At [`Outage::restore`].
+    Never,
+    Wall(Instant),
+    /// When the virtual clock reaches this time (ns).
+    Clock(i64),
+}
+
+#[derive(Clone)]
+struct Cut {
+    /// Never [`Loss::Nothing`].
+    loss: Loss,
+    end: End,
+}
+
 struct State {
     send: Option<Cut>,
     recv: Option<Cut>,
-    /// Unix time the receive side has been down since.
-    recv_since: f64,
-    /// The latest receive outages that ended (at most [`WINDOWS`]), as Unix
-    /// times `[from, to)`, with what each stopped.
-    recv_windows: VecDeque<(f64, f64, Only)>,
-    next_id: u64,
+    /// What the receive side stopped before it came back: the next receive
+    /// drops it from what the transport buffered.
+    drain: Loss,
 }
 
 /// A channel's link state.
 pub(crate) struct Outage {
     state: Mutex<State>,
+    /// Whether anything is cut or to drain: every packet sent and received
+    /// checks it without locking.
+    active: AtomicBool,
     clock: Option<Clock>,
 }
 
 impl Outage {
-    pub(crate) fn new(clock: Option<Clock>) -> Arc<Self> {
-        Arc::new(Self {
-            state: Mutex::new(State::default()),
+    pub(crate) fn new(clock: Option<Clock>) -> Self {
+        Self {
+            state: Mutex::new(State {
+                send: None,
+                recv: None,
+                drain: Loss::Nothing,
+            }),
+            active: AtomicBool::new(false),
             clock,
-        })
+        }
     }
 
     /// Cut `direction` for `duration` (until [`Outage::restore`] without
     /// one), measured on the virtual clock if there is one, stopping the
     /// messages named in `only` (everything without). A side already down
-    /// gets the new end and messages.
+    /// gets the new end and messages. Returns what the receive side stops.
     pub(crate) fn cut(
-        self: &Arc<Self>,
+        &self,
         direction: LinkDirection,
         duration: Option<Duration>,
         only: Option<BTreeSet<String>>,
-    ) -> Result<()> {
+    ) -> Result<Loss> {
+        let loss = match only {
+            None => Loss::Everything,
+            Some(names) if names.is_empty() => {
+                return Err(Error::Config(
+                    "a cut must name at least one message (or none, for everything)".into(),
+                ))
+            }
+            Some(names) => Loss::Named(Arc::new(names)),
+        };
         let end = match (duration, &self.clock) {
             (None, _) => End::Never,
-            (Some(d), Some(clock)) => {
-                End::Clock(clock.now_ns().saturating_add(to_ns(d.as_secs_f64())?))
-            }
-            // A duration past what an `Instant` can hold never ends.
-            (Some(d), None) => match Instant::now().checked_add(d) {
-                Some(at) => End::Wall {
-                    at,
-                    unix: now_timestamp() + d.as_secs_f64(),
-                },
-                None => End::Never,
-            },
+            (Some(d), Some(clock)) => End::Clock(clock.deadline_after(d)),
+            // Too far to represent: until reconnected.
+            (Some(d), None) => Instant::now().checked_add(d).map_or(End::Never, End::Wall),
         };
-        if only.as_ref().is_some_and(BTreeSet::is_empty) {
-            return Err(Error::Config(
-                "a cut's messages must name at least one message".into(),
-            ));
-        }
+        let cut = Some(Cut { loss, end });
         let mut s = self.state.lock().unwrap();
-        let id = s.next_id;
-        s.next_id += 1;
-        let cut = Some(Cut {
-            end,
-            only: only.map(Arc::new),
-            id,
-        });
         if direction.sends() {
             s.send = cut.clone();
         }
         if direction.receives() {
-            if s.recv.is_none() {
-                s.recv_since = now_timestamp();
-            }
             s.recv = cut;
         }
-        drop(s);
-        // A cut on the clock ends as the clock passes its end, so the wall
-        // time it ended at (for the arrivals it drops) is when that happened.
-        if let (End::Clock(at), Some(clock)) = (end, &self.clock) {
-            let outage = Arc::clone(self);
-            clock.schedule(
-                at,
-                Box::new(move |_: &Clock, _| {
-                    let mut s = outage.state.lock().unwrap();
-                    if s.send.as_ref().is_some_and(|c| c.id == id) {
-                        s.send = None;
-                    }
-                    if s.recv.as_ref().is_some_and(|c| c.id == id) {
-                        Self::end_recv(&mut s, now_timestamp());
-                    }
-                }),
-            );
-        }
-        Ok(())
+        self.active.store(true, Ordering::Release);
+        Ok(s.recv.as_ref().map_or(Loss::Nothing, |c| c.loss.clone()))
     }
 
     /// Bring `direction` back up.
@@ -200,75 +178,75 @@ impl Outage {
         if direction.sends() {
             s.send = None;
         }
-        if direction.receives() && s.recv.is_some() {
-            Self::end_recv(&mut s, now_timestamp());
+        if direction.receives() {
+            Self::end_recv(&mut s);
         }
+        self.settle(&s);
     }
 
-    fn end_recv(s: &mut State, unix: f64) {
+    fn end_recv(s: &mut State) {
         if let Some(cut) = s.recv.take() {
-            if s.recv_windows.len() == WINDOWS {
-                s.recv_windows.pop_front();
-            }
-            let since = s.recv_since;
-            s.recv_windows.push_back((since, unix, cut.only));
+            s.drain = std::mem::replace(&mut s.drain, Loss::Nothing).and(cut.loss);
         }
     }
 
-    /// End the cuts whose time has come.
-    fn expire(&self, s: &mut State) {
-        let now_ns = self.clock.as_ref().map(Clock::now_ns);
-        let ended = |cut: &Option<Cut>| -> Option<f64> {
-            match cut.as_ref()?.end {
-                End::Never => None,
-                End::Wall { at, unix } => (Instant::now() >= at).then_some(unix),
-                End::Clock(at) => now_ns.is_some_and(|n| n >= at).then(now_timestamp),
-            }
+    /// Clear the fast-path flag once nothing is left.
+    fn settle(&self, s: &State) {
+        if s.send.is_none() && s.recv.is_none() && matches!(s.drain, Loss::Nothing) {
+            self.active.store(false, Ordering::Release);
+        }
+    }
+
+    /// The state with the cuts whose time has come ended, or `None` when
+    /// nothing is cut (found without locking).
+    fn current(&self) -> Option<MutexGuard<'_, State>> {
+        if !self.active.load(Ordering::Acquire) {
+            return None;
+        }
+        let mut s = self.state.lock().unwrap();
+        let ended = |cut: &Option<Cut>| match cut.as_ref().map(|c| c.end) {
+            Some(End::Wall(at)) => Instant::now() >= at,
+            Some(End::Clock(at)) => self.clock.as_ref().is_some_and(|c| c.now_ns() >= at),
+            Some(End::Never) | None => false,
         };
-        if ended(&s.send).is_some() {
+        if ended(&s.send) {
             s.send = None;
         }
-        if let Some(unix) = ended(&s.recv) {
-            Self::end_recv(s, unix);
+        if ended(&s.recv) {
+            Self::end_recv(&mut s);
         }
+        self.settle(&s);
+        Some(s)
     }
 
     /// Whether `direction` is down (either side, for [`LinkDirection::Both`]).
     pub(crate) fn is_down(&self, direction: LinkDirection) -> bool {
-        let mut s = self.state.lock().unwrap();
-        self.expire(&mut s);
-        (direction.sends() && s.send.is_some()) || (direction.receives() && s.recv.is_some())
+        self.current().is_some_and(|s| {
+            (direction.sends() && s.send.is_some()) || (direction.receives() && s.recv.is_some())
+        })
     }
 
-    /// Whether a message named `name` is lost on the way out.
+    /// Whether a packet of a message named `name` is lost on the way out.
     pub(crate) fn drops_sent(&self, name: Option<&str>) -> bool {
-        let mut s = self.state.lock().unwrap();
-        self.expire(&mut s);
-        match s.send.as_ref().map(|c| &c.only) {
-            None => false,
-            Some(None) => true,
-            Some(Some(names)) => name.is_some_and(|n| names.contains(n)),
-        }
+        self.current()
+            .and_then(|s| s.send.as_ref().map(|c| c.loss.drops(name)))
+            .unwrap_or(false)
     }
 
-    /// What a received packet stamped `arrival` (a Unix time, as live
-    /// transports stamp packets) loses: what the receive side being down
-    /// stops, or else what a recent receive outage stopped if it arrived
-    /// during it.
-    pub(crate) fn received(&self, arrival: Option<f64>) -> Loss {
-        let mut s = self.state.lock().unwrap();
-        self.expire(&mut s);
-        if let Some(cut) = &s.recv {
-            return Loss::of(&cut.only);
-        }
-        let Some(t) = arrival else {
-            return Loss::Nothing;
-        };
-        s.recv_windows
-            .iter()
-            .rev()
-            .find(|(from, to, _)| t >= *from && t < *to)
-            .map_or(Loss::Nothing, |(_, _, only)| Loss::of(only))
+    /// What a received packet loses.
+    pub(crate) fn received(&self) -> Loss {
+        self.current()
+            .and_then(|s| s.recv.as_ref().map(|c| c.loss.clone()))
+            .unwrap_or(Loss::Nothing)
+    }
+
+    /// What to drop of what the transport buffered while the receive side
+    /// was down, once; `None` when there is nothing to drain.
+    pub(crate) fn take_drain(&self) -> Option<Loss> {
+        let mut s = self.current()?;
+        let drain = std::mem::replace(&mut s.drain, Loss::Nothing);
+        self.settle(&s);
+        (!matches!(drain, Loss::Nothing)).then_some(drain)
     }
 }
 
@@ -276,8 +254,8 @@ impl Outage {
 mod tests {
     use super::*;
 
-    fn lost(o: &Outage, arrival: Option<f64>) -> bool {
-        matches!(o.received(arrival), Loss::Everything)
+    fn lost(o: &Outage) -> bool {
+        matches!(o.received(), Loss::Everything)
     }
 
     fn names(list: &[&str]) -> Option<BTreeSet<String>> {
@@ -308,9 +286,9 @@ mod tests {
         assert!(!o.is_down(LinkDirection::Both));
         o.cut(LinkDirection::Send, None, None).unwrap();
         assert!(o.is_down(LinkDirection::Send) && o.is_down(LinkDirection::Both));
-        assert!(!o.is_down(LinkDirection::Recv) && !lost(&o, None));
+        assert!(!o.is_down(LinkDirection::Recv) && !lost(&o));
         o.cut(LinkDirection::Recv, None, None).unwrap();
-        assert!(lost(&o, None));
+        assert!(lost(&o));
         o.restore(LinkDirection::Send);
         assert!(!o.is_down(LinkDirection::Send) && o.is_down(LinkDirection::Recv));
         o.restore(LinkDirection::Both);
@@ -318,52 +296,23 @@ mod tests {
     }
 
     #[test]
-    fn arrivals_during_the_outage_stay_lost() {
+    fn what_was_buffered_meanwhile_is_drained_once() {
         let o = Outage::new(None);
-        let before = now_timestamp();
-        std::thread::sleep(Duration::from_millis(2));
-        o.cut(LinkDirection::Recv, None, None).unwrap();
-        std::thread::sleep(Duration::from_millis(2));
-        let during = now_timestamp();
-        std::thread::sleep(Duration::from_millis(2));
+        assert!(o.take_drain().is_none());
+        o.cut(LinkDirection::Recv, None, names(&["a"])).unwrap();
         o.restore(LinkDirection::Recv);
-        // Down, everything goes; back up, only what arrived meanwhile.
-        assert!(!lost(&o, Some(before)));
-        assert!(lost(&o, Some(during)));
-        assert!(!lost(&o, Some(now_timestamp())));
-        assert!(!lost(&o, None));
-    }
-
-    #[test]
-    fn earlier_outages_stay_lost_after_later_ones() {
-        let o = Outage::new(None);
-        let gap = || std::thread::sleep(Duration::from_millis(2));
-        o.cut(LinkDirection::Recv, None, None).unwrap();
-        gap();
-        let first = now_timestamp();
-        gap();
+        o.cut(LinkDirection::Recv, None, names(&["b"])).unwrap();
         o.restore(LinkDirection::Recv);
-        gap();
-        let between = now_timestamp();
-        gap();
+        // Two outages before anyone read: what either stopped goes.
+        let Some(Loss::Named(drain)) = o.take_drain() else {
+            panic!("named cuts drain named messages");
+        };
+        assert!(drain.contains("a") && drain.contains("b"));
+        assert!(o.take_drain().is_none());
         o.cut(LinkDirection::Recv, None, None).unwrap();
-        gap();
-        o.restore(LinkDirection::Recv);
-        assert!(lost(&o, Some(first)));
-        assert!(!lost(&o, Some(between)));
-    }
-
-    #[test]
-    fn a_cut_names_at_least_one_message_and_may_last_forever() {
-        let o = Outage::new(None);
-        let e = o
-            .cut(LinkDirection::Both, None, Some(BTreeSet::new()))
-            .unwrap_err();
-        assert!(e.to_string().contains("at least one"), "{e}");
-        assert!(!o.is_down(LinkDirection::Both));
-        o.cut(LinkDirection::Both, Some(Duration::MAX), None)
-            .unwrap();
-        assert!(o.is_down(LinkDirection::Both));
+        o.restore(LinkDirection::Both);
+        assert!(matches!(o.take_drain(), Some(Loss::Everything)));
+        assert!(!o.active.load(Ordering::Acquire));
     }
 
     #[test]
@@ -374,6 +323,7 @@ mod tests {
         assert!(o.is_down(LinkDirection::Both));
         std::thread::sleep(Duration::from_millis(40));
         assert!(!o.is_down(LinkDirection::Both));
+        assert!(matches!(o.take_drain(), Some(Loss::Everything)));
     }
 
     #[test]
@@ -389,6 +339,7 @@ mod tests {
         assert!(o.is_down(LinkDirection::Both));
         clock.advance(0.1).unwrap();
         assert!(!o.is_down(LinkDirection::Both));
+        // Nothing is left on the clock.
         assert_eq!(clock.pending(), 0);
     }
 
@@ -399,13 +350,8 @@ mod tests {
         o.cut(LinkDirection::Send, Some(Duration::from_millis(100)), None)
             .unwrap();
         o.cut(LinkDirection::Send, None, None).unwrap();
-        // The first cut's end does not end the second.
         clock.advance(1.0).unwrap();
         assert!(o.is_down(LinkDirection::Send));
-        o.restore(LinkDirection::Send);
-        o.cut(LinkDirection::Send, Some(Duration::from_millis(100)), None)
-            .unwrap();
-        o.restore(LinkDirection::Send);
         o.cut(LinkDirection::Send, Some(Duration::from_millis(500)), None)
             .unwrap();
         clock.advance(0.2).unwrap();
@@ -417,20 +363,27 @@ mod tests {
     #[test]
     fn a_cut_can_stop_only_named_messages() {
         let o = Outage::new(None);
-        o.cut(LinkDirection::Both, None, names(&["scan", "VehicleSpeed"]))
+        let loss = o
+            .cut(LinkDirection::Both, None, names(&["scan", "VehicleSpeed"]))
             .unwrap();
+        assert!(loss.drops(Some("VehicleSpeed")) && !loss.drops(None));
         assert!(o.is_down(LinkDirection::Both));
         assert!(o.drops_sent(Some("scan")));
         assert!(!o.drops_sent(Some("SteeringCmd")) && !o.drops_sent(None));
-        let Loss::Named(stopped) = o.received(None) else {
-            panic!("a named cut stops named messages");
-        };
-        assert!(stopped.contains("VehicleSpeed") && stopped.len() == 2);
         // A new cut replaces the names; restoring ends it.
         o.cut(LinkDirection::Send, None, None).unwrap();
         assert!(o.drops_sent(Some("SteeringCmd")) && o.drops_sent(None));
         o.restore(LinkDirection::Both);
         assert!(!o.drops_sent(Some("scan")));
-        assert!(matches!(o.received(None), Loss::Nothing));
+        assert!(matches!(o.received(), Loss::Nothing));
+    }
+
+    #[test]
+    fn empty_names_and_huge_durations() {
+        let o = Outage::new(None);
+        assert!(o.cut(LinkDirection::Both, None, names(&[])).is_err());
+        o.cut(LinkDirection::Both, Some(Duration::MAX), None)
+            .unwrap();
+        assert!(o.is_down(LinkDirection::Both));
     }
 }
