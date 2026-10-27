@@ -157,15 +157,22 @@ impl Channel {
 
     /// Simulate losing the link: what travels in `direction` (`"send"`,
     /// `"recv"` or `"both"`) is lost until `reconnect()`, or for `duration`
-    /// seconds (on the channel's clock if it has one). The transport stays
-    /// open; sends and periodic messages still encode, then drop their packets.
-    #[pyo3(signature = (duration = None, *, direction = "both"))]
-    fn disconnect(&self, duration: Option<f64>, direction: &str) -> PyResult<()> {
+    /// seconds (on the channel's clock if it has one); with `messages`, only
+    /// the messages of those names. The transport stays open; sends and
+    /// periodic messages still encode, then drop their packets.
+    #[pyo3(signature = (duration = None, *, direction = "both", messages = None))]
+    fn disconnect(
+        &self,
+        duration: Option<f64>,
+        direction: &str,
+        messages: Option<Vec<String>>,
+    ) -> PyResult<()> {
         let direction: LinkDirection = direction.parse().py()?;
         let duration = duration
             .map(|d| self::duration(d, "duration"))
             .transpose()?;
-        self.inner.disconnect(direction, duration).py()
+        let messages = messages.map(|names| names.into_iter().collect());
+        self.inner.disconnect(direction, duration, messages).py()
     }
 
     /// Bring `direction` of the link back up.

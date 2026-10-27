@@ -1,7 +1,7 @@
 //! A channel: a transport and a codec composed, sending and receiving named
 //! messages.
 
-use std::collections::VecDeque;
+use std::collections::{BTreeSet, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
@@ -11,7 +11,7 @@ use crate::clock::{to_ns, Clock};
 use crate::codec::{self, Codec};
 use crate::error::{Error, Result};
 use crate::message::{Message, Packet};
-use crate::outage::{LinkDirection, Outage};
+use crate::outage::{LinkDirection, Loss, Outage};
 use crate::telemetry::{self, ChannelMetrics, Direction, Instruments, PeriodicMetrics};
 use crate::transport::{self, Transport};
 use crate::url::{CodecSpec, Endpoint};
@@ -45,10 +45,10 @@ impl Inner {
         result
     }
 
-    /// One packet into the transport, recorded, unless the send side of the
-    /// link is down: then it is lost, as on a cut line.
-    fn send_packet(&self, packet: &Packet) -> Result<()> {
-        if self.outage.is_down(LinkDirection::Send) {
+    /// One packet of the message `name` into the transport, recorded, unless
+    /// an outage stops the message: then it is lost, as on a cut line.
+    fn send_packet(&self, packet: &Packet, name: Option<&str>) -> Result<()> {
+        if self.outage.drops_sent(name) {
             return Ok(());
         }
         let start = Instant::now();
@@ -86,6 +86,7 @@ impl Inner {
             }
         };
         let first = packets.first().and_then(|p| p.timestamp);
+        let name = message.name.as_deref();
         if let (Some(clock), true) = (&self.clock, paced) {
             // Later packets are sent as the clock passes their times.
             let now = clock.now_ns();
@@ -99,16 +100,17 @@ impl Inner {
                     _ => 0,
                 };
                 if delay == 0 {
-                    self.send_packet(&p)?;
+                    self.send_packet(&p, name)?;
                 } else {
                     let inner = Arc::clone(self);
+                    let name = name.map(str::to_owned);
                     clock.schedule(
                         now + delay,
                         Box::new(move |_: &Clock, _| {
                             if !inner.closed.load(Ordering::Acquire) {
                                 // A failure has no caller to report to;
                                 // it is recorded for the next send.
-                                if let Err(e) = inner.send_packet(&p) {
+                                if let Err(e) = inner.send_packet(&p, name.as_deref()) {
                                     *inner.deferred_error.lock().unwrap() = Some(e);
                                 }
                             }
@@ -129,7 +131,7 @@ impl Inner {
                     self.wait_until(start + Duration::from_secs_f64(delay.clamp(0.0, 3600.0)))?;
                 }
             }
-            self.send_packet(p)?;
+            self.send_packet(p, name)?;
         }
         Ok(())
     }
@@ -259,7 +261,8 @@ impl Channel {
             };
             // Before the clock restamps it: the transport's arrival time
             // says whether it came during an outage.
-            if inner.outage.drops(packet.timestamp) {
+            let loss = inner.outage.received(packet.timestamp);
+            if matches!(loss, Loss::Everything) {
                 if deadline.is_some_and(|d| Instant::now() >= d) {
                     return Ok(None);
                 }
@@ -271,6 +274,9 @@ impl Channel {
             inner.metrics.packet(Direction::Rx, &packet);
             let mut messages: VecDeque<Message> =
                 inner.codec.lock().unwrap().decode(packet)?.into();
+            if let Loss::Named(stopped) = &loss {
+                messages.retain(|m| !m.name.as_ref().is_some_and(|n| stopped.contains(n)));
+            }
             for m in &messages {
                 inner.metrics.message(Direction::Rx, m);
             }
@@ -380,13 +386,23 @@ impl Channel {
     /// still encode and then drop their packets, and periodic messages keep
     /// ticking, so a codec's counters move on as an ECU's would; received
     /// packets are dropped as they are read, along with those that arrived
-    /// meanwhile. The transport stays open. Cutting a side that is down
-    /// already gives it the new end.
-    pub fn disconnect(&self, direction: LinkDirection, duration: Option<Duration>) -> Result<()> {
+    /// meanwhile. The transport stays open.
+    ///
+    /// With `messages`, only the messages of those names are lost (by name:
+    /// before encoding on the way out, after decoding on the way in) and the
+    /// rest of the link carries on: one CAN frame of a bus, a LiDAR's
+    /// `scan`. Cutting a side that is down already gives it the new end and
+    /// messages.
+    pub fn disconnect(
+        &self,
+        direction: LinkDirection,
+        duration: Option<Duration>,
+        messages: Option<BTreeSet<String>>,
+    ) -> Result<()> {
         if self.is_closed() {
             return Err(Error::Closed);
         }
-        self.inner.outage.cut(direction, duration)
+        self.inner.outage.cut(direction, duration, messages)
     }
 
     /// Bring `direction` of the link back up (see [`Channel::disconnect`]).
@@ -1130,7 +1146,7 @@ mod tests {
                 .collect()
         };
         // Send side: the send succeeds and the packet is lost.
-        a.disconnect(LinkDirection::Send, None).unwrap();
+        a.disconnect(LinkDirection::Send, None, None).unwrap();
         assert!(a.is_disconnected(LinkDirection::Send) && !a.is_disconnected(LinkDirection::Recv));
         send(&a, 1).unwrap();
         b.send(&Message::raw(Packet::bytes(vec![2]))).unwrap();
@@ -1142,7 +1158,7 @@ mod tests {
         // Receive side: what is read while it is down is lost, and so is
         // what arrived meanwhile, read or not.
         send(&b, 0).unwrap();
-        a.disconnect(LinkDirection::Recv, None).unwrap();
+        a.disconnect(LinkDirection::Recv, None, None).unwrap();
         send(&b, 4).unwrap();
         assert!(a.recv(Some(Duration::from_millis(20))).unwrap().is_none());
         send(&b, 5).unwrap();
@@ -1152,9 +1168,39 @@ mod tests {
         assert_eq!(got(&a), vec![6]);
         a.close();
         assert!(matches!(
-            a.disconnect(LinkDirection::Both, None),
+            a.disconnect(LinkDirection::Both, None, None),
             Err(Error::Closed)
         ));
+    }
+
+    #[test]
+    fn a_cut_can_stop_only_named_messages() {
+        let mut lax = Options::new();
+        lax.insert("strict", Value::Bool(false));
+        let tx = Channel::open("mem://t-ch-outage-named", &dbc(), lax).unwrap();
+        let rx = Channel::open("mem://t-ch-outage-named", &dbc(), Options::new()).unwrap();
+        let names = |ch: &Channel| -> Vec<String> {
+            drain(ch).into_iter().filter_map(|m| m.name).collect()
+        };
+        let stop = Some(BTreeSet::from(["VehicleSpeed".to_owned()]));
+        let send_both = || {
+            tx.send(&Message::new("VehicleSpeed", vec![])).unwrap();
+            tx.send(&Message::new("SteeringCmd", vec![])).unwrap();
+        };
+        // On the way out: VehicleSpeed is lost, SteeringCmd goes through.
+        tx.disconnect(LinkDirection::Send, None, stop.clone())
+            .unwrap();
+        assert!(tx.is_disconnected(LinkDirection::Send));
+        send_both();
+        assert_eq!(names(&rx), ["SteeringCmd"]);
+        tx.reconnect(LinkDirection::Both);
+        // On the way in, by decoded name.
+        rx.disconnect(LinkDirection::Recv, None, stop).unwrap();
+        send_both();
+        assert_eq!(names(&rx), ["SteeringCmd"]);
+        rx.reconnect(LinkDirection::Recv);
+        send_both();
+        assert_eq!(names(&rx), ["VehicleSpeed", "SteeringCmd"]);
     }
 
     #[test]
@@ -1178,7 +1224,7 @@ mod tests {
         assert_eq!(drain(&rx).len(), 1);
         // Down for 0.3 s of simulated time: the ticks at 0.1 and 0.2 are
         // lost (still counted as sent), the one at 0.3 goes out.
-        tx.disconnect(LinkDirection::Both, Some(Duration::from_millis(250)))
+        tx.disconnect(LinkDirection::Both, Some(Duration::from_millis(250)), None)
             .unwrap();
         clock.advance(0.2).unwrap();
         assert!(tx.is_disconnected(LinkDirection::Both));

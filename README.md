@@ -74,7 +74,7 @@ The whole public API:
 | `Channel.send(message)` / `send(name, fields)` | encode and send |
 | `Channel.recv(timeout=None) -> Message \| None` | next message (iterate the channel for all) |
 | `Channel.every(period, message_or_name, fields=None, *, duration=None) -> Periodic` | cyclic send from a Rust thread; `update()`, `stop()`, `period`, `sent_count`. `period=None`: the message's cycle time from the DBC / FIBEX (see [Cycle times](#cycle-times)) |
-| `Channel.disconnect(duration=None, *, direction="both")`, `reconnect(*, direction="both")`, `disconnected(direction="both")` | simulate losing the link (`"send"`, `"recv"`, `"both"`); see [Link outages](#link-outages) |
+| `Channel.disconnect(duration=None, *, direction="both", messages=None)`, `reconnect(*, direction="both")`, `disconnected(direction="both")` | simulate losing the link (`"send"`, `"recv"`, `"both"`); see [Link outages](#link-outages) |
 | `Channel.close()` | also via `with` / `async with` |
 | `await Channel.asend(...)`, `await Channel.arecv(timeout=None)`, `async for msg in channel` | asyncio |
 | `hilspy.merge(*channels)` | `(channel, message)` from several buses as they arrive (`for` / `async for`) |
@@ -389,9 +389,13 @@ ecu.disconnect(2.0)  # both ways, for 2 s (simulated, on a clock)
 ecu.disconnect(direction="send")  # what we send is lost, until...
 ecu.reconnect()
 assert not ecu.disconnected()
+ecu.disconnect(messages=["VehicleSpeed"])  # only this frame; the bus carries on
+lidar.disconnect(messages=["scan"])
 ```
 
-While a direction is down, sends succeed and periodic messages keep ticking:
+`messages` names what is lost (by name: before encoding on the way out, after
+decoding on the way in); without it the whole link goes. While a direction is
+down, sends succeed and periodic messages keep ticking:
 they are encoded (an E2E counter or a sequence number moves on, as an ECU's
 does when its bus is cut) and their packets dropped. Received packets are
 dropped as they are read, and once the receive side is back so are those that

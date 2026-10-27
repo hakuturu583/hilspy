@@ -193,3 +193,23 @@ def test_disconnect_for_a_while(mem: str) -> None:
         assert not a.disconnected()
         a.send(Message(data=b"back"))
         assert _drain(b) == [b"back"]
+
+
+def test_disconnect_stops_only_the_named_messages(mem: str, vehicle_dbc: str) -> None:
+    with (
+        hilspy.open(mem, vehicle_dbc, strict=False) as tx,
+        hilspy.open(mem, vehicle_dbc) as rx,
+    ):
+
+        def received() -> list[str | None]:
+            return [m.name for m in iter(lambda: rx.recv(timeout=0.02), None)]
+
+        tx.disconnect(direction="send", messages=["VehicleSpeed"])
+        tx.send("VehicleSpeed", {})
+        tx.send("SteeringCmd", {})
+        assert received() == ["SteeringCmd"]
+        tx.reconnect()
+        rx.disconnect(direction="recv", messages="SteeringCmd")
+        tx.send("VehicleSpeed", {})
+        tx.send("SteeringCmd", {})
+        assert received() == ["VehicleSpeed"]
