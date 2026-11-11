@@ -49,20 +49,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Create vcan0
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y "linux-modules-extra-$(uname -r)" iproute2
-          sudo modprobe vcan
-          sudo ip link add dev vcan0 type vcan
-          sudo ip link set vcan0 mtu 72
-          sudo ip link set up vcan0
-          ip -details link show vcan0
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: "3.12"
+      # The packaged vcan playbook (ansible-runner), as `scenario-hils --setup` runs it.
+      - run: uv sync --only-group setup
+      - name: Create vcan0 (CAN FD MTU) with the setup command
+        run: uv run --no-sync tools/setup_host.py --vcan vcan0:fd --no-v4l2
+      - name: Check vcan0, and that setting it up again changes nothing
+        run: |
+          ip -details link show vcan0 | tee link.txt
+          grep -q "mtu 72" link.txt
+          uv run --no-sync tools/setup_host.py --vcan vcan0:fd --no-v4l2 | tee again.txt
+          grep -q "changed=0" again.txt
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
       - run: uv sync
       - name: Run the SocketCAN tests (and fail if they were skipped)
         env:

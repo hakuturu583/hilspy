@@ -1,8 +1,15 @@
 # Prepares a Debian / Ubuntu host for hilspy's v4l2:// transport:
 # GStreamer, v4l2loopback devices (now and at every boot), the video group,
 # and optionally what building hilspy with the `v4l2` feature needs.
-# Run it through tools/setup_host.py (ansible-runner); the variables below
-# are its options.
+# It ships in the hilspy wheel (hilspy/ansible/), so a program that only
+# installs hilspy can run it: tools/setup_host.py does from a checkout, and
+# autoware_carla_scenario's `scenario-hils --setup` with the devices its
+# configuration names. Both run it through ansible-runner.
+#
+# The variables below are its options. The devices are /dev/video<first> on
+# (count of them), labelled "<label> N"; v4l2loopback_numbers and
+# v4l2loopback_labels set them one by one instead (lists of the same length:
+# the numbers need not be consecutive).
 - name: v4l2loopback cameras for hilspy
   hosts: all
   become: true
@@ -20,6 +27,19 @@
       ansible.builtin.assert:
         that: ansible_facts["system"] == "Linux" and ansible_facts["os_family"] == "Debian"
         fail_msg: v4l2loopback setup supports Debian and Ubuntu hosts only
+
+    - name: Check the devices asked for
+      ansible.builtin.assert:
+        that:
+          - v4l2loopback_numbers | length > 0
+          - v4l2loopback_numbers | length == v4l2loopback_labels | length
+          - v4l2loopback_numbers | unique | length == v4l2loopback_numbers | length
+          - v4l2loopback_labels | select('search', '[\",]') | list | length == 0
+        fail_msg: >-
+          v4l2loopback_numbers ({{ v4l2loopback_numbers }}) and v4l2loopback_labels
+          ({{ v4l2loopback_labels }}) must be as many, the numbers distinct and the
+          labels free of quotes and commas
+        quiet: true
 
     - name: Update the apt cache
       tags: [packages, module]
