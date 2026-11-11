@@ -368,6 +368,11 @@ pub struct Encoder {
 }
 
 impl Encoder {
+    /// The rotation speed the encoder writes scans at, revolutions a minute.
+    pub fn rpm(&self) -> f64 {
+        self.rpm
+    }
+
     /// `rpm` defaults to the profile's; `return_mode` (a single-return
     /// mode's name) to `strongest`, or the first single-return mode.
     pub fn new(model: &Model, rpm: Option<f64>, return_mode: Option<&str>) -> Result<Self> {
