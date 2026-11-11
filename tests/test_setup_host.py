@@ -76,6 +76,7 @@ def test_bad_combinations(setup_host: ModuleType, argv: list[str]) -> None:
         "vcan.yml",
         "templates/v4l2loopback.conf.j2",
         "templates/hilspy-vcan.service.j2",
+        "files/hilspy-vcan",
     ],
 )
 def test_the_package_ships_the_playbooks(setup_host: ModuleType, path: str) -> None:

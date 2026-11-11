@@ -8,14 +8,9 @@ Before=network-pre.target
 Type=oneshot
 RemainAfterExit=yes
 ExecStartPre=modprobe vcan
-{% for i in vcan_interfaces %}
-# {{ i.name }}: {{ 'CAN FD (MTU 72)' if i.fd | default(false) | bool else 'classic CAN (MTU 16)' }}. The MTU is set while down.
-ExecStart=-ip link add dev {{ i.name }} type vcan
-ExecStart=ip link set {{ i.name }} down
-ExecStart=ip link set {{ i.name }} mtu {{ 72 if i.fd | default(false) | bool else 16 }}
-ExecStart=ip link set {{ i.name }} up
-ExecStop=-ip link delete {{ i.name }}
-{% endfor %}
+# The interfaces and their MTUs: /etc/hilspy/vcan-interfaces.
+ExecStart=/usr/local/lib/hilspy/hilspy-vcan up
+ExecStop=/usr/local/lib/hilspy/hilspy-vcan down
 
 [Install]
 WantedBy=multi-user.target

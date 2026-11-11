@@ -661,7 +661,7 @@ variables are the interface.
 
 | Playbook | Variables | Sets up |
 | --- | --- | --- |
-| `vcan.yml` | `vcan_interfaces: [{name: vcan0, fd: true}, ...]` | the `vcan` module and the interfaces (`hilspy-vcan.service`; an interface dropped from the list is deleted) |
+| `vcan.yml` | `vcan_interfaces: [{name: vcan0, fd: true}, ...]` | the `vcan` module and the interfaces, brought to the list on every run and at boot (`hilspy-vcan.service`): a deleted, down or wrong-MTU interface is put back, one dropped from the list is deleted, and a name of an interface of another kind (a CAN adapter) is refused before anything changes |
 | `v4l2loopback.yml` | `v4l2loopback_count`, `v4l2loopback_first`, `v4l2loopback_label`, or `v4l2loopback_numbers: [10, 12]` with `v4l2loopback_labels: [front, rear]`; `v4l2loopback_exclusive_caps`, `hilspy_user`, `hilspy_build` | GStreamer, v4l2loopback and its devices, the `video` group |
 
 Run them on `localhost` with `ansible_python_interpreter: /usr/bin/python3`
