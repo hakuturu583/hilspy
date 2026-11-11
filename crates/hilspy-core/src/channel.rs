@@ -33,6 +33,9 @@ struct Inner {
     metrics: ChannelMetrics,
     /// A simulated loss of the link ([`Channel::disconnect`]).
     outage: Outage,
+    /// When the next paced message is due if it continues the stream (the
+    /// end of the previous one's period), on the wall clock.
+    pace_next: Mutex<Option<Instant>>,
 }
 
 impl Inner {
@@ -75,14 +78,14 @@ impl Inner {
             }
             _ => message,
         };
-        let (packets, paced) = match (&message.name, &message.packet) {
-            (None, Some(p)) => (vec![p.clone()], false),
+        let (packets, paced, period) = match (&message.name, &message.packet) {
+            (None, Some(p)) => (vec![p.clone()], false, None),
             (None, None) => {
                 return Err(Error::encode("a message needs a name or data"));
             }
             (Some(_), _) => {
                 let mut codec = self.codec.lock().unwrap();
-                (codec.encode(message)?, codec.paced())
+                (codec.encode(message)?, codec.paced(), codec.pace_period())
             }
         };
         let first = packets.first().and_then(|p| p.timestamp);
@@ -124,7 +127,11 @@ impl Inner {
                 None => Ok(()),
             };
         }
-        let start = Instant::now();
+        let start = if paced {
+            self.paced_start(period)
+        } else {
+            Instant::now()
+        };
         for p in &packets {
             if let (true, Some(t0), Some(t)) = (paced, first, p.timestamp) {
                 let delay = t - t0;
@@ -135,6 +142,24 @@ impl Inner {
             self.send_packet(p, name.as_deref())?;
         }
         Ok(())
+    }
+
+    /// When a paced message's first packet is due. A sensor streams without a
+    /// break: a message sent within one `period` of the end of the previous
+    /// one's continues the stream from that end, so the time each send takes
+    /// past it (the encoding, the sleep that oversteps the last packet, the
+    /// caller's own work) does not push every later message back. A send that
+    /// comes later than that starts afresh, now. Without a `period` (the
+    /// codec does not say how long a message lasts) every send starts now.
+    fn paced_start(&self, period: Option<Duration>) -> Instant {
+        let now = Instant::now();
+        let mut next = self.pace_next.lock().unwrap();
+        let start = match (*next, period) {
+            (Some(due), Some(p)) if now < due + p => due,
+            _ => now,
+        };
+        *next = period.map(|p| start + p);
+        start
     }
 
     /// Sleep until `deadline`, returning early with `Closed` on close.
@@ -218,6 +243,7 @@ impl Channel {
                 closed: AtomicBool::new(false),
                 deferred_error: Mutex::new(None),
                 outage: Outage::new(clock.clone()),
+                pace_next: Mutex::new(None),
                 clock,
                 metrics,
             }),
@@ -963,6 +989,48 @@ mod tests {
             n += 1;
         }
         assert_eq!(n, 150);
+    }
+
+    #[test]
+    fn consecutive_paced_sends_keep_the_revolution_period() {
+        use crate::value::{Array, Value};
+        let scan = Message::new(
+            "scan",
+            ["x", "y", "z"]
+                .iter()
+                .map(|k| ((*k).to_owned(), Value::Array(Array::F64(vec![10.0]))))
+                .collect(),
+        );
+        let tx = Channel::open("mem://t-ch-period", "lidar:vlp16", Options::new()).unwrap();
+        let _rx = Channel::open("mem://t-ch-period", "raw", Options::new()).unwrap();
+        // Ten revolutions back to back: each starts one 100 ms period after the
+        // previous one, not when the previous send returned, so the stream does
+        // not drift by the time spent sending the last packet.
+        let start = Instant::now();
+        for _ in 0..10 {
+            tx.send(&scan).unwrap();
+        }
+        let first_nine = Duration::from_millis(900);
+        let elapsed = start.elapsed();
+        // The 10th send ends ~98 ms after its due time (900 ms).
+        assert!(
+            elapsed >= first_nine + Duration::from_millis(95),
+            "{elapsed:?}"
+        );
+        assert!(
+            elapsed < first_nine + Duration::from_millis(115),
+            "{elapsed:?}"
+        );
+        // After a pause longer than a period the stream starts afresh instead
+        // of bursting to catch up.
+        std::thread::sleep(Duration::from_millis(250));
+        let start = Instant::now();
+        tx.send(&scan).unwrap();
+        assert!(
+            start.elapsed() >= Duration::from_millis(95),
+            "{:?}",
+            start.elapsed()
+        );
     }
 
     #[test]

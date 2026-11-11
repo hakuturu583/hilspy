@@ -254,6 +254,11 @@ impl Codec for Lidar {
         self.pace
     }
 
+    fn pace_period(&self) -> Option<std::time::Duration> {
+        self.pace
+            .then(|| std::time::Duration::from_secs_f64(60.0 / self.encoder.rpm()))
+    }
+
     fn decode(&mut self, packet: Packet) -> Result<Vec<Message>> {
         let decoded = self.model.decode(&packet.data, packet.timestamp)?;
         if !self.per_packet {

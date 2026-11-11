@@ -48,6 +48,11 @@ pub trait Codec: Send {
     fn paced(&self) -> bool {
         false
     }
+    /// How long one paced message lasts in a stream (a LiDAR revolution at
+    /// its rpm), so consecutive sends continue it; `None`: each starts afresh.
+    fn pace_period(&self) -> Option<std::time::Duration> {
+        None
+    }
     /// How often the network description says `message` is sent (a DBC
     /// `GenMsgCycleTime`, a FIBEX `CYCLIC-TIMING`): the period
     /// [`Channel::every`](crate::Channel::every) uses when given none.
