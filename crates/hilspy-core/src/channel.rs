@@ -127,7 +127,11 @@ impl Inner {
                 None => Ok(()),
             };
         }
-        let start = if paced { self.paced_start(period) } else { Instant::now() };
+        let start = if paced {
+            self.paced_start(period)
+        } else {
+            Instant::now()
+        };
         for p in &packets {
             if let (true, Some(t0), Some(t)) = (paced, first, p.timestamp) {
                 let delay = t - t0;
@@ -1009,14 +1013,24 @@ mod tests {
         let first_nine = Duration::from_millis(900);
         let elapsed = start.elapsed();
         // The 10th send ends ~98 ms after its due time (900 ms).
-        assert!(elapsed >= first_nine + Duration::from_millis(95), "{elapsed:?}");
-        assert!(elapsed < first_nine + Duration::from_millis(115), "{elapsed:?}");
+        assert!(
+            elapsed >= first_nine + Duration::from_millis(95),
+            "{elapsed:?}"
+        );
+        assert!(
+            elapsed < first_nine + Duration::from_millis(115),
+            "{elapsed:?}"
+        );
         // After a pause longer than a period the stream starts afresh instead
         // of bursting to catch up.
         std::thread::sleep(Duration::from_millis(250));
         let start = Instant::now();
         tx.send(&scan).unwrap();
-        assert!(start.elapsed() >= Duration::from_millis(95), "{:?}", start.elapsed());
+        assert!(
+            start.elapsed() >= Duration::from_millis(95),
+            "{:?}",
+            start.elapsed()
+        );
     }
 
     #[test]

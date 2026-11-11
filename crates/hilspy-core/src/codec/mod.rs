@@ -48,11 +48,8 @@ pub trait Codec: Send {
     fn paced(&self) -> bool {
         false
     }
-    /// How long one paced message lasts when messages follow one another
-    /// without a break (a LiDAR revolution at its rpm): a paced send that
-    /// comes within this of the previous one's end continues the stream, its
-    /// packets timed from where the previous message's period ended rather
-    /// than from when the send was called. `None`: each send starts afresh.
+    /// How long one paced message lasts in a stream (a LiDAR revolution at
+    /// its rpm), so consecutive sends continue it; `None`: each starts afresh.
     fn pace_period(&self) -> Option<std::time::Duration> {
         None
     }
