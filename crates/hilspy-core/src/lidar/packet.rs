@@ -534,7 +534,7 @@ impl Encoder {
                     (c as usize, azimuth[i], distance[i])
                 }
             };
-            if !(d >= min && d <= max) || !az.is_finite() {
+            if !(d >= min && d <= max && az.is_finite()) {
                 continue;
             }
             let raw = (d / model.distance_unit).round();
