@@ -107,7 +107,8 @@ class Host:
         return [line for line in self.log.read_text().splitlines() if " show " not in line]
 
     def run(self, verb: str, listed: str) -> subprocess.CompletedProcess[str]:
-        self.config.write_text(listed)
+        # As vcan.yml writes it: LF line ends (write_text gives CRLF on Windows).
+        self.config.write_bytes(listed.encode())
         script = resources.files("hilspy").joinpath("ansible/files/hilspy-vcan")
         return subprocess.run(
             ["sh", str(script), verb], env=self.env, capture_output=True, text=True
