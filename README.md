@@ -545,7 +545,8 @@ The feature links the system GStreamer, so it is not in the published
 wheels. It works on amd64 and arm64 Linux alike (CI tests both).
 `tools/setup_host.py` sets a Debian / Ubuntu host (x86_64 or aarch64) up with
 [ansible-runner](https://ansible.readthedocs.io/projects/runner/) (playbook
-`tools/ansible/v4l2loopback.yml`): GStreamer and v4l2loopback (DKMS) are
+`hilspy/ansible/v4l2loopback.yml`, see [Host setup
+playbooks](#host-setup-playbooks)): GStreamer and v4l2loopback (DKMS) are
 installed, the devices are created now and at every boot
 (`/etc/modprobe.d/hilspy-v4l2loopback.conf`, labels `hilspy camera N`,
 `exclusive_caps=1` so browsers list them), you join the `video` group and,
@@ -641,14 +642,30 @@ gnss = hilspy.open("serial:///dev/ttyACM0?baud=921600", "sbf")
 Rust crates register through `hilspy_core::transport::register` and
 `hilspy_core::codec::register`.
 
-A virtual CAN interface for local testing:
+Virtual CAN interfaces for local testing, now and at every boot (a systemd
+unit, `hilspy-vcan.service`; `:fd` gives the CAN FD MTU):
 
 ```sh
-sudo modprobe vcan
-sudo ip link add dev vcan0 type vcan
-sudo ip link set vcan0 mtu 72        # CAN FD
-sudo ip link set up vcan0
+uv run --group setup tools/setup_host.py --vcan vcan0:fd --no-v4l2
+uv run --group setup tools/setup_host.py --vcan vcan0:fd --vcan vcan1 --no-v4l2
 ```
+
+### Host setup playbooks
+
+The [ansible](https://docs.ansible.com/) playbooks that prepare a Debian /
+Ubuntu host ship in the wheel, under `hilspy/ansible/`, so a program that
+only installed hilspy can run them (`importlib.resources.files("hilspy") /
+"ansible"`) -- autoware_carla_scenario's `scenario-hils --setup` does, with
+the devices its configuration names. They are not a Python API: their
+variables are the interface.
+
+| Playbook | Variables | Sets up |
+| --- | --- | --- |
+| `vcan.yml` | `vcan_interfaces: [{name: vcan0, fd: true}, ...]` | the `vcan` module and the interfaces, brought to the list on every run and at boot (`hilspy-vcan.service`): a deleted, down or wrong-MTU interface is put back, one dropped from the list is deleted, and a name of an interface of another kind (a CAN adapter) is refused before anything changes |
+| `v4l2loopback.yml` | `v4l2loopback_count`, `v4l2loopback_first`, `v4l2loopback_label`, or `v4l2loopback_numbers: [10, 12]` with `v4l2loopback_labels: [front, rear]`; `v4l2loopback_exclusive_caps`, `hilspy_user`, `hilspy_build` | GStreamer, v4l2loopback and its devices, the `video` group |
+
+Run them on `localhost` with `ansible_python_interpreter: /usr/bin/python3`
+(the apt bindings) and `become` (sudo).
 
 ## Examples
 

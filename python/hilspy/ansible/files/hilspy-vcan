@@ -1,0 +1,83 @@
+#!/bin/sh
+# Managed by hilspy (hilspy/ansible/vcan.yml); edits are overwritten.
+#
+# hilspy-vcan up|down: bring the virtual CAN interfaces listed in
+# $HILSPY_VCAN_CONFIG (default /etc/hilspy/vcan-interfaces; lines "NAME MTU")
+# to what the list says, or delete them. hilspy-vcan.service runs it at boot,
+# and vcan.yml on every run, so an interface deleted, taken down or given
+# another MTU since is put back.
+#
+# A listed name that belongs to an interface of another kind (a CAN adapter,
+# can0) is refused before any interface is touched: "up" leaves everything as
+# it is and fails, "down" deletes only vcan interfaces. "up" prints "changed"
+# when it changed something.
+set -eu
+
+config=${HILSPY_VCAN_CONFIG:-/etc/hilspy/vcan-interfaces}
+
+exists() { ip link show dev "$1" >/dev/null 2>&1 </dev/null; }
+
+is_vcan() { ip -details link show dev "$1" 2>/dev/null </dev/null | grep -qw vcan; }
+
+check() {
+    while read -r name mtu; do
+        [ -n "$name" ] || continue
+        if exists "$name" && ! is_vcan "$name"; then
+            echo "hilspy-vcan: $name is an interface of another kind, not vcan; nothing changed" >&2
+            exit 1
+        fi
+    done <"$config"
+}
+
+up() {
+    check
+    changed=
+    while read -r name mtu; do
+        [ -n "$name" ] || continue
+        if ! exists "$name"; then
+            ip link add dev "$name" type vcan </dev/null
+            changed=1
+        fi
+        link=$(ip link show dev "$name" </dev/null)
+        case "$link" in
+        *" mtu $mtu "*) ;;
+        *)
+            # vcan takes a new MTU only while down.
+            ip link set dev "$name" down </dev/null
+            ip link set dev "$name" mtu "$mtu" </dev/null
+            changed=1
+            link=$(ip link show dev "$name" </dev/null)
+            ;;
+        esac
+        flags=${link#*<}
+        flags=${flags%%>*}
+        case ",$flags," in
+        *,UP,*) ;;
+        *)
+            ip link set dev "$name" up </dev/null
+            changed=1
+            ;;
+        esac
+    done <"$config"
+    if [ -n "$changed" ]; then
+        echo changed
+    fi
+}
+
+down() {
+    while read -r name mtu; do
+        [ -n "$name" ] || continue
+        if exists "$name" && is_vcan "$name"; then
+            ip link delete dev "$name" </dev/null
+        fi
+    done <"$config"
+}
+
+case "${1:-}" in
+up) up ;;
+down) down ;;
+*)
+    echo "usage: hilspy-vcan up|down" >&2
+    exit 2
+    ;;
+esac

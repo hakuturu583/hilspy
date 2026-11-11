@@ -15,6 +15,7 @@ cargo fmt --all && cargo clippy --all-targets -- -D warnings
 uv run ruff check . && uv run ruff format . && uv run mypy
 HILSPY_TEST_VCAN=vcan0 uv run pytest tests/test_socketcan.py   # needs vcan0 (CI job `socketcan`)
 uv run --group setup tools/setup_host.py --build   # GStreamer, v4l2loopback /dev/video10, `v4l2` build
+uv run --group setup tools/setup_host.py --vcan vcan0:fd --no-v4l2   # vcan0 (CI job `socketcan`)
 cargo test -p hilspy-core --features v4l2
 HILSPY_TEST_V4L2=/dev/video10 uv run --no-sync pytest tests/test_v4l2.py   # CI job `v4l2`
 docker build -t hilspy-dashboard dashboard   # Prometheus + Perses image (CI job `dashboard`)
@@ -44,7 +45,10 @@ uv run tools/setup_host.py --dashboard --no-v4l2   # docker pull the image of th
   core builds elsewhere (`can://` then reports that it needs Linux).
 - `v4l2://` (GStreamer) is behind the `v4l2` feature as well as Linux: it
   links the system GStreamer, which the wheels cannot carry. Host setup goes
-  in the ansible playbook `tools/ansible/v4l2loopback.yml`.
+  in the ansible playbooks under `python/hilspy/ansible/` (`v4l2loopback.yml`,
+  `vcan.yml`): they ship in the wheel, so `scenario-hils --setup`
+  (autoware_carla_scenario) runs them with variables it derives from its
+  configuration. Their variables are an interface: keep them compatible.
 - LiDAR sensors are data, not code: a model is a profile in
   `crates/hilspy-core/lidar/profiles/*.txtpb` (schema `lidar_profile.proto`).
   After editing either, run `cargo run -p hilspy-core --example lidar_profiles`

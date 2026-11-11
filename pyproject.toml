@@ -40,7 +40,7 @@ dev = [
     "pyubx2>=1.3.8",
     "pyrtcm>=1.2.0",
 ]
-# tools/setup_host.py: v4l2loopback cameras and GStreamer for v4l2://.
+# tools/setup_host.py: v4l2loopback cameras and GStreamer for v4l2://, vcan for can://.
 setup = [
     "ansible-runner>=2.4",
     "ansible-core>=2.15",

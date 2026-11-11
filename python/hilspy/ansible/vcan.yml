@@ -1,0 +1,174 @@
+# Prepares a Debian / Ubuntu host for hilspy's can:// transport on virtual
+# CAN: the vcan module and the interfaces, now and at every boot.
+#
+# It ships in the hilspy wheel (hilspy/ansible/) beside v4l2loopback.yml and
+# runs the same ways: tools/setup_host.py --vcan, or autoware_carla_scenario's
+# `scenario-hils --setup` with the can://vcan* devices its configuration
+# names, both through ansible-runner.
+#
+# vcan_interfaces lists the interfaces: {name: vcan0, fd: true}. An FD
+# interface gets the CAN FD MTU (72), the others the classic one (16), which
+# `can://NAME?fd` needs and plain `can://NAME` works with.
+#
+# /usr/local/lib/hilspy/hilspy-vcan (files/hilspy-vcan) brings the interfaces
+# to the list (/etc/hilspy/vcan-interfaces): at boot through a systemd unit
+# (hilspy-vcan.service), and on every run of this playbook, so an interface
+# deleted, taken down or given another MTU since is put back. A name that
+# belongs to an interface of another kind (a CAN adapter) is refused before
+# anything changes. An interface dropped from the list is deleted.
+- name: vcan interfaces for hilspy
+  hosts: all
+  become: true
+  vars:
+    vcan_interfaces:
+      - { name: vcan0, fd: true }
+    vcan_names: "{{ vcan_interfaces | map(attribute='name') | list }}"
+  tasks:
+    - name: Check the platform
+      ansible.builtin.assert:
+        that: ansible_facts["system"] == "Linux" and ansible_facts["os_family"] == "Debian"
+        fail_msg: vcan setup supports Debian and Ubuntu hosts only
+
+    - name: Check the interfaces asked for
+      ansible.builtin.assert:
+        that:
+          - vcan_names | length > 0
+          - vcan_names | unique | length == vcan_names | length
+          # A Linux interface name: at most 15 bytes, no '/', ':' or space.
+          - vcan_names | select('match', '^[A-Za-z0-9_.-]{1,15}$') | list | length == vcan_names | length
+        fail_msg: >-
+          vcan_interfaces ({{ vcan_names }}) must be distinct interface names
+          of at most 15 letters, digits, '_', '.' or '-'
+        quiet: true
+
+    - name: Install iproute2
+      tags: [packages]
+      ansible.builtin.apt:
+        name: iproute2
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Look for the vcan module
+      tags: [packages, module]
+      ansible.builtin.command: modinfo vcan
+      register: vcan_module
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Install the kernel's extra modules (cloud kernels leave vcan out)
+      tags: [packages, module]
+      when: vcan_module.rc != 0
+      ansible.builtin.apt:
+        name: "linux-modules-extra-{{ ansible_facts['kernel'] }}"
+
+    - name: Load vcan at boot
+      tags: [module]
+      ansible.builtin.copy:
+        content: "vcan\n"
+        dest: /etc/modules-load.d/hilspy-vcan.conf
+        mode: "0644"
+
+    - name: Load vcan now
+      tags: [module]
+      ansible.builtin.command: modprobe vcan
+      changed_when: false
+      check_mode: false
+      when: not ansible_check_mode
+
+    - name: Refuse names of interfaces of another kind (a CAN adapter)
+      tags: [interfaces]
+      ansible.builtin.command: "ip -details link show dev {{ item.name }}"
+      loop: "{{ vcan_interfaces }}"
+      register: vcan_kind
+      changed_when: false
+      check_mode: false
+      failed_when: vcan_kind.rc == 0 and 'vcan' not in vcan_kind.stdout.split()
+
+    - name: Read the interfaces of the previous run
+      tags: [interfaces]
+      ansible.builtin.slurp:
+        src: /etc/hilspy/vcan-interfaces
+      register: vcan_previous
+      failed_when: false
+
+    - name: Delete the interfaces no longer asked for (vcan ones only)
+      tags: [interfaces]
+      vars:
+        previous: >-
+          {{ (vcan_previous.content | default('') | b64decode).splitlines()
+             | map('split') | select | map('first') | list }}
+      ansible.builtin.shell: "ip -details link show dev {{ item }} | grep -qw vcan && ip link delete dev {{ item }}"
+      loop: "{{ previous | difference(vcan_names) }}"
+      register: vcan_deleted
+      changed_when: vcan_deleted.rc == 0
+      failed_when: false
+
+    - name: Make the directories of the interface list and the script
+      tags: [interfaces]
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0755"
+      loop: [/etc/hilspy, /usr/local/lib/hilspy]
+
+    - name: Record the interfaces and their MTUs
+      tags: [interfaces]
+      ansible.builtin.copy:
+        content: |
+          {% for i in vcan_interfaces %}
+          {{ i.name }} {{ 72 if i.fd | default(false) | bool else 16 }}
+          {% endfor %}
+        dest: /etc/hilspy/vcan-interfaces
+        mode: "0644"
+
+    - name: Install the script that brings the interfaces to the list
+      tags: [interfaces]
+      ansible.builtin.copy:
+        src: files/hilspy-vcan
+        dest: /usr/local/lib/hilspy/hilspy-vcan
+        mode: "0755"
+
+    - name: Write the unit that runs it at boot
+      tags: [interfaces]
+      ansible.builtin.template:
+        src: templates/hilspy-vcan.service.j2
+        dest: /etc/systemd/system/hilspy-vcan.service
+        mode: "0644"
+      register: vcan_unit
+
+    - name: Enable the unit
+      tags: [interfaces]
+      ansible.builtin.systemd_service:
+        name: hilspy-vcan.service
+        enabled: true
+        state: started
+        daemon_reload: "{{ vcan_unit is changed }}"
+
+    # Every run, not only when the unit changed: a oneshot unit that is
+    # already active does not run again on `started`.
+    - name: Bring the interfaces to the list
+      tags: [interfaces]
+      ansible.builtin.command: /usr/local/lib/hilspy/hilspy-vcan up
+      register: vcan_up
+      changed_when: "'changed' in vcan_up.stdout"
+      when: not ansible_check_mode
+
+    - name: Check the interfaces
+      tags: [interfaces]
+      ansible.builtin.command: "ip -details link show dev {{ item.name }}"
+      loop: "{{ vcan_interfaces }}"
+      register: vcan_links
+      changed_when: false
+      check_mode: false
+      when: not ansible_check_mode
+      failed_when: >-
+        vcan_links.rc != 0 or 'vcan' not in vcan_links.stdout.split()
+        or (' mtu ' ~ (72 if item.fd | default(false) | bool else 16) ~ ' ') not in vcan_links.stdout
+        or vcan_links.stdout is not search('[<,]UP[,>]')
+
+    - name: Summary
+      ansible.builtin.debug:
+        msg: >-
+          {% for i in vcan_interfaces %}can://{{ i.name }}{{ '?fd' if i.fd | default(false) | bool else '' }}{{ ', ' if not loop.last else '' }}{% endfor %}
+          ready.

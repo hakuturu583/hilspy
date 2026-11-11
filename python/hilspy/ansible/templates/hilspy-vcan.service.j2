@@ -1,0 +1,16 @@
+# Managed by hilspy (hilspy/ansible/vcan.yml); edits are overwritten.
+[Unit]
+Description=hilspy virtual CAN interfaces ({{ vcan_names | join(', ') }})
+After=systemd-modules-load.service
+Before=network-pre.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStartPre=modprobe vcan
+# The interfaces and their MTUs: /etc/hilspy/vcan-interfaces.
+ExecStart=/usr/local/lib/hilspy/hilspy-vcan up
+ExecStop=/usr/local/lib/hilspy/hilspy-vcan down
+
+[Install]
+WantedBy=multi-user.target
